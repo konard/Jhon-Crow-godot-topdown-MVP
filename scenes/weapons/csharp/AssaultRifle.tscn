@@ -1,0 +1,23 @@
+[gd_scene load_steps=4 format=3 uid="uid://c5q8m3x7n2k1p"]
+
+[ext_resource type="Script" path="res://Scripts/Weapons/AssaultRifle.cs" id="1_assault_rifle"]
+[ext_resource type="PackedScene" uid="uid://dv2q8m5n7xk1q" path="res://scenes/projectiles/csharp/Bullet.tscn" id="2_bullet"]
+[ext_resource type="Resource" uid="uid://b8q2n5x7m3k1w" path="res://resources/weapons/AssaultRifleData.tres" id="3_weapon_data"]
+
+[node name="AssaultRifle" type="Node2D"]
+script = ExtResource("1_assault_rifle")
+WeaponData = ExtResource("3_weapon_data")
+BulletScene = ExtResource("2_bullet")
+BulletSpawnOffset = 25.0
+BurstCount = 3
+BurstDelay = 0.05
+LaserSightEnabled = true
+LaserSightLength = 500.0
+LaserSightColor = Color(1, 0, 0, 0.5)
+LaserSightWidth = 2.0
+
+[node name="LaserSight" type="Line2D" parent="."]
+width = 2.0
+default_color = Color(1, 0, 0, 0.5)
+begin_cap_mode = 1
+end_cap_mode = 1

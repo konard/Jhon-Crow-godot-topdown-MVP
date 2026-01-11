@@ -92,6 +92,16 @@ public partial class Player : BaseCharacter
                 BulletScene = GD.Load<PackedScene>("res://scenes/projectiles/Bullet.tscn");
             }
         }
+
+        // Auto-equip weapon if not set but a weapon child exists
+        if (CurrentWeapon == null)
+        {
+            CurrentWeapon = GetNodeOrNull<BaseWeapon>("AssaultRifle");
+            if (CurrentWeapon != null)
+            {
+                GD.Print($"[Player] {Name}: Auto-equipped weapon {CurrentWeapon.Name}");
+            }
+        }
     }
 
     /// <summary>
@@ -128,6 +138,12 @@ public partial class Player : BaseCharacter
         {
             Shoot();
         }
+
+        // Handle reload input
+        if (Input.IsActionJustPressed("reload"))
+        {
+            Reload();
+        }
     }
 
     /// <summary>
@@ -147,6 +163,17 @@ public partial class Player : BaseCharacter
         }
 
         return direction;
+    }
+
+    /// <summary>
+    /// Initiates reload of the current weapon.
+    /// </summary>
+    private void Reload()
+    {
+        if (CurrentWeapon != null)
+        {
+            CurrentWeapon.StartReload();
+        }
     }
 
     /// <summary>

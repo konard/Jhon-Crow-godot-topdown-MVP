@@ -1,0 +1,284 @@
+using Godot;
+using GodotTopDownTemplate.AbstractClasses;
+
+namespace GodotTopDownTemplate.Weapons;
+
+/// <summary>
+/// Assault rifle weapon with burst fire mode and laser sight.
+/// Inherits from BaseWeapon and extends it with specific assault rifle behavior.
+/// </summary>
+public partial class AssaultRifle : BaseWeapon
+{
+    /// <summary>
+    /// Number of bullets fired in a burst.
+    /// </summary>
+    [Export]
+    public int BurstCount { get; set; } = 3;
+
+    /// <summary>
+    /// Delay between each bullet in a burst (in seconds).
+    /// </summary>
+    [Export]
+    public float BurstDelay { get; set; } = 0.05f;
+
+    /// <summary>
+    /// Whether the laser sight is enabled.
+    /// </summary>
+    [Export]
+    public bool LaserSightEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Maximum length of the laser sight in pixels.
+    /// </summary>
+    [Export]
+    public float LaserSightLength { get; set; } = 500.0f;
+
+    /// <summary>
+    /// Color of the laser sight.
+    /// </summary>
+    [Export]
+    public Color LaserSightColor { get; set; } = new Color(1.0f, 0.0f, 0.0f, 0.5f);
+
+    /// <summary>
+    /// Width of the laser sight line.
+    /// </summary>
+    [Export]
+    public float LaserSightWidth { get; set; } = 2.0f;
+
+    /// <summary>
+    /// Reference to the Line2D node for the laser sight.
+    /// </summary>
+    private Line2D? _laserSight;
+
+    /// <summary>
+    /// Whether the weapon is currently firing a burst.
+    /// </summary>
+    private bool _isBurstFiring;
+
+    /// <summary>
+    /// Signal emitted when a burst starts.
+    /// </summary>
+    [Signal]
+    public delegate void BurstStartedEventHandler();
+
+    /// <summary>
+    /// Signal emitted when a burst finishes.
+    /// </summary>
+    [Signal]
+    public delegate void BurstFinishedEventHandler();
+
+    public override void _Ready()
+    {
+        base._Ready();
+
+        // Get or create the laser sight Line2D
+        _laserSight = GetNodeOrNull<Line2D>("LaserSight");
+
+        if (_laserSight == null && LaserSightEnabled)
+        {
+            CreateLaserSight();
+        }
+
+        UpdateLaserSightVisibility();
+    }
+
+    public override void _Process(double delta)
+    {
+        base._Process(delta);
+
+        // Update laser sight to point towards mouse
+        if (LaserSightEnabled && _laserSight != null)
+        {
+            UpdateLaserSight();
+        }
+    }
+
+    /// <summary>
+    /// Creates the laser sight Line2D programmatically.
+    /// </summary>
+    private void CreateLaserSight()
+    {
+        _laserSight = new Line2D
+        {
+            Name = "LaserSight",
+            Width = LaserSightWidth,
+            DefaultColor = LaserSightColor,
+            BeginCapMode = Line2D.LineCapMode.Round,
+            EndCapMode = Line2D.LineCapMode.Round
+        };
+
+        // Initialize with two points (start and end)
+        _laserSight.AddPoint(Vector2.Zero);
+        _laserSight.AddPoint(Vector2.Right * LaserSightLength);
+
+        AddChild(_laserSight);
+    }
+
+    /// <summary>
+    /// Updates the laser sight to point towards the mouse cursor.
+    /// Uses raycasting to stop at obstacles.
+    /// </summary>
+    private void UpdateLaserSight()
+    {
+        if (_laserSight == null)
+        {
+            return;
+        }
+
+        // Get direction to mouse
+        Vector2 mousePos = GetGlobalMousePosition();
+        Vector2 direction = (mousePos - GlobalPosition).Normalized();
+
+        // Calculate the end point of the laser
+        Vector2 endPoint = direction * LaserSightLength;
+
+        // Perform raycast to check for obstacles
+        var spaceState = GetWorld2D().DirectSpaceState;
+        var query = PhysicsRayQueryParameters2D.Create(
+            GlobalPosition,
+            GlobalPosition + endPoint,
+            4 // Collision mask for obstacles (layer 3 = value 4)
+        );
+
+        var result = spaceState.IntersectRay(query);
+
+        if (result.Count > 0)
+        {
+            // Hit an obstacle, shorten the laser
+            Vector2 hitPosition = (Vector2)result["position"];
+            endPoint = hitPosition - GlobalPosition;
+        }
+
+        // Update the laser sight line points (in local coordinates)
+        _laserSight.SetPointPosition(0, Vector2.Zero);
+        _laserSight.SetPointPosition(1, endPoint);
+    }
+
+    /// <summary>
+    /// Updates the visibility of the laser sight based on LaserSightEnabled.
+    /// </summary>
+    private void UpdateLaserSightVisibility()
+    {
+        if (_laserSight != null)
+        {
+            _laserSight.Visible = LaserSightEnabled;
+        }
+    }
+
+    /// <summary>
+    /// Enables or disables the laser sight.
+    /// </summary>
+    /// <param name="enabled">Whether to enable the laser sight.</param>
+    public void SetLaserSightEnabled(bool enabled)
+    {
+        LaserSightEnabled = enabled;
+        UpdateLaserSightVisibility();
+    }
+
+    /// <summary>
+    /// Fires the assault rifle in burst mode.
+    /// Overrides base Fire to implement burst fire behavior.
+    /// </summary>
+    /// <param name="direction">Direction to fire.</param>
+    /// <returns>True if the burst was started successfully.</returns>
+    public override bool Fire(Vector2 direction)
+    {
+        // Don't start a new burst if already firing
+        if (_isBurstFiring)
+        {
+            return false;
+        }
+
+        // Check if we can fire at all
+        if (!CanFire || WeaponData == null || BulletScene == null)
+        {
+            return false;
+        }
+
+        // Start burst fire
+        StartBurstFire(direction);
+        return true;
+    }
+
+    /// <summary>
+    /// Starts the burst fire sequence.
+    /// </summary>
+    /// <param name="direction">Direction to fire.</param>
+    private async void StartBurstFire(Vector2 direction)
+    {
+        _isBurstFiring = true;
+        EmitSignal(SignalName.BurstStarted);
+
+        int bulletsToFire = Mathf.Min(BurstCount, CurrentAmmo);
+
+        for (int i = 0; i < bulletsToFire; i++)
+        {
+            if (CurrentAmmo <= 0)
+            {
+                break;
+            }
+
+            // Fire a single bullet
+            FireSingleBullet(direction);
+
+            // Wait for burst delay before firing next bullet (except for the last one)
+            if (i < bulletsToFire - 1)
+            {
+                await ToSignal(GetTree().CreateTimer(BurstDelay), "timeout");
+            }
+        }
+
+        _isBurstFiring = false;
+        EmitSignal(SignalName.BurstFinished);
+    }
+
+    /// <summary>
+    /// Fires a single bullet without burst logic.
+    /// Used internally by the burst fire system.
+    /// </summary>
+    /// <param name="direction">Direction to fire.</param>
+    private void FireSingleBullet(Vector2 direction)
+    {
+        if (WeaponData == null || BulletScene == null || CurrentAmmo <= 0)
+        {
+            return;
+        }
+
+        CurrentAmmo--;
+
+        // Apply spread if configured in WeaponData
+        Vector2 spreadDirection = ApplySpread(direction);
+
+        SpawnBullet(spreadDirection);
+
+        EmitSignal(SignalName.Fired);
+        EmitSignal(SignalName.AmmoChanged, CurrentAmmo, ReserveAmmo);
+    }
+
+    /// <summary>
+    /// Applies spread to the shooting direction based on WeaponData settings.
+    /// </summary>
+    /// <param name="direction">Original direction.</param>
+    /// <returns>Direction with spread applied.</returns>
+    private Vector2 ApplySpread(Vector2 direction)
+    {
+        if (WeaponData == null || WeaponData.SpreadAngle <= 0)
+        {
+            return direction;
+        }
+
+        // Convert spread angle from degrees to radians
+        float spreadRadians = Mathf.DegToRad(WeaponData.SpreadAngle);
+
+        // Generate random spread within the angle range
+        float randomSpread = (float)GD.RandRange(-spreadRadians / 2, spreadRadians / 2);
+
+        // Rotate the direction by the spread amount
+        return direction.Rotated(randomSpread);
+    }
+
+    /// <summary>
+    /// Gets whether the weapon is currently in the middle of a burst.
+    /// </summary>
+    public bool IsBurstFiring => _isBurstFiring;
+}
