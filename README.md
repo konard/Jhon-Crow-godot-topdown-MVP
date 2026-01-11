@@ -29,14 +29,15 @@ A template project for creating top-down games in Godot 4.3+ with support for bo
 1. Clone or download this repository
 2. Open Godot Engine (standard version)
 3. Click "Import" and select the `project.godot` file
-4. Press F5 to run the main scene
+4. Press F5 to run the test level (TestTier.tscn)
 
 ### Using C# (Optional)
 1. Clone or download this repository
 2. Open Godot Engine .NET (with C# support)
 3. Click "Import" and select the `project.godot` file
-4. Open `scenes/levels/csharp/TestTier.tscn` and press F6 to run C# version
-5. Or replace scene references in your project to use C# versions
+4. Press F5 to run the GDScript version (default)
+5. Or open `scenes/levels/csharp/TestTier.tscn` and press F6 to run the C# version
+6. Or change the main scene in project.godot to use C# versions
 
 ## Project Structure
 
@@ -187,11 +188,11 @@ Resource for bullet configuration:
 
 ## Scenes
 
-### Main.tscn
-The main entry scene that loads when pressing F5. This is the starting point of the game and can be used to display menus or load other scenes.
-
 ### TestTier.tscn
-A test level/tier (shooting range) for developing and testing game mechanics. This scene serves as a complete example of how to create a playable level with proper collision setup.
+The main test level (shooting range) that loads when pressing F5. This scene serves as a complete example of how to create a playable level with proper collision setup and is perfect for rapid prototyping and testing game mechanics.
+
+### Main.tscn
+An optional entry/menu scene that can be used to display title screens, menus, or load other scenes. To use it as your main scene, change `run/main_scene` in `project.godot`.
 
 #### Features
 - **Enclosed play area** with walls that prevent the player from leaving
@@ -232,11 +233,12 @@ TestTier
 - The player cannot pass through walls or obstacles
 
 #### Running the Test Tier
-To test the shooting range directly:
-1. Open `scenes/levels/TestTier.tscn` in the Godot editor
-2. Press F6 to run the current scene (or F5 if set as main scene)
+To test the shooting range:
+1. Press F5 to run the main scene (TestTier is set as the default main scene)
+2. Or open `scenes/levels/TestTier.tscn` in the Godot editor and press F6
 3. Use WASD or Arrow Keys to move the player
-4. Verify collision with walls and obstacles works correctly
+4. Click left mouse button to shoot at targets
+5. Verify collision with walls and obstacles works correctly
 
 ### Player.tscn (GDScript) / csharp/Player.tscn (C#)
 The player character scene with smooth physics-based movement. Features:
