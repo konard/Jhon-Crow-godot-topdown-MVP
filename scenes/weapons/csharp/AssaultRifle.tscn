@@ -18,6 +18,7 @@ LaserSightColor = Color(1, 0, 0, 0.5)
 LaserSightWidth = 2.0
 
 [node name="LaserSight" type="Line2D" parent="."]
+points = PackedVector2Array(0, 0, 500, 0)
 width = 2.0
 default_color = Color(1, 0, 0, 0.5)
 begin_cap_mode = 1
