@@ -113,6 +113,22 @@ public partial class AssaultRifle : BaseWeapon
         {
             CreateLaserSight();
         }
+        else if (_laserSight != null)
+        {
+            // Ensure the existing laser sight has the correct properties
+            _laserSight.Width = LaserSightWidth;
+            _laserSight.DefaultColor = LaserSightColor;
+            _laserSight.BeginCapMode = Line2D.LineCapMode.Round;
+            _laserSight.EndCapMode = Line2D.LineCapMode.Round;
+
+            // Ensure it has at least 2 points
+            if (_laserSight.GetPointCount() < 2)
+            {
+                _laserSight.ClearPoints();
+                _laserSight.AddPoint(Vector2.Zero);
+                _laserSight.AddPoint(Vector2.Right * LaserSightLength);
+            }
+        }
 
         UpdateLaserSightVisibility();
     }
