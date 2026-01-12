@@ -111,8 +111,8 @@ enum BehaviorMode {
 @export var enable_lead_prediction: bool = true
 
 ## Bullet speed for lead prediction calculation.
-## Should match the actual bullet speed (default is 2000 for assault rifle).
-@export var bullet_speed: float = 2000.0
+## Should match the actual bullet speed (default is 2500 for assault rifle).
+@export var bullet_speed: float = 2500.0
 
 ## Ammunition system - magazine size (bullets per magazine).
 @export var magazine_size: int = 30
@@ -122,6 +122,10 @@ enum BehaviorMode {
 
 ## Ammunition system - time to reload in seconds.
 @export var reload_time: float = 2.0
+
+## Delay (in seconds) between spotting player and starting to shoot.
+## Gives player a brief reaction time when entering enemy line of sight.
+@export var detection_delay: float = 0.05
 
 ## Signal emitted when the enemy is hit.
 signal hit
@@ -231,6 +235,12 @@ var _bullets_in_threat_sphere: Array = []
 
 ## GOAP world state for goal-oriented planning.
 var _goap_world_state: Dictionary = {}
+
+## Detection delay timer - tracks time since entering combat.
+var _detection_timer: float = 0.0
+
+## Whether the detection delay has elapsed.
+var _detection_delay_elapsed: bool = false
 
 
 
@@ -507,7 +517,7 @@ func _process_idle_state(delta: float) -> void:
 
 
 ## Process COMBAT state - actively engaging player.
-func _process_combat_state(_delta: float) -> void:
+func _process_combat_state(delta: float) -> void:
 	# In combat, enemy stands still and shoots (no velocity)
 	velocity = Vector2.ZERO
 
@@ -524,10 +534,16 @@ func _process_combat_state(_delta: float) -> void:
 			_transition_to_idle()
 		return
 
-	# Aim and shoot at player
+	# Update detection delay timer
+	if not _detection_delay_elapsed:
+		_detection_timer += delta
+		if _detection_timer >= detection_delay:
+			_detection_delay_elapsed = true
+
+	# Aim and shoot at player (only shoot after detection delay)
 	if _player:
 		_aim_at_player()
-		if _shoot_timer >= shoot_cooldown:
+		if _detection_delay_elapsed and _shoot_timer >= shoot_cooldown:
 			_shoot()
 			_shoot_timer = 0.0
 
@@ -677,6 +693,9 @@ func _transition_to_idle() -> void:
 ## Transition to COMBAT state.
 func _transition_to_combat() -> void:
 	_current_state = AIState.COMBAT
+	# Reset detection delay timer when entering combat
+	_detection_timer = 0.0
+	_detection_delay_elapsed = false
 
 
 ## Transition to SEEKING_COVER state.
@@ -1177,6 +1196,8 @@ func _reset() -> void:
 	_has_valid_cover = false
 	_under_fire = false
 	_suppression_timer = 0.0
+	_detection_timer = 0.0
+	_detection_delay_elapsed = false
 	_bullets_in_threat_sphere.clear()
 	_initialize_health()
 	_initialize_ammo()
