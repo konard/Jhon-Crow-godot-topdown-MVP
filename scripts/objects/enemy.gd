@@ -821,6 +821,39 @@ func _is_position_visible_from_player(pos: Vector2) -> bool:
 	return false
 
 
+## Check if a target position is visible from the enemy's perspective.
+## Uses raycast to verify there are no obstacles between enemy and the target position.
+## This is used to validate lead prediction targets - enemies should only aim at
+## positions they can actually see.
+func _is_position_visible_to_enemy(target_pos: Vector2) -> bool:
+	var distance := global_position.distance_to(target_pos)
+
+	# Use direct space state to check line of sight from enemy to target
+	var space_state := get_world_2d().direct_space_state
+	var query := PhysicsRayQueryParameters2D.new()
+	query.from = global_position
+	query.to = target_pos
+	query.collision_mask = 4  # Only check obstacles (layer 3)
+	query.exclude = [get_rid()]  # Exclude self
+
+	var result := space_state.intersect_ray(query)
+
+	if result.is_empty():
+		# No obstacle between enemy and target - position is visible
+		return true
+
+	# Check if we hit an obstacle before reaching the target
+	var hit_position: Vector2 = result["position"]
+	var distance_to_hit := global_position.distance_to(hit_position)
+
+	if distance_to_hit < distance - 10.0:  # 10 pixel tolerance
+		# Hit obstacle before target - position is NOT visible
+		_log_debug("Position %s blocked by obstacle at distance %.1f (target at %.1f)" % [target_pos, distance_to_hit, distance])
+		return false
+
+	return true
+
+
 ## Check if the line of fire to the target position is clear of other enemies.
 ## Returns true if no other enemies would be hit by a bullet traveling to the target.
 func _is_firing_line_clear_of_friendlies(target_position: Vector2) -> bool:
@@ -1145,9 +1178,10 @@ func _play_delayed_shell_sound() -> void:
 
 ## Calculate lead prediction - aims where the player will be, not where they are.
 ## Uses iterative approach for better accuracy with moving targets.
-## Only applies lead prediction if the player has been continuously visible
-## for at least lead_prediction_delay seconds, preventing enemies from
-## "knowing" where the player will emerge from cover.
+## Only applies lead prediction if:
+## 1. The player has been continuously visible for at least lead_prediction_delay seconds
+## 2. The predicted position is also visible to the enemy (not behind cover)
+## This prevents enemies from "knowing" where the player will emerge from cover.
 func _calculate_lead_prediction() -> Vector2:
 	if _player == null:
 		return global_position
@@ -1186,6 +1220,14 @@ func _calculate_lead_prediction() -> Vector2:
 
 		# Update distance for next iteration
 		distance = global_position.distance_to(predicted_pos)
+
+	# CRITICAL: Validate that the predicted position is actually visible to the enemy.
+	# If the predicted position is behind cover (e.g., player is running toward cover exit),
+	# we should NOT aim there - it would feel like the enemy is "cheating" by knowing
+	# where the player will emerge. Fall back to player's current visible position.
+	if not _is_position_visible_to_enemy(predicted_pos):
+		_log_debug("Lead prediction blocked: predicted position %s is not visible, using current position %s" % [predicted_pos, player_pos])
+		return player_pos
 
 	_log_debug("Lead prediction: player at %s moving %s, aiming at %s" % [player_pos, player_velocity, predicted_pos])
 
