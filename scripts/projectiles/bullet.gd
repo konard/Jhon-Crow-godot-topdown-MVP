@@ -49,5 +49,11 @@ func _on_area_entered(area: Area2D) -> void:
 	# Only destroy bullet if the area has on_hit method (actual hit targets)
 	# This allows bullets to pass through detection-only areas like ThreatSpheres
 	if area.has_method("on_hit"):
+		# Check if this is a HitArea - if so, check against parent's instance ID
+		# This prevents the shooter from damaging themselves
+		var parent := area.get_parent()
+		if parent and shooter_id == parent.get_instance_id():
+			return  # Don't hit the shooter
+
 		area.on_hit()
 		queue_free()

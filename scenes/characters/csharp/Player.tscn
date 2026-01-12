@@ -1,7 +1,8 @@
-[gd_scene load_steps=6 format=3 uid="uid://dv8nq2vj5r7p2"]
+[gd_scene load_steps=7 format=3 uid="uid://dv8nq2vj5r7p2"]
 
 [ext_resource type="Script" path="res://Scripts/Characters/Player.cs" id="1_player"]
 [ext_resource type="PackedScene" uid="uid://c5q8m3x7n2k1p" path="res://scenes/weapons/csharp/AssaultRifle.tscn" id="2_assault_rifle"]
+[ext_resource type="Script" path="res://scripts/objects/hit_area.gd" id="3_hit_area"]
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_player"]
 radius = 16.0
@@ -32,3 +33,11 @@ position_smoothing_enabled = true
 position_smoothing_speed = 5.0
 
 [node name="AssaultRifle" parent="." instance=ExtResource("2_assault_rifle")]
+
+[node name="HitArea" type="Area2D" parent="."]
+collision_layer = 1
+collision_mask = 16
+script = ExtResource("3_hit_area")
+
+[node name="HitCollisionShape" type="CollisionShape2D" parent="HitArea"]
+shape = SubResource("CircleShape2D_player")
