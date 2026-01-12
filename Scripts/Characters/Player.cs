@@ -285,6 +285,16 @@ public partial class Player : BaseCharacter
         GetTree().CurrentScene.AddChild(bullet);
     }
 
+    /// <summary>
+    /// Called when hit by a projectile via hit_area.gd.
+    /// This method name follows GDScript naming convention for cross-language compatibility
+    /// with the hit detection system that uses has_method("on_hit") checks.
+    /// </summary>
+    public void on_hit()
+    {
+        TakeDamage(1);
+    }
+
     /// <inheritdoc/>
     public override void TakeDamage(float amount)
     {
