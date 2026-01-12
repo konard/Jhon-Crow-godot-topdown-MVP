@@ -170,6 +170,145 @@ func _process_combat_state(delta: float) -> void:
 3. When player becomes visible again, normal tracking resumes
 4. The fix should be verifiable by enabling `debug_logging` and observing log messages
 
+## Follow-up Issue: Enemies Getting Stuck During Movement
+
+### User Feedback (January 2026)
+
+After the initial fix was deployed, the user reported:
+> "debug_logging включить не могу, потому что в собранном exe нет такой функции. враги пытаются двигаться, но застревают."
+>
+> Translation: "I can't enable debug_logging because the compiled exe doesn't have that function. Enemies are trying to move but get stuck."
+
+### Root Cause Analysis
+
+The enemies were getting stuck due to several issues in the movement and pathfinding logic:
+
+#### 1. Ineffective Wall Avoidance
+
+**Original implementation** (`_check_wall_ahead()`):
+- Used only 3 raycasts at narrow angles (-28°, 0°, +28°)
+- `WALL_CHECK_DISTANCE` was only 40 pixels (enemy radius is 24 pixels)
+- Random direction choice for center raycast hits caused jittering
+- 50/50 blend between movement direction and avoidance was too weak
+
+**Problem**: The narrow angle spread and short detection distance made it easy for enemies to get trapped in corners or against walls.
+
+#### 2. No Stuck Detection
+
+The original code had no mechanism to detect when an enemy was stuck (not making progress toward target). Once stuck, an enemy would keep trying the same approach indefinitely.
+
+#### 3. Invalid Flank Positions
+
+**Original `_calculate_flank_position()`**:
+- Calculated a random position without validating if it was actually reachable
+- The target could be inside a wall or obstacle
+- No fallback positions if the initial position was blocked
+
+### Industry Research on Movement Issues
+
+Based on research from Godot community forums and game development resources:
+
+1. **CharacterBody2D Common Issues** ([Godot Forums](https://forum.godotengine.org/t/movement-stuck-in-2-walls/72424)):
+   - Characters can get stuck in corners with standard `move_and_slide()`
+   - Wall avoidance raycasts need wider angles to detect obstacles early
+
+2. **Pathfinding Without NavigationAgent** ([abitawake.com](https://abitawake.com/news/articles/enemy-ai-chasing-a-player-without-navigation2d-or-a-star-pathfinding)):
+   - Direct path movement works for simple scenarios
+   - Need stuck detection and recovery for complex environments
+   - Alternative positions should be validated before movement
+
+3. **Enemy Stuck Detection Patterns** ([Godot Forum](https://forum.godotengine.org/t/enemy-gets-stuck/67304)):
+   - Track position over time to detect lack of progress
+   - Implement retry logic with alternative positions
+   - Give up gracefully if movement is impossible
+
+### Solution Implementation
+
+#### Fix 1: Improved Wall Avoidance
+
+```gdscript
+## Distance to check for walls ahead.
+const WALL_CHECK_DISTANCE: float = 60.0  # Was 40.0
+
+## Number of raycasts for wall detection.
+const WALL_CHECK_COUNT: int = 5  # Was 3
+
+# Use 5 raycasts spread from -60° to +60° (every 30 degrees)
+# Weight avoidance inversely by distance (closer walls = stronger avoidance)
+# Use deterministic direction for center raycast to avoid jitter
+```
+
+**Key changes**:
+- Increased `WALL_CHECK_DISTANCE` from 40 to 60 pixels
+- Increased `WALL_CHECK_COUNT` from 3 to 5
+- Widened angle spread from ±28° to ±60°
+- Added distance-weighted avoidance (closer walls have more influence)
+- Changed avoidance blend from 50/50 to 30/70 (favor avoidance)
+- Made center raycast direction deterministic to prevent jitter
+
+#### Fix 2: Stuck Detection System
+
+```gdscript
+## Time threshold to consider the enemy "stuck" (in seconds).
+const STUCK_DETECTION_TIME: float = 1.0
+
+## Minimum distance the enemy should move in STUCK_DETECTION_TIME to not be considered stuck.
+const STUCK_DETECTION_DISTANCE: float = 20.0
+
+## Maximum number of flank position retries before giving up.
+const MAX_FLANK_RETRIES: int = 3
+```
+
+**New functions**:
+- `_check_if_stuck(delta)`: Tracks position over time and detects when enemy hasn't moved enough
+- `_reset_stuck_detection()`: Resets tracking when changing states or reaching destination
+
+#### Fix 3: Validated Flank Positions
+
+```gdscript
+func _calculate_flank_position() -> void:
+    # Try different flank angles if the first one is blocked
+    var sides := [initial_side, -initial_side]
+    var distance_multipliers := [1.0, 0.7, 0.5, 1.3]
+
+    for distance_mult in distance_multipliers:
+        for side in sides:
+            var test_position := player_pos + flank_direction * (flank_distance * distance_mult)
+            if _is_position_valid(test_position):
+                _flank_target = test_position
+                return
+
+    # All positions blocked - fall back to moving toward player
+    _flank_target = player_pos + player_to_enemy * (flank_distance * 0.5)
+
+func _is_position_valid(pos: Vector2) -> bool:
+    # Use physics space state to check if position overlaps with obstacles
+    var query := PhysicsPointQueryParameters2D.new()
+    query.position = pos
+    query.collision_mask = 4  # Only check obstacles (layer 3)
+    return space_state.intersect_point(query, 1).is_empty()
+```
+
+**Key changes**:
+- Validate flank position is not inside an obstacle before using it
+- Try alternative positions (other side, closer/farther distances)
+- Fall back to moving directly toward player if all positions blocked
+
+### Recovery Behavior
+
+When stuck is detected:
+1. **In FLANKING state**: Increment retry counter, try new flank position
+2. **After MAX_FLANK_RETRIES (3)**: Give up flanking, return to COMBAT state
+3. **In SEEKING_COVER state**: Invalidate cover position, find new cover
+4. **State transitions**: Reset stuck detection when changing states
+
+### Testing Recommendations
+
+1. Test in environments with many obstacles and corners
+2. Verify enemies can reach flank positions around buildings
+3. Check that enemies don't get stuck on cover objects
+4. Observe that stuck enemies recover and try alternative approaches
+
 ## References
 
 - [Cover System - Level Design Book](https://book.leveldesignbook.com/process/combat/cover)
@@ -177,3 +316,6 @@ func _process_combat_state(delta: float) -> void:
 - [Enemy AI Design - Tom Clancy's The Division](https://www.gamedeveloper.com/design/enemy-ai-design-in-tom-clancy-s-the-division)
 - [Enemy AI Question - GameDev.net Forums](https://www.gamedev.net/forums/topic/709899-question-about-enemy-ai/)
 - [Enemy NPC Design Patterns in Shooter Games](https://www.academia.edu/2806378/Enemy_NPC_Design_Patterns_in_Shooter_Games)
+- [Movement Stuck in Walls - Godot Forum](https://forum.godotengine.org/t/movement-stuck-in-2-walls/72424)
+- [Enemy Gets Stuck - Godot Forum](https://forum.godotengine.org/t/enemy-gets-stuck/67304)
+- [Enemy AI: Chasing a Player Without Navigation2D](https://abitawake.com/news/articles/enemy-ai-chasing-a-player-without-navigation2d-or-a-star-pathfinding)
