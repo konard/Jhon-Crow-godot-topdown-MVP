@@ -258,6 +258,15 @@ var _threat_reaction_timer: float = 0.0
 ## Whether the threat reaction delay has elapsed (enemy can react to bullets).
 var _threat_reaction_delay_elapsed: bool = false
 
+## Memory of bullets that have passed through the threat sphere recently.
+## This allows the enemy to react even after fast-moving bullets have exited.
+var _threat_memory_timer: float = 0.0
+
+## Duration to remember that a bullet passed through the threat sphere.
+## This should be longer than the reaction delay to ensure enemies can complete
+## their reaction even after bullets have passed through quickly.
+const THREAT_MEMORY_DURATION: float = 0.5
+
 ## GOAP world state for goal-oriented planning.
 var _goap_world_state: Dictionary = {}
 
@@ -438,17 +447,24 @@ func _update_suppression(delta: float) -> void:
 	# Clean up destroyed bullets from tracking
 	_bullets_in_threat_sphere = _bullets_in_threat_sphere.filter(func(b): return is_instance_valid(b))
 
-	if _bullets_in_threat_sphere.is_empty():
+	# Determine if there's an active threat (bullets in sphere OR recent threat memory)
+	var has_active_threat := not _bullets_in_threat_sphere.is_empty() or _threat_memory_timer > 0.0
+
+	if not has_active_threat:
 		if _under_fire:
 			_suppression_timer += delta
 			if _suppression_timer >= suppression_cooldown:
 				_under_fire = false
 				_suppression_timer = 0.0
 				_log_debug("Suppression ended")
-		# Reset threat reaction timer when no bullets are in threat sphere
+		# Reset threat reaction timer when no bullets are in threat sphere and no threat memory
 		_threat_reaction_timer = 0.0
 		_threat_reaction_delay_elapsed = false
 	else:
+		# Decrement threat memory timer if no bullets currently in sphere
+		if _bullets_in_threat_sphere.is_empty() and _threat_memory_timer > 0.0:
+			_threat_memory_timer -= delta
+
 		# Update threat reaction timer
 		if not _threat_reaction_delay_elapsed:
 			_threat_reaction_timer += delta
@@ -1400,6 +1416,9 @@ func _on_threat_area_entered(area: Area2D) -> void:
 		return  # Ignore own bullets
 
 	_bullets_in_threat_sphere.append(area)
+	# Set threat memory timer so enemy can react even after fast bullets exit
+	# This allows the reaction delay to complete even if bullets pass through quickly
+	_threat_memory_timer = THREAT_MEMORY_DURATION
 	# Note: _under_fire is now set in _update_suppression after threat_reaction_delay
 	# This gives the player more time before the enemy reacts to nearby gunfire
 	_log_debug("Bullet entered threat sphere, starting reaction delay...")
@@ -1498,6 +1517,7 @@ func _reset() -> void:
 	_player_visibility_ratio = 0.0
 	_threat_reaction_timer = 0.0
 	_threat_reaction_delay_elapsed = false
+	_threat_memory_timer = 0.0
 	_bullets_in_threat_sphere.clear()
 	_initialize_health()
 	_initialize_ammo()
