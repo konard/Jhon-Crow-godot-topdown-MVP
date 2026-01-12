@@ -130,6 +130,11 @@ enum BehaviorMode {
 ## Gives player a brief reaction time when entering enemy line of sight.
 @export var detection_delay: float = 0.05
 
+## Minimum time (in seconds) the player must be continuously visible before
+## lead prediction is enabled. This prevents enemies from predicting player
+## position immediately when they emerge from cover.
+@export var lead_prediction_delay: float = 0.3
+
 ## Signal emitted when the enemy is hit.
 signal hit
 
@@ -244,6 +249,10 @@ var _detection_timer: float = 0.0
 
 ## Whether the detection delay has elapsed.
 var _detection_delay_elapsed: bool = false
+
+## Continuous visibility timer - tracks how long the player has been continuously visible.
+## Resets when line of sight is lost.
+var _continuous_visibility_timer: float = 0.0
 
 
 
@@ -1007,10 +1016,13 @@ func _check_wall_ahead(direction: Vector2) -> Vector2:
 ## Check if the player is visible using raycast.
 ## If detection_range is 0 or negative, uses unlimited detection range (line-of-sight only).
 ## This allows the enemy to see the player even outside the viewport if there's no obstacle.
+## Also updates the continuous visibility timer for lead prediction control.
 func _check_player_visibility() -> void:
+	var was_visible := _can_see_player
 	_can_see_player = false
 
 	if _player == null or not _raycast:
+		_continuous_visibility_timer = 0.0
 		return
 
 	var distance_to_player := global_position.distance_to(_player.global_position)
@@ -1018,6 +1030,7 @@ func _check_player_visibility() -> void:
 	# Check if player is within detection range (only if detection_range is positive)
 	# If detection_range <= 0, detection is unlimited (line-of-sight only)
 	if detection_range > 0 and distance_to_player > detection_range:
+		_continuous_visibility_timer = 0.0
 		return
 
 	# Point raycast at player - use actual distance to player for the raycast length
@@ -1036,6 +1049,13 @@ func _check_player_visibility() -> void:
 	else:
 		# No collision between us and player - we have clear line of sight
 		_can_see_player = true
+
+	# Update continuous visibility timer
+	if _can_see_player:
+		_continuous_visibility_timer += get_physics_process_delta_time()
+	else:
+		# Lost line of sight - reset the timer
+		_continuous_visibility_timer = 0.0
 
 
 ## Aim the enemy sprite/direction at the player using gradual rotation.
@@ -1125,11 +1145,22 @@ func _play_delayed_shell_sound() -> void:
 
 ## Calculate lead prediction - aims where the player will be, not where they are.
 ## Uses iterative approach for better accuracy with moving targets.
+## Only applies lead prediction if the player has been continuously visible
+## for at least lead_prediction_delay seconds, preventing enemies from
+## "knowing" where the player will emerge from cover.
 func _calculate_lead_prediction() -> Vector2:
 	if _player == null:
 		return global_position
 
 	var player_pos := _player.global_position
+
+	# Only use lead prediction if the player has been continuously visible
+	# for long enough. This prevents enemies from predicting player position
+	# immediately when they emerge from cover.
+	if _continuous_visibility_timer < lead_prediction_delay:
+		_log_debug("Lead prediction disabled: visibility time %.2fs < %.2fs required" % [_continuous_visibility_timer, lead_prediction_delay])
+		return player_pos
+
 	var player_velocity := Vector2.ZERO
 
 	# Get player velocity if they are a CharacterBody2D
@@ -1305,6 +1336,7 @@ func _reset() -> void:
 	_suppression_timer = 0.0
 	_detection_timer = 0.0
 	_detection_delay_elapsed = false
+	_continuous_visibility_timer = 0.0
 	_bullets_in_threat_sphere.clear()
 	_initialize_health()
 	_initialize_ammo()
