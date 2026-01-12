@@ -53,7 +53,8 @@ const SHELL_RIFLE: String = "res://assets/audio/падает гильза авт
 const SHELL_PISTOL: String = "res://assets/audio/падает гильза пистолета.wav"
 
 ## Fire mode toggle sound.
-const FIRE_MODE_TOGGLE: String = "res://assets/audio/игрок изменил режим стрельбы (нажал b).wav"
+## Note: Renamed from Cyrillic to ASCII for export compatibility (see issue #64).
+const FIRE_MODE_TOGGLE: String = "res://assets/audio/fire_mode_toggle.wav"
 
 ## Volume settings (in dB).
 const VOLUME_SHOT: float = -5.0
