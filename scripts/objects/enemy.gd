@@ -31,10 +31,14 @@ enum BehaviorMode {
 @export var behavior_mode: BehaviorMode = BehaviorMode.GUARD
 
 ## Maximum movement speed in pixels per second.
-@export var move_speed: float = 80.0
+@export var move_speed: float = 150.0
 
 ## Combat movement speed (faster when flanking/seeking cover).
-@export var combat_move_speed: float = 120.0
+@export var combat_move_speed: float = 220.0
+
+## Rotation speed in radians per second for gradual turning.
+## Default is 8 rad/sec which allows player to dodge without cover.
+@export var rotation_speed: float = 8.0
 
 ## Detection range for spotting the player.
 ## Set to 0 or negative to allow unlimited detection range (line-of-sight only).
@@ -929,13 +933,27 @@ func _check_player_visibility() -> void:
 		_can_see_player = true
 
 
-## Aim the enemy sprite/direction at the player.
+## Aim the enemy sprite/direction at the player using gradual rotation.
 func _aim_at_player() -> void:
 	if _player == null:
 		return
 	var direction := (_player.global_position - global_position).normalized()
-	# Rotate the enemy to face the player
-	rotation = direction.angle()
+	var target_angle := direction.angle()
+
+	# Calculate the shortest rotation direction
+	var angle_diff := wrapf(target_angle - rotation, -PI, PI)
+
+	# Get the delta time from the current physics process
+	var delta := get_physics_process_delta_time()
+
+	# Apply gradual rotation based on rotation_speed
+	if abs(angle_diff) <= rotation_speed * delta:
+		# Close enough to snap to target
+		rotation = target_angle
+	elif angle_diff > 0:
+		rotation += rotation_speed * delta
+	else:
+		rotation -= rotation_speed * delta
 
 
 ## Shoot a bullet towards the player.

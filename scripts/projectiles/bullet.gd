@@ -6,7 +6,8 @@ extends Area2D
 ## target reactions on hit.
 
 ## Speed of the bullet in pixels per second.
-@export var speed: float = 600.0
+## Default is 2000 for realistic assault rifle feel.
+@export var speed: float = 2000.0
 
 ## Maximum lifetime in seconds before auto-destruction.
 @export var lifetime: float = 3.0

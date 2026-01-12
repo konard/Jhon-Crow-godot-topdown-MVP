@@ -5,18 +5,28 @@ extends Node2D
 ## Features:
 ## - Large map (4000x2960 playable area) with multiple combat zones
 ## - Various cover types (low walls, barricades, crates, pillars)
-## - 14 enemies in strategic positions (8 guards, 6 patrols)
+## - 10 enemies in strategic positions (6 guards, 4 patrols)
 ## - Enemies do not respawn after death
 ## - Visual indicators for cover positions
+## - Ammo counter with color-coded warnings
 
 ## Reference to the enemy count label.
 var _enemy_count_label: Label = null
+
+## Reference to the ammo count label.
+var _ammo_label: Label = null
+
+## Reference to the player.
+var _player: Node2D = null
 
 ## Total enemy count at start.
 var _initial_enemy_count: int = 0
 
 ## Current enemy count.
 var _current_enemy_count: int = 0
+
+## Whether game over has been shown.
+var _game_over_shown: bool = false
 
 
 func _ready() -> void:
@@ -31,9 +41,32 @@ func _ready() -> void:
 	_enemy_count_label = get_node_or_null("CanvasLayer/UI/EnemyCountLabel")
 	_update_enemy_count_label()
 
+	# Find and setup player tracking
+	_setup_player_tracking()
+
 
 func _process(_delta: float) -> void:
 	pass
+
+
+## Setup tracking for the player.
+func _setup_player_tracking() -> void:
+	_player = get_node_or_null("Entities/Player")
+	if _player == null:
+		return
+
+	# Find the ammo label
+	_ammo_label = get_node_or_null("CanvasLayer/UI/AmmoLabel")
+
+	# Connect to player signals
+	if _player.has_signal("ammo_changed"):
+		_player.ammo_changed.connect(_on_player_ammo_changed)
+	if _player.has_signal("ammo_depleted"):
+		_player.ammo_depleted.connect(_on_player_ammo_depleted)
+
+	# Initial ammo display
+	if _player.has_method("get_current_ammo") and _player.has_method("get_max_ammo"):
+		_update_ammo_label(_player.get_current_ammo(), _player.get_max_ammo())
 
 
 ## Setup tracking for all enemies in the scene.
@@ -61,6 +94,33 @@ func _on_enemy_died() -> void:
 	if _current_enemy_count <= 0:
 		print("All enemies eliminated! Arena cleared!")
 		_show_victory_message()
+
+
+## Called when player ammo changes.
+func _on_player_ammo_changed(current: int, maximum: int) -> void:
+	_update_ammo_label(current, maximum)
+
+
+## Called when player runs out of ammo.
+func _on_player_ammo_depleted() -> void:
+	if _current_enemy_count > 0 and not _game_over_shown:
+		_show_game_over_message()
+
+
+## Update the ammo label with color coding.
+func _update_ammo_label(current: int, maximum: int) -> void:
+	if _ammo_label == null:
+		return
+
+	_ammo_label.text = "AMMO: %d/%d" % [current, maximum]
+
+	# Color coding: red at <=5, yellow at <=10, white otherwise
+	if current <= 5:
+		_ammo_label.add_theme_color_override("font_color", Color(1.0, 0.2, 0.2, 1.0))
+	elif current <= 10:
+		_ammo_label.add_theme_color_override("font_color", Color(1.0, 1.0, 0.2, 1.0))
+	else:
+		_ammo_label.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
 
 
 ## Update the enemy count label in UI.
@@ -91,3 +151,29 @@ func _show_victory_message() -> void:
 	victory_label.offset_bottom = 50
 
 	ui.add_child(victory_label)
+
+
+## Show game over message when player runs out of ammo with enemies remaining.
+func _show_game_over_message() -> void:
+	_game_over_shown = true
+
+	var ui := get_node_or_null("CanvasLayer/UI")
+	if ui == null:
+		return
+
+	var game_over_label := Label.new()
+	game_over_label.name = "GameOverLabel"
+	game_over_label.text = "OUT OF AMMO\n%d enemies remaining" % _current_enemy_count
+	game_over_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	game_over_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	game_over_label.add_theme_font_size_override("font_size", 48)
+	game_over_label.add_theme_color_override("font_color", Color(1.0, 0.2, 0.2, 1.0))
+
+	# Center the label
+	game_over_label.set_anchors_preset(Control.PRESET_CENTER)
+	game_over_label.offset_left = -250
+	game_over_label.offset_right = 250
+	game_over_label.offset_top = -75
+	game_over_label.offset_bottom = 75
+
+	ui.add_child(game_over_label)
