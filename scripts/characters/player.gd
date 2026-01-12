@@ -5,6 +5,7 @@ extends CharacterBody2D
 ## Supports WASD and arrow key input via configured input actions.
 ## Shoots bullets towards the mouse cursor on left mouse button click.
 ## Features limited ammunition system with progressive spread.
+## Includes health system for taking damage from enemy projectiles.
 
 ## Maximum movement speed in pixels per second.
 @export var max_speed: float = 300.0
@@ -24,8 +25,32 @@ extends CharacterBody2D
 ## Maximum ammunition (90 bullets = 3 magazines of 30).
 @export var max_ammo: int = 90
 
+## Maximum health of the player.
+@export var max_health: int = 5
+
+## Color when at full health.
+@export var full_health_color: Color = Color(0.2, 0.6, 1.0, 1.0)
+
+## Color when at low health (interpolates based on health percentage).
+@export var low_health_color: Color = Color(0.1, 0.2, 0.4, 1.0)
+
+## Color to flash when hit.
+@export var hit_flash_color: Color = Color(1.0, 1.0, 1.0, 1.0)
+
+## Duration of hit flash effect in seconds.
+@export var hit_flash_duration: float = 0.1
+
 ## Current ammunition count.
 var _current_ammo: int = 90
+
+## Current health of the player.
+var _current_health: int = 5
+
+## Whether the player is alive.
+var _is_alive: bool = true
+
+## Reference to the sprite for color changes.
+@onready var _sprite: Sprite2D = $Sprite2D
 
 ## Progressive spread system parameters.
 ## Number of shots before spread starts increasing.
@@ -50,15 +75,30 @@ signal ammo_changed(current: int, maximum: int)
 ## Signal emitted when ammo is depleted.
 signal ammo_depleted
 
+## Signal emitted when the player is hit.
+signal hit
+
+## Signal emitted when health changes.
+signal health_changed(current: int, maximum: int)
+
+## Signal emitted when the player dies.
+signal died
+
 
 func _ready() -> void:
 	# Preload bullet scene if not set in inspector
 	if bullet_scene == null:
 		bullet_scene = preload("res://scenes/projectiles/Bullet.tscn")
 	_current_ammo = max_ammo
+	_current_health = max_health
+	_is_alive = true
+	_update_health_visual()
 
 
 func _physics_process(delta: float) -> void:
+	if not _is_alive:
+		return
+
 	var input_direction := _get_input_direction()
 
 	if input_direction != Vector2.ZERO:
@@ -130,6 +170,10 @@ func _shoot() -> void:
 	# Set bullet direction
 	bullet.direction = shoot_direction
 
+	# Set shooter ID to identify this player as the source
+	# This prevents the player from being hit by their own bullets
+	bullet.shooter_id = get_instance_id()
+
 	# Add bullet to the scene tree (parent's parent to avoid it being a child of player)
 	get_tree().current_scene.add_child(bullet)
 
@@ -148,3 +192,78 @@ func get_current_ammo() -> int:
 ## Get maximum ammo count.
 func get_max_ammo() -> int:
 	return max_ammo
+
+
+## Called when hit by a projectile.
+func on_hit() -> void:
+	if not _is_alive:
+		return
+
+	hit.emit()
+
+	# Show hit flash effect
+	_show_hit_flash()
+
+	# Apply damage
+	_current_health -= 1
+	health_changed.emit(_current_health, max_health)
+
+	if _current_health <= 0:
+		_on_death()
+	else:
+		_update_health_visual()
+
+
+## Shows a brief flash effect when hit.
+func _show_hit_flash() -> void:
+	if not _sprite:
+		return
+
+	_sprite.modulate = hit_flash_color
+
+	await get_tree().create_timer(hit_flash_duration).timeout
+
+	# Restore color based on current health (if still alive)
+	if _is_alive:
+		_update_health_visual()
+
+
+## Updates the sprite color based on current health percentage.
+func _update_health_visual() -> void:
+	if not _sprite:
+		return
+
+	# Interpolate color based on health percentage
+	var health_percent := _get_health_percent()
+	_sprite.modulate = full_health_color.lerp(low_health_color, 1.0 - health_percent)
+
+
+## Returns the current health as a percentage (0.0 to 1.0).
+func _get_health_percent() -> float:
+	if max_health <= 0:
+		return 0.0
+	return float(_current_health) / float(max_health)
+
+
+## Called when the player dies.
+func _on_death() -> void:
+	_is_alive = false
+	died.emit()
+	# Visual feedback - make sprite darker/transparent
+	if _sprite:
+		_sprite.modulate = Color(0.3, 0.3, 0.3, 0.5)
+
+
+## Get current health.
+func get_current_health() -> int:
+	return _current_health
+
+
+## Get maximum health.
+func get_max_health() -> int:
+	return max_health
+
+
+## Check if player is alive.
+func is_alive() -> bool:
+	return _is_alive

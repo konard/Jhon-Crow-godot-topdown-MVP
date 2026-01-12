@@ -42,6 +42,12 @@ public partial class Bullet : Area2D
     public Vector2 Direction { get; set; } = Vector2.Right;
 
     /// <summary>
+    /// Instance ID of the node that shot this bullet.
+    /// Used to prevent self-damage (e.g., player or enemies not damaging themselves).
+    /// </summary>
+    public ulong ShooterId { get; set; } = 0;
+
+    /// <summary>
     /// Timer tracking remaining lifetime.
     /// </summary>
     private float _timeAlive;
@@ -105,6 +111,15 @@ public partial class Bullet : Area2D
     private void OnAreaEntered(Area2D area)
     {
         GD.Print($"[Bullet]: Hit {area.Name} (damage: {Damage})");
+
+        // Check if this is a HitArea - if so, check against parent's instance ID
+        // This prevents the shooter from damaging themselves
+        var parent = area.GetParent();
+        if (parent != null && ShooterId == parent.GetInstanceId())
+        {
+            GD.Print($"[Bullet]: Ignoring self-hit on {parent.Name}");
+            return; // Don't hit the shooter
+        }
 
         // Check if the target implements IDamageable
         if (area is IDamageable damageable)

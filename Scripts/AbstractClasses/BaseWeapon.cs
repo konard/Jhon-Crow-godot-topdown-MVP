@@ -154,6 +154,14 @@ public abstract partial class BaseWeapon : Node2D
             bullet.Set("Speed", WeaponData.BulletSpeed);
         }
 
+        // Set shooter ID to prevent self-damage
+        // The shooter is the owner of the weapon (parent node)
+        var owner = GetParent();
+        if (owner != null)
+        {
+            bullet.Set("ShooterId", owner.GetInstanceId());
+        }
+
         GetTree().CurrentScene.AddChild(bullet);
     }
 

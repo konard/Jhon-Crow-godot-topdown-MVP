@@ -278,6 +278,9 @@ public partial class Player : BaseCharacter
         // Set bullet direction
         bullet.Set("Direction", direction);
 
+        // Set shooter ID to prevent self-damage
+        bullet.Set("ShooterId", GetInstanceId());
+
         // Add bullet to the scene tree
         GetTree().CurrentScene.AddChild(bullet);
     }
