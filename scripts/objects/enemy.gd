@@ -591,9 +591,9 @@ func _find_cover_position() -> void:
 			# Check if this position blocks line of sight from player
 			var cover_direction := (cover_pos - player_pos).normalized()
 			var dot_product := direction_from_player.dot(cover_direction)
-			var blocking_score := max(0, dot_product)
+			var blocking_score: float = maxf(0.0, dot_product)
 
-			var total_score := distance_score * 0.3 + blocking_score * 0.7
+			var total_score: float = distance_score * 0.3 + blocking_score * 0.7
 
 			if total_score > best_score:
 				best_score = total_score
