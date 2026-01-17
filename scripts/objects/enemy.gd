@@ -359,6 +359,7 @@ func _ready() -> void:
 	_setup_cover_detection()
 	_setup_threat_sphere()
 	_initialize_goap_state()
+	_connect_debug_mode_signal()
 	_update_debug_label()
 
 	# Preload bullet scene if not set in inspector
@@ -446,6 +447,24 @@ func _initialize_goap_state() -> void:
 		"is_retreating": false,
 		"hits_taken": 0
 	}
+
+
+## Connect to GameManager's debug mode signal for F7 toggle.
+func _connect_debug_mode_signal() -> void:
+	var game_manager: Node = get_node_or_null("/root/GameManager")
+	if game_manager:
+		# Connect to debug mode toggle signal
+		if game_manager.has_signal("debug_mode_toggled"):
+			game_manager.debug_mode_toggled.connect(_on_debug_mode_toggled)
+		# Sync with current debug mode state
+		if game_manager.has_method("is_debug_mode_enabled"):
+			debug_label_enabled = game_manager.is_debug_mode_enabled()
+
+
+## Called when debug mode is toggled via F7 key.
+func _on_debug_mode_toggled(enabled: bool) -> void:
+	debug_label_enabled = enabled
+	_update_debug_label()
 
 
 ## Find the player node in the scene tree.
