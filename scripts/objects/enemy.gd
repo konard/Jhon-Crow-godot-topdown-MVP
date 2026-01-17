@@ -340,12 +340,25 @@ var _combat_shoot_duration: float = 2.5
 ## Whether the enemy is currently in the "exposed shooting" phase of combat.
 var _combat_exposed: bool = false
 
+## Whether the enemy is in the "approaching player" phase of combat.
+## In this phase, the enemy moves toward the player to get into direct contact.
+var _combat_approaching: bool = false
+
+## Timer for the approach phase of combat.
+var _combat_approach_timer: float = 0.0
+
+## Maximum time to spend approaching player before starting to shoot (seconds).
+const COMBAT_APPROACH_MAX_TIME: float = 2.0
+
+## Distance at which enemy is considered "close enough" to start shooting phase.
+const COMBAT_DIRECT_CONTACT_DISTANCE: float = 250.0
+
 ## --- Pursuit State (cover-to-cover movement) ---
 ## Timer for waiting at cover during pursuit.
 var _pursuit_cover_wait_timer: float = 0.0
 
-## Duration to wait at each cover during pursuit (2-3 seconds).
-const PURSUIT_COVER_WAIT_DURATION: float = 2.5
+## Duration to wait at each cover during pursuit (1-2 seconds, reduced for faster pursuit).
+const PURSUIT_COVER_WAIT_DURATION: float = 1.5
 
 ## Current pursuit target cover position.
 var _pursuit_next_cover: Vector2 = Vector2.ZERO
@@ -724,12 +737,16 @@ func _process_idle_state(delta: float) -> void:
 			_process_guard(delta)
 
 
-## Process COMBAT state - come out of cover, shoot for 2-3 seconds, return to cover.
-## Implements the combat cycling behavior: exposed -> shoot -> return to cover.
+## Process COMBAT state - approach player for direct contact, shoot for 2-3 seconds, return to cover.
+## Implements the combat cycling behavior: approach -> exposed shooting -> return to cover.
+## Phase 1 (approaching): Move toward player to get into direct contact range.
+## Phase 2 (exposed): Stand and shoot for 2-3 seconds.
+## Phase 3: Return to cover via SEEKING_COVER state.
 func _process_combat_state(delta: float) -> void:
 	# Check for suppression - transition to retreating behavior
 	if _under_fire and enable_cover:
 		_combat_exposed = false
+		_combat_approaching = false
 		_transition_to_retreating()
 		return
 
@@ -738,12 +755,14 @@ func _process_combat_state(delta: float) -> void:
 	if enemies_in_combat >= 2:
 		_log_debug("Multiple enemies in combat (%d), transitioning to ASSAULT" % enemies_in_combat)
 		_combat_exposed = false
+		_combat_approaching = false
 		_transition_to_assault()
 		return
 
 	# If can't see player, try flanking or pursue
 	if not _can_see_player:
 		_combat_exposed = false
+		_combat_approaching = false
 		if enable_flanking and _player:
 			_transition_to_flanking()
 		else:
@@ -756,37 +775,79 @@ func _process_combat_state(delta: float) -> void:
 		if _detection_timer >= detection_delay:
 			_detection_delay_elapsed = true
 
-	# If we have cover and have been exposed long enough, go back to cover
-	if _combat_exposed and _has_valid_cover:
-		_combat_shoot_timer += delta
-		if _combat_shoot_timer >= _combat_shoot_duration:
-			_log_debug("Combat exposure time complete (%.1fs), returning to cover" % _combat_shoot_duration)
-			_combat_exposed = false
-			_combat_shoot_timer = 0.0
-			_transition_to_seeking_cover()
-			return
-
-	# If we don't have cover, find some first
+	# If we don't have cover, find some first (needed for returning later)
 	if not _has_valid_cover and enable_cover:
 		_find_cover_position()
 		if _has_valid_cover:
 			_log_debug("Found cover at %s for combat cycling" % _cover_position)
 
-	# Mark as exposed since we're actively engaging
-	if not _combat_exposed:
+	# Check player distance for approach/exposed phase decisions
+	var distance_to_player := INF
+	if _player:
+		distance_to_player = global_position.distance_to(_player.global_position)
+
+	# Determine if we should be in approach phase or exposed shooting phase
+	var in_direct_contact := distance_to_player <= COMBAT_DIRECT_CONTACT_DISTANCE
+
+	# If already exposed (shooting phase), handle shooting and timer
+	if _combat_exposed:
+		_combat_shoot_timer += delta
+
+		# Check if exposure time is complete - go back to cover
+		if _combat_shoot_timer >= _combat_shoot_duration and _has_valid_cover:
+			_log_debug("Combat exposure time complete (%.1fs), returning to cover" % _combat_shoot_duration)
+			_combat_exposed = false
+			_combat_approaching = false
+			_combat_shoot_timer = 0.0
+			_transition_to_seeking_cover()
+			return
+
+		# In exposed phase, stand still and shoot
+		velocity = Vector2.ZERO
+
+		# Aim and shoot at player (only shoot after detection delay)
+		if _player:
+			_aim_at_player()
+			if _detection_delay_elapsed and _shoot_timer >= shoot_cooldown:
+				_shoot()
+				_shoot_timer = 0.0
+		return
+
+	# Not in exposed phase yet - determine if we need to approach or can start shooting
+	if in_direct_contact or _combat_approach_timer >= COMBAT_APPROACH_MAX_TIME:
+		# Close enough or approached long enough - start exposed shooting phase
 		_combat_exposed = true
+		_combat_approaching = false
 		_combat_shoot_timer = 0.0
+		_combat_approach_timer = 0.0
 		# Randomize exposure duration between 2-3 seconds
 		_combat_shoot_duration = randf_range(2.0, 3.0)
-		_log_debug("COMBAT exposed phase started, will shoot for %.1fs" % _combat_shoot_duration)
+		_log_debug("COMBAT exposed phase started (distance: %.0f), will shoot for %.1fs" % [distance_to_player, _combat_shoot_duration])
+		return
 
-	# In combat, enemy stands still and shoots (no velocity)
-	velocity = Vector2.ZERO
+	# Need to approach player - move toward them
+	if not _combat_approaching:
+		_combat_approaching = true
+		_combat_approach_timer = 0.0
+		_log_debug("COMBAT approach phase started, moving toward player")
 
-	# Aim and shoot at player (only shoot after detection delay)
+	_combat_approach_timer += delta
+
+	# Move toward player while approaching
 	if _player:
-		_aim_at_player()
+		var direction_to_player := (_player.global_position - global_position).normalized()
+
+		# Apply wall avoidance
+		var avoidance := _check_wall_ahead(direction_to_player)
+		if avoidance != Vector2.ZERO:
+			direction_to_player = (direction_to_player * 0.5 + avoidance * 0.5).normalized()
+
+		velocity = direction_to_player * combat_move_speed
+		rotation = direction_to_player.angle()
+
+		# Can shoot while approaching (only after detection delay)
 		if _detection_delay_elapsed and _shoot_timer >= shoot_cooldown:
+			_aim_at_player()
 			_shoot()
 			_shoot_timer = 0.0
 
@@ -1159,7 +1220,7 @@ func _process_retreat_multiple_hits(delta: float, direction_to_cover: Vector2) -
 
 
 ## Process PURSUING state - move cover-to-cover toward player.
-## Enemy moves between covers, waiting 2-3 seconds at each cover,
+## Enemy moves between covers, waiting 1-2 seconds at each cover,
 ## until they can see and hit the player.
 func _process_pursuing_state(delta: float) -> void:
 	# Check for suppression - transition to retreating behavior
@@ -1185,7 +1246,7 @@ func _process_pursuing_state(delta: float) -> void:
 
 	# Check if we're waiting at cover
 	if _has_valid_cover and not _has_pursuit_cover:
-		# Currently at cover, wait for 2-3 seconds
+		# Currently at cover, wait for 1-2 seconds before moving to next cover
 		_pursuit_cover_wait_timer += delta
 		velocity = Vector2.ZERO
 
@@ -1196,6 +1257,23 @@ func _process_pursuing_state(delta: float) -> void:
 			_find_pursuit_cover_toward_player()
 			if _has_pursuit_cover:
 				_log_debug("Found pursuit cover at %s" % _pursuit_next_cover)
+			else:
+				# No pursuit cover found - fallback behavior
+				_log_debug("No pursuit cover found, checking fallback options")
+				# If we can now see the player, engage directly
+				if _can_see_player:
+					_log_debug("Can see player, transitioning to COMBAT")
+					_transition_to_combat()
+					return
+				# Try flanking
+				if enable_flanking and _player:
+					_log_debug("Attempting flanking maneuver")
+					_transition_to_flanking()
+					return
+				# Last resort: move directly toward player
+				_log_debug("No cover options, moving directly toward player")
+				_transition_to_combat()
+				return
 		return
 
 	# If we have a pursuit cover target, move toward it
@@ -1420,6 +1498,11 @@ func _transition_to_combat() -> void:
 	# Reset detection delay timer when entering combat
 	_detection_timer = 0.0
 	_detection_delay_elapsed = false
+	# Reset combat phase variables
+	_combat_exposed = false
+	_combat_approaching = false
+	_combat_shoot_timer = 0.0
+	_combat_approach_timer = 0.0
 
 
 ## Transition to SEEKING_COVER state.
@@ -2433,6 +2516,8 @@ func _reset() -> void:
 	_combat_shoot_timer = 0.0
 	_combat_shoot_duration = 2.5
 	_combat_exposed = false
+	_combat_approaching = false
+	_combat_approach_timer = 0.0
 	# Reset pursuit state variables
 	_pursuit_cover_wait_timer = 0.0
 	_pursuit_next_cover = Vector2.ZERO
@@ -2507,10 +2592,21 @@ func _update_debug_label() -> void:
 			var time_left := ASSAULT_WAIT_DURATION - _assault_wait_timer
 			state_text += "\n(%.1fs)" % time_left
 
-	# Add combat exposed timer info if in combat
-	if _current_state == AIState.COMBAT and _combat_exposed:
-		var time_left := _combat_shoot_duration - _combat_shoot_timer
-		state_text += "\n(%.1fs)" % time_left
+	# Add combat phase info if in combat
+	if _current_state == AIState.COMBAT:
+		if _combat_exposed:
+			var time_left := _combat_shoot_duration - _combat_shoot_timer
+			state_text += "\n(EXPOSED %.1fs)" % time_left
+		elif _combat_approaching:
+			state_text += "\n(APPROACH)"
+
+	# Add pursuit timer info if pursuing and waiting at cover
+	if _current_state == AIState.PURSUING:
+		if _has_valid_cover and not _has_pursuit_cover:
+			var time_left := PURSUIT_COVER_WAIT_DURATION - _pursuit_cover_wait_timer
+			state_text += "\n(WAIT %.1fs)" % time_left
+		elif _has_pursuit_cover:
+			state_text += "\n(MOVING)"
 
 	_debug_label.text = state_text
 
