@@ -9,11 +9,13 @@ extends Node
 ## - Add new sound types to the SoundType enum
 ## - Define propagation distances for each sound type
 ## - Listeners (enemies) register themselves to receive sound events
+## - Sound sources can specify custom loudness (range) for their weapons
 ##
 ## Usage:
 ## - Call emit_sound() when a sound-producing action occurs (shooting, explosions, etc.)
 ## - Listeners call register_listener() to receive sound notifications
 ## - Listeners implement on_sound_heard(sound_type, position, source) to react
+## - Use custom_range parameter to specify weapon-specific loudness
 
 ## Types of sounds that can propagate through the game world.
 ## Each type has different propagation characteristics.
@@ -64,8 +66,16 @@ var _listeners: Array = []
 ## Whether debug logging is enabled.
 var _debug_logging: bool = false
 
+## Reference to FileLogger for persistent logging.
+var _file_logger: Node = null
+
 
 func _ready() -> void:
+	# Get FileLogger reference for persistent logging
+	_file_logger = get_node_or_null("/root/FileLogger")
+	if _file_logger:
+		_log_to_file("SoundPropagation autoload initialized")
+
 	# Try to sync with GameManager debug mode
 	var game_manager: Node = get_node_or_null("/root/GameManager")
 	if game_manager and game_manager.has_method("is_debug_mode_enabled"):
@@ -86,6 +96,7 @@ func register_listener(listener: Node2D) -> void:
 	if listener and not _listeners.has(listener):
 		_listeners.append(listener)
 		_log_debug("Registered sound listener: %s" % listener.name)
+		_log_to_file("Registered listener: %s (total: %d)" % [listener.name, _listeners.size()])
 
 
 ## Unregister a listener from receiving sound events.
@@ -94,6 +105,7 @@ func unregister_listener(listener: Node2D) -> void:
 	if idx >= 0:
 		_listeners.remove_at(idx)
 		_log_debug("Unregistered sound listener: %s" % listener.name)
+		_log_to_file("Unregistered listener: %s (remaining: %d)" % [listener.name, _listeners.size()])
 
 
 ## Emit a sound at a given position.
@@ -110,24 +122,41 @@ func emit_sound(sound_type: SoundType, position: Vector2, source_type: SourceTyp
 				source_node: Node2D = null, custom_range: float = -1.0) -> void:
 	var propagation_distance := custom_range if custom_range > 0 else PROPAGATION_DISTANCES.get(sound_type, 1000.0)
 
+	var source_name := source_node.name if source_node else "null"
 	_log_debug("Sound emitted: type=%s, pos=%s, source=%s, range=%.0f" % [
 		SoundType.keys()[sound_type],
 		position,
 		SourceType.keys()[source_type],
 		propagation_distance
 	])
+	_log_to_file("Sound emitted: type=%s, pos=%s, source=%s (%s), range=%.0f, listeners=%d" % [
+		SoundType.keys()[sound_type],
+		position,
+		SourceType.keys()[source_type],
+		source_name,
+		propagation_distance,
+		_listeners.size()
+	])
 
 	# Clean up invalid listeners (destroyed nodes)
+	var prev_count := _listeners.size()
 	_listeners = _listeners.filter(func(l): return is_instance_valid(l))
+	if _listeners.size() < prev_count:
+		_log_to_file("Cleaned up %d invalid listeners" % (prev_count - _listeners.size()))
 
 	# Notify all listeners within range
 	var listeners_notified := 0
+	var listeners_out_of_range := 0
+	var listeners_skipped_self := 0
+	var listeners_below_threshold := 0
+
 	for listener in _listeners:
 		if not is_instance_valid(listener):
 			continue
 
 		# Skip if listener is the source (can't hear your own sounds as external)
 		if source_node and listener == source_node:
+			listeners_skipped_self += 1
 			continue
 
 		# Check if listener is within propagation range
@@ -146,6 +175,14 @@ func emit_sound(sound_type: SoundType, position: Vector2, source_type: SourceTyp
 				elif listener.has_method("on_sound_heard"):
 					listener.on_sound_heard(sound_type, position, source_type, source_node)
 					listeners_notified += 1
+			else:
+				listeners_below_threshold += 1
+		else:
+			listeners_out_of_range += 1
+
+	_log_to_file("Sound result: notified=%d, out_of_range=%d, self=%d, below_threshold=%d" % [
+		listeners_notified, listeners_out_of_range, listeners_skipped_self, listeners_below_threshold
+	])
 
 	if listeners_notified > 0:
 		_log_debug("Sound notified %d listeners" % listeners_notified)
@@ -216,3 +253,9 @@ func get_listener_count() -> int:
 func _log_debug(message: String) -> void:
 	if _debug_logging:
 		print("[SoundPropagation] " + message)
+
+
+## Log a message to the file logger for persistent debugging.
+func _log_to_file(message: String) -> void:
+	if _file_logger and _file_logger.has_method("log_info"):
+		_file_logger.log_info("[SoundPropagation] " + message)

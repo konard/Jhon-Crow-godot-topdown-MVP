@@ -161,6 +161,81 @@ Added 10 new unit tests:
 - [Procedural Synthesis of Gunshot Sounds Based on Physically Motivated Models - ResearchGate](https://www.researchgate.net/publication/315862064_Procedural_Synthesis_of_Gunshot_Sounds_Based_on_Physically_Motivated_Models)
 - [GSOUND: Interactive Sound Propagation for Games - UNC Chapel Hill](http://gamma.cs.unc.edu/GSOUND/gsound_aes41st.pdf)
 
+## User Feedback: Second Iteration (v3)
+
+### Problem Description
+User reported that sound propagation still doesn't work. Provided game log (`game_log_20260118_094728.txt`) shows:
+- Enemies spawn and transition states normally
+- NO "Heard gunshot" messages appear in logs
+- Enemies only transition to COMBAT when they SEE the player (visual detection)
+- Sound-based detection is not triggering at all
+
+### Root Cause Analysis (v3)
+
+After analyzing the game log, the issue is clear:
+1. **No sound propagation logging**: The game log shows no evidence of sounds being emitted or heard
+2. **Missing debug visibility**: Without file logging in SoundPropagation, we couldn't trace the actual behavior
+3. **User requested weapon-specific loudness**: The gunshot loudness should be defined in the weapon (assault rifle), not globally
+
+### Solution (v3)
+
+#### 1. Added Persistent File Logging
+Added comprehensive logging to SoundPropagation that writes to FileLogger:
+```gdscript
+func emit_sound(...) -> void:
+    _log_to_file("Sound emitted: type=%s, pos=%s, source=%s (%s), range=%.0f, listeners=%d" % [...])
+    # ... processing ...
+    _log_to_file("Sound result: notified=%d, out_of_range=%d, self=%d, below_threshold=%d" % [...])
+```
+
+This allows debugging in exported builds where console output is not visible.
+
+#### 2. Added Weapon Loudness Property
+Added `weapon_loudness` property to both Player and Enemy:
+```gdscript
+## Player
+@export var weapon_loudness: float = 1469.0  # Viewport diagonal for assault rifle
+
+## Enemy
+@export var weapon_loudness: float = 1469.0  # Same default for enemies
+```
+
+#### 3. Updated Shooting to Use Custom Loudness
+Changed from convenience methods to explicit emit_sound with custom range:
+```gdscript
+# Player shooting
+sound_propagation.emit_sound(0, global_position, 0, self, weapon_loudness)  # GUNSHOT, PLAYER
+
+# Enemy shooting
+sound_propagation.emit_sound(0, global_position, 1, self, weapon_loudness)  # GUNSHOT, ENEMY
+```
+
+#### 4. Added Registration Failure Warning
+If enemy fails to register as listener, now logs a warning:
+```gdscript
+func _deferred_register_sound_listener() -> void:
+    if sound_propagation and sound_propagation.has_method("register_listener"):
+        sound_propagation.register_listener(self)
+        _log_to_file("Registered as sound listener")
+    else:
+        _log_to_file("WARNING: Could not register as sound listener")
+```
+
+### Diagnostic Approach
+With the new logging, the game log will now show:
+1. When SoundPropagation autoload initializes
+2. When each enemy registers as a listener (and total count)
+3. When each gunshot is emitted (with source, position, range, listener count)
+4. Results of each sound emission (how many notified, out of range, etc.)
+5. When enemies hear sounds (if they do)
+
+This diagnostic information will help identify whether the issue is:
+- Listeners not registering
+- Sounds not being emitted
+- Listeners out of range
+- Intensity below threshold
+- State-based filtering
+
 ## Lessons Learned
 
 1. **Tie game parameters to meaningful metrics**: Using viewport size as a reference for sound propagation makes the system more intuitive and gameplay-aligned.
@@ -172,3 +247,9 @@ Added 10 new unit tests:
 4. **Provide intensity information to listeners**: This allows for more nuanced reactions (like only reacting to loud sounds during combat).
 
 5. **Test edge cases**: Include tests for boundary conditions like zero distance, reference distance, and viewport distance.
+
+6. **Add persistent logging for debugging**: Always include file-based logging that works in exported builds, not just console print statements.
+
+7. **Make parameters configurable at the source**: Properties like weapon loudness should be defined on the weapon/entity that produces the sound, allowing different weapons to have different characteristics.
+
+8. **Fail with visibility**: When critical systems fail to initialize (like listener registration), log warnings that will be visible in game logs.

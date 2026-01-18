@@ -65,6 +65,10 @@ enum BehaviorMode {
 ## Offset from enemy center for bullet spawn position.
 @export var bullet_spawn_offset: float = 30.0
 
+## Weapon loudness - determines how far gunshots propagate for alerting other enemies.
+## Set to viewport diagonal (~1469 pixels) for assault rifle by default.
+@export var weapon_loudness: float = 1469.0
+
 ## Patrol points as offsets from the initial position.
 ## Only used when behavior_mode is PATROL.
 @export var patrol_offsets: Array[Vector2] = [Vector2(100, 0), Vector2(-100, 0)]
@@ -610,6 +614,10 @@ func _deferred_register_sound_listener() -> void:
 	if sound_propagation and sound_propagation.has_method("register_listener"):
 		sound_propagation.register_listener(self)
 		_log_debug("Registered as sound listener")
+		_log_to_file("Registered as sound listener")
+	else:
+		_log_to_file("WARNING: Could not register as sound listener (SoundPropagation not found)")
+		push_warning("[%s] Could not register as sound listener - SoundPropagation not found" % name)
 
 
 ## Unregister this enemy from sound propagation when dying or being destroyed.
@@ -1849,9 +1857,10 @@ func _shoot_with_inaccuracy() -> void:
 		audio_manager.play_m16_shot(global_position)
 
 	# Emit gunshot sound for in-game sound propagation (alerts other enemies)
+	# Uses weapon_loudness to determine propagation range
 	var sound_propagation: Node = get_node_or_null("/root/SoundPropagation")
-	if sound_propagation and sound_propagation.has_method("emit_enemy_gunshot"):
-		sound_propagation.emit_enemy_gunshot(global_position, self)
+	if sound_propagation and sound_propagation.has_method("emit_sound"):
+		sound_propagation.emit_sound(0, global_position, 1, self, weapon_loudness)  # 0 = GUNSHOT, 1 = ENEMY
 
 	_play_delayed_shell_sound()
 
@@ -1899,9 +1908,10 @@ func _shoot_burst_shot() -> void:
 		audio_manager.play_m16_shot(global_position)
 
 	# Emit gunshot sound for in-game sound propagation (alerts other enemies)
+	# Uses weapon_loudness to determine propagation range
 	var sound_propagation: Node = get_node_or_null("/root/SoundPropagation")
-	if sound_propagation and sound_propagation.has_method("emit_enemy_gunshot"):
-		sound_propagation.emit_enemy_gunshot(global_position, self)
+	if sound_propagation and sound_propagation.has_method("emit_sound"):
+		sound_propagation.emit_sound(0, global_position, 1, self, weapon_loudness)  # 0 = GUNSHOT, 1 = ENEMY
 
 	_play_delayed_shell_sound()
 
@@ -3132,9 +3142,10 @@ func _shoot() -> void:
 		audio_manager.play_m16_shot(global_position)
 
 	# Emit gunshot sound for in-game sound propagation (alerts other enemies)
+	# Uses weapon_loudness to determine propagation range
 	var sound_propagation: Node = get_node_or_null("/root/SoundPropagation")
-	if sound_propagation and sound_propagation.has_method("emit_enemy_gunshot"):
-		sound_propagation.emit_enemy_gunshot(global_position, self)
+	if sound_propagation and sound_propagation.has_method("emit_sound"):
+		sound_propagation.emit_sound(0, global_position, 1, self, weapon_loudness)  # 0 = GUNSHOT, 1 = ENEMY
 
 	# Play shell casing sound with a small delay
 	_play_delayed_shell_sound()
