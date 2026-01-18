@@ -739,7 +739,9 @@ func _initialize_goap_state() -> void:
 		"can_hit_from_cover": false,
 		"player_close": false,
 		"enemies_in_combat": 0,
-		"player_distracted": false
+		"player_distracted": false,
+		"player_reloading": false,
+		"player_ammo_empty": false
 	}
 
 
@@ -978,6 +980,38 @@ func _process_ai_state(delta: float) -> void:
 
 			# Return early - we've taken the highest priority action
 			# The state machine will continue normally in the next frame
+			return
+
+	# HIGHEST PRIORITY: If player is reloading or tried to shoot with empty weapon,
+	# and enemy is close to the player, immediately attack with maximum priority.
+	# This exploits the player's vulnerability during reload or when out of ammo.
+	var player_is_vulnerable: bool = _goap_world_state.get("player_reloading", false) or _goap_world_state.get("player_ammo_empty", false)
+	if player_is_vulnerable and _can_see_player and _player and _is_player_close():
+		# Check if we have a clear shot (no wall blocking bullet spawn)
+		var direction_to_player := (_player.global_position - global_position).normalized()
+		var has_clear_shot := _is_bullet_spawn_clear(direction_to_player)
+
+		if has_clear_shot and _can_shoot():
+			# Log the vulnerability attack
+			var reason: String = "reloading" if _goap_world_state.get("player_reloading", false) else "empty ammo"
+			_log_to_file("Player %s - priority attack triggered" % reason)
+
+			# Aim at player immediately
+			rotation = direction_to_player.angle()
+
+			# Shoot immediately - bypassing ALL timers and state restrictions
+			_shoot()
+			_shoot_timer = 0.0  # Reset shoot timer after vulnerability shot
+
+			# Ensure detection delay is bypassed for any subsequent normal shots
+			_detection_delay_elapsed = true
+
+			# Transition to COMBAT if not already in a combat-related state
+			if _current_state == AIState.IDLE:
+				_transition_to_combat()
+				_detection_delay_elapsed = true  # Re-set after transition resets it
+
+			# Return early - we've taken the highest priority action
 			return
 
 	# State transitions based on conditions
@@ -3677,6 +3711,18 @@ func get_current_state() -> AIState:
 ## Get GOAP world state (for GOAP planner).
 func get_goap_world_state() -> Dictionary:
 	return _goap_world_state.duplicate()
+
+
+## Set player reloading state. Called by level when player starts/finishes reload.
+## When player starts reloading near an enemy, the enemy will attack with maximum priority.
+func set_player_reloading(is_reloading: bool) -> void:
+	_goap_world_state["player_reloading"] = is_reloading
+
+
+## Set player ammo empty state. Called by level when player tries to shoot with empty weapon.
+## When player tries to shoot with no ammo, the enemy will attack with maximum priority.
+func set_player_ammo_empty(is_empty: bool) -> void:
+	_goap_world_state["player_ammo_empty"] = is_empty
 
 
 ## Check if enemy is currently under fire.

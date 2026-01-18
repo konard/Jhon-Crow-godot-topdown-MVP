@@ -225,6 +225,34 @@ class AttackDistractedPlayerAction extends GOAPAction:
 		return 100.0  # Should never happen if preconditions are correct
 
 
+## Action to attack a vulnerable player (reloading or tried to shoot with empty weapon).
+## This action has the LOWEST cost (highest priority) of all actions, tied with AttackDistractedPlayerAction.
+## When the player is visible, close, and vulnerable (reloading or out of ammo),
+## this action takes precedence over all other behaviors, forcing an immediate attack.
+## This punishes players for reloading at unsafe times or running out of ammo near enemies.
+class AttackVulnerablePlayerAction extends GOAPAction:
+	func _init() -> void:
+		super._init("attack_vulnerable_player", 0.1)  # Very low cost = highest priority
+		preconditions = {
+			"player_visible": true,
+			"player_close": true
+		}
+		effects = {
+			"player_engaged": true
+		}
+
+	func get_cost(_agent: Node, world_state: Dictionary) -> float:
+		# Check if player is vulnerable (reloading or empty ammo)
+		var player_reloading: bool = world_state.get("player_reloading", false)
+		var player_ammo_empty: bool = world_state.get("player_ammo_empty", false)
+		var player_close: bool = world_state.get("player_close", false)
+
+		# Only give highest priority if player is vulnerable AND close
+		if (player_reloading or player_ammo_empty) and player_close:
+			return 0.05  # Absolute highest priority, same as distracted player
+		return 100.0  # Very high cost if player is not vulnerable
+
+
 ## Create and return all enemy actions.
 static func create_all_actions() -> Array[GOAPAction]:
 	var actions: Array[GOAPAction] = []
@@ -240,4 +268,5 @@ static func create_all_actions() -> Array[GOAPAction]:
 	actions.append(PursuePlayerAction.new())
 	actions.append(AssaultPlayerAction.new())
 	actions.append(AttackDistractedPlayerAction.new())
+	actions.append(AttackVulnerablePlayerAction.new())
 	return actions

@@ -125,6 +125,11 @@ func _setup_player_tracking() -> void:
 			_player.ammo_changed.connect(_on_player_ammo_changed)
 		if _player.has_signal("ammo_depleted"):
 			_player.ammo_depleted.connect(_on_player_ammo_depleted)
+		# Connect reload signals for enemy aggression behavior
+		if _player.has_signal("reload_started"):
+			_player.reload_started.connect(_on_player_reload_started)
+		if _player.has_signal("reload_completed"):
+			_player.reload_completed.connect(_on_player_reload_completed)
 		# Initial ammo display
 		if _player.has_method("get_current_ammo") and _player.has_method("get_max_ammo"):
 			_update_ammo_label(_player.get_current_ammo(), _player.get_max_ammo())
@@ -273,9 +278,50 @@ func _on_magazines_changed(magazine_ammo_counts: Array) -> void:
 
 
 ## Called when player runs out of ammo (GDScript Player).
+## This also notifies nearby enemies that the player tried to shoot with empty weapon.
 func _on_player_ammo_depleted() -> void:
+	# Notify all enemies that player tried to shoot with empty weapon
+	_broadcast_player_ammo_empty(true)
+
+	# Show game over if enemies remain
 	if _current_enemy_count > 0 and not _game_over_shown:
 		_show_game_over_message()
+
+
+## Called when player starts reloading.
+## Notifies nearby enemies that player is vulnerable.
+func _on_player_reload_started() -> void:
+	_broadcast_player_reloading(true)
+
+
+## Called when player finishes reloading.
+## Clears the reloading state for all enemies.
+func _on_player_reload_completed() -> void:
+	_broadcast_player_reloading(false)
+	# Also clear ammo empty state since player now has ammo
+	_broadcast_player_ammo_empty(false)
+
+
+## Broadcast player reloading state to all enemies.
+func _broadcast_player_reloading(is_reloading: bool) -> void:
+	var enemies_node := get_node_or_null("Environment/Enemies")
+	if enemies_node == null:
+		return
+
+	for enemy in enemies_node.get_children():
+		if enemy.has_method("set_player_reloading"):
+			enemy.set_player_reloading(is_reloading)
+
+
+## Broadcast player ammo empty state to all enemies.
+func _broadcast_player_ammo_empty(is_empty: bool) -> void:
+	var enemies_node := get_node_or_null("Environment/Enemies")
+	if enemies_node == null:
+		return
+
+	for enemy in enemies_node.get_children():
+		if enemy.has_method("set_player_ammo_empty"):
+			enemy.set_player_ammo_empty(is_empty)
 
 
 ## Called when player dies.
