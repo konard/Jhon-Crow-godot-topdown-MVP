@@ -189,6 +189,9 @@ signal ammo_depleted
 ## Debug label for showing current AI state above the enemy.
 @onready var _debug_label: Label = $DebugLabel
 
+## NavigationAgent2D for pathfinding around obstacles.
+@onready var _nav_agent: NavigationAgent2D = $NavigationAgent2D
+
 ## Wall detection raycasts for obstacle avoidance (created at runtime).
 var _wall_raycasts: Array[RayCast2D] = []
 
@@ -1092,8 +1095,7 @@ func _process_seeking_cover_state(_delta: float) -> void:
 		return
 
 	# Move towards cover
-	var direction := (_cover_position - global_position).normalized()
-	var distance := global_position.distance_to(_cover_position)
+	var distance: float = global_position.distance_to(_cover_position)
 
 	if distance < 10.0:
 		# Reached the cover position, but still visible - try to find better cover
@@ -1105,11 +1107,8 @@ func _process_seeking_cover_state(_delta: float) -> void:
 				_transition_to_combat()
 				return
 
-	# Apply enhanced wall avoidance with dynamic weighting
-	direction = _apply_wall_avoidance(direction)
-
-	velocity = direction * combat_move_speed
-	rotation = direction.angle()
+	# Use navigation-based pathfinding to move toward cover
+	_move_to_target_nav(_cover_position, combat_move_speed)
 
 	# Can still shoot while moving to cover (only after detection delay)
 	if _can_see_player and _player and _detection_delay_elapsed and _shoot_timer >= shoot_cooldown:
@@ -1283,67 +1282,9 @@ func _process_flanking_state(delta: float) -> void:
 		_transition_to_combat()
 		return
 
-	# Check if we have direct line of sight to flank target (no obstacles)
-	if _has_clear_path_to(_flank_target):
-		# Direct path is clear - move directly toward flank target
-		var direction := (_flank_target - global_position).normalized()
-		direction = _apply_wall_avoidance(direction)
-		velocity = direction * combat_move_speed
-		rotation = direction.angle()
-		_has_flank_cover = false
-		return
-
-	# Path is blocked - use cover-to-cover movement
-
-	# If we're at a cover position, wait briefly before moving to next
-	if _has_valid_cover and not _has_flank_cover:
-		_flank_cover_wait_timer += delta
-		velocity = Vector2.ZERO
-
-		if _flank_cover_wait_timer >= FLANK_COVER_WAIT_DURATION:
-			# Done waiting, find next cover toward flank target
-			_find_flank_cover_toward_target()
-			if not _has_flank_cover:
-				_log_debug("No flank cover found, attempting direct movement")
-				# No cover found - try direct movement with enhanced wall avoidance
-				var direction := (_flank_target - global_position).normalized()
-				direction = _apply_wall_avoidance(direction)
-				velocity = direction * combat_move_speed
-				rotation = direction.angle()
-				# Invalidate current cover to trigger new search next frame
-				_has_valid_cover = false
-		return
-
-	# If we have a flank cover target, move toward it
-	if _has_flank_cover:
-		var direction := (_flank_next_cover - global_position).normalized()
-		var distance := global_position.distance_to(_flank_next_cover)
-
-		# Check if we've reached the flank cover
-		if distance < 15.0:
-			_log_debug("Reached flank cover at distance %.1f" % distance)
-			_has_flank_cover = false
-			_flank_cover_wait_timer = 0.0
-			_cover_position = _flank_next_cover
-			_has_valid_cover = true
-			# Start waiting at this cover
-			return
-
-		# Apply enhanced wall avoidance with dynamic weighting
-		direction = _apply_wall_avoidance(direction)
-
-		velocity = direction * combat_move_speed
-		rotation = direction.angle()
-		return
-
-	# No cover and no flank cover target - find initial flank cover
-	_find_flank_cover_toward_target()
-	if not _has_flank_cover:
-		# Can't find cover, try direct movement with wall avoidance
-		var direction := (_flank_target - global_position).normalized()
-		direction = _apply_wall_avoidance(direction)
-		velocity = direction * combat_move_speed
-		rotation = direction.angle()
+	# Use navigation-based pathfinding to move toward flank target
+	# This handles obstacles properly unlike direct movement with wall avoidance
+	_move_to_target_nav(_flank_target, combat_move_speed)
 
 
 ## Process SUPPRESSED state - staying in cover under fire.
@@ -1444,7 +1385,7 @@ func _process_retreating_state(delta: float) -> void:
 
 ## Process FULL_HP retreat: walk backwards facing player, shoot with reduced accuracy,
 ## periodically turn toward cover.
-func _process_retreat_full_hp(delta: float, direction_to_cover: Vector2) -> void:
+func _process_retreat_full_hp(delta: float, _direction_to_cover: Vector2) -> void:
 	_retreat_turn_timer += delta
 
 	if _retreat_turning_to_cover:
@@ -1453,10 +1394,8 @@ func _process_retreat_full_hp(delta: float, direction_to_cover: Vector2) -> void
 			_retreat_turning_to_cover = false
 			_retreat_turn_timer = 0.0
 
-		# Face cover and move toward it
-		rotation = direction_to_cover.angle()
-		direction_to_cover = _apply_wall_avoidance(direction_to_cover)
-		velocity = direction_to_cover * combat_move_speed
+		# Use navigation to move toward cover
+		_move_to_target_nav(_cover_position, combat_move_speed)
 	else:
 		# Face player and back up (walk backwards)
 		if _retreat_turn_timer >= RETREAT_TURN_INTERVAL:
@@ -1466,17 +1405,15 @@ func _process_retreat_full_hp(delta: float, direction_to_cover: Vector2) -> void
 
 		if _player:
 			# Face the player
-			var direction_to_player := (_player.global_position - global_position).normalized()
 			_aim_at_player()
 
-			# Move backwards (opposite of player direction = toward cover generally)
-			# Use the negative of the direction we're facing for "backing up"
-			var move_direction := -direction_to_player
-
-			# Apply enhanced wall avoidance with dynamic weighting
-			move_direction = _apply_wall_avoidance(move_direction)
-
-			velocity = move_direction * combat_move_speed * 0.7  # Slower when backing up
+			# Use navigation to move toward cover but keep facing player
+			var nav_direction: Vector2 = _get_nav_direction_to(_cover_position)
+			if nav_direction != Vector2.ZERO:
+				nav_direction = _apply_wall_avoidance(nav_direction)
+				velocity = nav_direction * combat_move_speed * 0.7  # Slower when backing up
+			else:
+				velocity = Vector2.ZERO
 
 			# Shoot with reduced accuracy (only after detection delay)
 			if _can_see_player and _detection_delay_elapsed and _shoot_timer >= shoot_cooldown:
@@ -1502,29 +1439,30 @@ func _process_retreat_one_hit(delta: float, direction_to_cover: Vector2) -> void
 
 		# Gradually turn from player to cover during burst
 		if _player:
-			var direction_to_player := (_player.global_position - global_position).normalized()
+			var direction_to_player: Vector2 = (_player.global_position - global_position).normalized()
 			var target_angle: float
 
 			# Interpolate rotation from player direction to cover direction
-			var burst_progress := 1.0 - (float(_retreat_burst_remaining) / 4.0)
-			var player_angle := direction_to_player.angle()
-			var cover_angle := direction_to_cover.angle()
+			var burst_progress: float = 1.0 - (float(_retreat_burst_remaining) / 4.0)
+			var player_angle: float = direction_to_player.angle()
+			var cover_direction: Vector2 = (_cover_position - global_position).normalized()
+			var cover_angle: float = cover_direction.angle()
 			target_angle = lerp_angle(player_angle, cover_angle, burst_progress * 0.7)
 			rotation = target_angle
 
-		# Move toward cover (slower during burst) with enhanced wall avoidance
-		direction_to_cover = _apply_wall_avoidance(direction_to_cover)
-		velocity = direction_to_cover * combat_move_speed * 0.5
+		# Use navigation to move toward cover (slower during burst)
+		var nav_direction: Vector2 = _get_nav_direction_to(_cover_position)
+		if nav_direction != Vector2.ZERO:
+			nav_direction = _apply_wall_avoidance(nav_direction)
+			velocity = nav_direction * combat_move_speed * 0.5
 
 		# Check if burst is complete
 		if _retreat_burst_remaining <= 0:
 			_retreat_burst_complete = true
 			_log_debug("ONE_HIT retreat: burst complete, now running to cover")
 	else:
-		# After burst, run to cover without shooting
-		rotation = direction_to_cover.angle()
-		direction_to_cover = _apply_wall_avoidance(direction_to_cover)
-		velocity = direction_to_cover * combat_move_speed
+		# After burst, run to cover without shooting using navigation
+		_move_to_target_nav(_cover_position, combat_move_speed)
 
 
 ## Process MULTIPLE_HITS retreat: quick burst of 2-4 shots then run to cover (same as ONE_HIT).
@@ -1593,11 +1531,8 @@ func _process_pursuing_state(delta: float) -> void:
 					_pursuit_approaching = false
 					return
 
-			# Apply enhanced wall avoidance and move toward player
-			direction = _apply_wall_avoidance(direction)
-
-			velocity = direction * combat_move_speed
-			rotation = direction.angle()
+			# Use navigation-based pathfinding to move toward player
+			_move_to_target_nav(_player.global_position, combat_move_speed)
 		return
 
 	# Check if we're waiting at cover
@@ -1635,8 +1570,7 @@ func _process_pursuing_state(delta: float) -> void:
 
 	# If we have a pursuit cover target, move toward it
 	if _has_pursuit_cover:
-		var direction := (_pursuit_next_cover - global_position).normalized()
-		var distance := global_position.distance_to(_pursuit_next_cover)
+		var distance: float = global_position.distance_to(_pursuit_next_cover)
 
 		# Check if we've reached the pursuit cover
 		# Note: We only check distance here, NOT visibility from player.
@@ -1651,11 +1585,8 @@ func _process_pursuing_state(delta: float) -> void:
 			# Start waiting at this cover
 			return
 
-		# Apply enhanced wall avoidance with dynamic weighting
-		direction = _apply_wall_avoidance(direction)
-
-		velocity = direction * combat_move_speed
-		rotation = direction.angle()
+		# Use navigation-based pathfinding to move toward pursuit cover
+		_move_to_target_nav(_pursuit_next_cover, combat_move_speed)
 		return
 
 	# No cover and no pursuit target - find initial pursuit cover
@@ -1693,13 +1624,10 @@ func _process_assault_state(delta: float) -> void:
 
 	# Move to cover position first
 	if _has_valid_cover and not _in_assault:
-		var distance_to_cover := global_position.distance_to(_cover_position)
+		var distance_to_cover: float = global_position.distance_to(_cover_position)
 		if distance_to_cover > 15.0 and _is_visible_from_player():
-			# Still need to reach cover
-			var direction := (_cover_position - global_position).normalized()
-			direction = _apply_wall_avoidance(direction)
-			velocity = direction * combat_move_speed
-			rotation = direction.angle()
+			# Use navigation-based pathfinding to reach cover
+			_move_to_target_nav(_cover_position, combat_move_speed)
 			return
 
 	# At cover, wait for assault timer
@@ -1725,15 +1653,10 @@ func _process_assault_state(delta: float) -> void:
 
 	# Assault phase - rush the player while shooting
 	if _assault_ready and _player:
-		var direction_to_player := (_player.global_position - global_position).normalized()
-		var distance_to_player := global_position.distance_to(_player.global_position)
+		var distance_to_player: float = global_position.distance_to(_player.global_position)
 
-		# Apply enhanced wall avoidance with dynamic weighting
-		direction_to_player = _apply_wall_avoidance(direction_to_player)
-
-		# Rush at full speed
-		velocity = direction_to_player * combat_move_speed
-		rotation = direction_to_player.angle()
+		# Use navigation-based pathfinding to rush player
+		_move_to_target_nav(_player.global_position, combat_move_speed)
 
 		# Update detection delay timer
 		if not _detection_delay_elapsed:
@@ -3513,3 +3436,62 @@ func _draw() -> void:
 			draw_line(flank_pos + Vector2(8, 0), flank_pos + Vector2(0, 8), color_flank, 2.0)
 			draw_line(flank_pos + Vector2(0, 8), flank_pos + Vector2(-8, 0), color_flank, 2.0)
 			draw_line(flank_pos + Vector2(-8, 0), flank_pos + Vector2(0, -8), color_flank, 2.0)
+
+
+## Set a navigation target and get the direction to follow the path.
+## Uses NavigationAgent2D for proper pathfinding around obstacles.
+## Returns the direction to move, or Vector2.ZERO if navigation is not available.
+func _get_nav_direction_to(target_pos: Vector2) -> Vector2:
+	if _nav_agent == null:
+		# Fall back to direct movement if no navigation agent
+		return (target_pos - global_position).normalized()
+
+	# Set the target for navigation
+	_nav_agent.target_position = target_pos
+
+	# Check if navigation is finished
+	if _nav_agent.is_navigation_finished():
+		return Vector2.ZERO
+
+	# Get the next position in the path
+	var next_pos: Vector2 = _nav_agent.get_next_path_position()
+
+	# Calculate direction to next path position
+	var direction: Vector2 = (next_pos - global_position).normalized()
+	return direction
+
+
+## Move toward a target position using NavigationAgent2D pathfinding.
+## This is the primary movement function that should be used instead of direct velocity assignment.
+## Returns true if movement was applied, false if target was reached or navigation unavailable.
+func _move_to_target_nav(target_pos: Vector2, speed: float) -> bool:
+	var direction: Vector2 = _get_nav_direction_to(target_pos)
+
+	if direction == Vector2.ZERO:
+		velocity = Vector2.ZERO
+		return false
+
+	# Apply additional wall avoidance on top of navigation path for tight corners
+	direction = _apply_wall_avoidance(direction)
+
+	velocity = direction * speed
+	rotation = direction.angle()
+	return true
+
+
+## Check if the navigation agent has a valid path to the target.
+func _has_nav_path_to(target_pos: Vector2) -> bool:
+	if _nav_agent == null:
+		return false
+
+	_nav_agent.target_position = target_pos
+	return not _nav_agent.is_navigation_finished()
+
+
+## Get distance to target along the navigation path (more accurate than straight-line).
+func _get_nav_path_distance(target_pos: Vector2) -> float:
+	if _nav_agent == null:
+		return global_position.distance_to(target_pos)
+
+	_nav_agent.target_position = target_pos
+	return _nav_agent.distance_to_target()

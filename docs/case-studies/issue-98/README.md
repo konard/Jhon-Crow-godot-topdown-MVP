@@ -4,7 +4,7 @@
 
 This case study addresses issue #98 which requests tactical movement for enemies, along with improvements to wall/passage detection to prevent enemies from sticking to walls or attempting to walk through them.
 
-**Status**: Second implementation attempt COMPLETE - with proper type annotations.
+**Status**: Third implementation attempt COMPLETE - NavMesh integration for proper pathfinding.
 
 ---
 
@@ -252,3 +252,139 @@ Run Unit Tests	Import project assets	2026-01-18T05:01:29.6580434Z           at: 
 Run Unit Tests	Import project assets	2026-01-18T05:01:29.6589037Z ERROR: Failed to load script "res://scripts/objects/enemy.gd" with error "Parse error".
 Run Unit Tests	Import project assets	2026-01-18T05:01:29.6589717Z    at: load (modules/gdscript/gdscript.cpp:2936)
 ```
+
+---
+
+## Third Implementation Attempt: NavMesh Integration
+
+### User Feedback on Second Implementation
+
+After the second implementation was successful from a code loading perspective, the repository owner provided additional feedback:
+
+> "используй NavMesh для правильной ходьбы. сделай так, чтоб сократить топтание на месте (сейчас враги очень плохо выходят на игрока)."
+
+**Translation**:
+> "Use NavMesh for proper walking. Reduce enemies stomping in place (currently enemies approach the player very poorly)."
+
+A game log file was provided: `game_log_20260118_083404.txt`
+
+### Game Log Analysis
+
+Analysis of the provided game log revealed a clear pattern of **"stomping in place"** behavior:
+
+```
+2026-01-18 08:35:11,375 - Enemy7 - State: PURSUING, Target: Player
+2026-01-18 08:35:11,391 - Enemy7 - Position: (1412.55, 824.12)
+2026-01-18 08:35:11,408 - Enemy7 - State: FLANKING, Target: Player
+2026-01-18 08:35:11,424 - Enemy7 - Position: (1412.93, 824.15)
+2026-01-18 08:35:11,441 - Enemy7 - State: COMBAT, Target: Player
+... [state cycling continues with minimal position change]
+```
+
+**Key Observations**:
+1. Enemies stuck at approximately position (1412-1591, 824)
+2. Rapid state cycling: PURSUING → FLANKING → COMBAT → PURSUING
+3. Position changes of only ~0.3-0.4 pixels between state updates
+4. Multiple enemies affected (Enemy7, Enemy10)
+
+### Root Cause Analysis
+
+The problem stems from the **raycast-based wall avoidance** approach:
+
+1. **Limited Pathfinding**: Raycasts only detect immediate obstacles, not optimal paths around complex structures
+2. **Local Minima**: Enemies get trapped against walls when the player is on the other side
+3. **State Thrashing**: Unable to progress, enemies rapidly switch states looking for alternatives
+4. **Wall Geometry**: The building has L-shaped corridors and room layouts that require planning ahead
+
+The existing wall avoidance code (`_check_wall_ahead()`, `_apply_wall_avoidance()`) works for simple obstacles but fails in complex indoor environments where enemies need to navigate around corners and through doorways.
+
+### Solution: NavigationAgent2D Integration
+
+Instead of relying solely on raycast-based wall avoidance, the solution integrates Godot's **NavigationServer2D** pathfinding system.
+
+**Components Added**:
+
+1. **NavigationAgent2D node to Enemy scene** (`scenes/objects/Enemy.tscn`):
+   ```
+   [node name="NavigationAgent2D" type="NavigationAgent2D" parent="."]
+   path_desired_distance = 4.0
+   target_desired_distance = 10.0
+   avoidance_enabled = true
+   radius = 24.0
+   neighbor_distance = 100.0
+   max_neighbors = 5
+   time_horizon_agents = 1.0
+   time_horizon_obstacles = 1.0
+   max_speed = 320.0
+   ```
+
+2. **NavigationRegion2D with NavigationPolygon to BuildingLevel** (`scenes/levels/BuildingLevel.tscn`):
+   ```
+   [node name="NavigationRegion2D" type="NavigationRegion2D" parent="."]
+   navigation_polygon = SubResource("NavigationPolygon_level")
+   ```
+   - Covers floor area (64, 64) to (2464, 2064)
+   - Uses `parsed_collision_mask = 4` to carve out walls
+   - Agent radius = 24.0 (matches enemy collision)
+
+3. **Runtime navigation baking in building_level.gd**:
+   ```gdscript
+   func _setup_navigation() -> void:
+       var nav_region = get_node_or_null("NavigationRegion2D")
+       var nav_poly = nav_region.navigation_polygon
+       # Bake using NavigationServer2D.parse_source_geometry_data()
+       # and NavigationServer2D.bake_from_source_geometry_data()
+   ```
+
+4. **Navigation helper functions in enemy.gd**:
+   ```gdscript
+   @onready var _nav_agent: NavigationAgent2D = $NavigationAgent2D
+
+   func _get_nav_direction_to(target_pos: Vector2) -> Vector2:
+       # Uses NavigationAgent2D to get path to target
+
+   func _move_to_target_nav(target_pos: Vector2, speed: float) -> bool:
+       # Primary movement function using navigation path
+       # Still applies wall_avoidance for tight corners
+
+   func _has_nav_path_to(target_pos: Vector2) -> bool:
+       # Check if valid path exists
+
+   func _get_nav_path_distance(target_pos: Vector2) -> float:
+       # Get path distance (more accurate than straight line)
+   ```
+
+5. **Updated movement in all states**:
+   - SEEKING_COVER: Uses `_move_to_target_nav()` for cover position
+   - FLANKING: Uses `_move_to_target_nav()` for flank target
+   - RETREATING: Uses `_move_to_target_nav()` for retreat positions
+   - ASSAULT: Uses `_move_to_target_nav()` for player approach
+   - PURSUING: Uses `_move_to_target_nav()` for cover movement and direct approach
+
+### Expected Improvements
+
+1. **Proper Path Planning**: NavigationAgent2D calculates complete paths around obstacles
+2. **No Local Minima**: Enemies will find doors and corridors automatically
+3. **Reduced State Thrashing**: Smooth movement should stabilize state transitions
+4. **Agent Avoidance**: Built-in avoidance between multiple agents
+5. **Performance**: Navigation mesh is baked once, path queries are fast
+
+### Files Modified in This Implementation
+
+1. `scenes/objects/Enemy.tscn` - Added NavigationAgent2D node
+2. `scripts/objects/enemy.gd` - Added `_nav_agent`, navigation helper functions, updated movement in all states
+3. `scenes/levels/BuildingLevel.tscn` - Added NavigationRegion2D and NavigationPolygon
+4. `scripts/levels/building_level.gd` - Added `_setup_navigation()` for runtime baking
+5. `docs/case-studies/issue-98/README.md` - This update
+
+---
+
+## Updated Timeline
+
+- **2026-01-18 04:50**: Issue #98 created
+- **2026-01-18 05:00**: First implementation (commit 0b694b7) - GDScript parse error
+- **2026-01-18 05:14**: Changes reverted
+- **2026-01-18 06:XX**: Second implementation with proper types - Code works but "stomping in place"
+- **2026-01-18 08:34**: User provides game log showing stomping behavior
+- **2026-01-18 08:43**: Game log downloaded to case study folder
+- **2026-01-18 XX:XX**: Third implementation - NavMesh integration for proper pathfinding
