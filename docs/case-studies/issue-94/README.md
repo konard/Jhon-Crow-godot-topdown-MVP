@@ -225,14 +225,114 @@ The `ci-logs/` directory contains the CI build logs collected during the investi
 
 These logs were essential for discovering the GDScript parse errors that caused the AI to completely fail in exported builds.
 
+## Fourth Implementation: Cover Exit Loop Fix
+
+### Problem Discovery (2026-01-18)
+
+User reported that enemies were still stuck in cover, cycling through COMBAT → SEEKING_COVER → IN_COVER repeatedly without actually exiting cover to engage the player.
+
+**User Feedback (Russian):**
+> "сейчас враги в COMBAT состоянии не выходят из-за укрытия, просто перезапускается таймер по кругу.
+> а должны выходить на ту линию, с которой в последний раз можно было стрелять в игрока"
+
+**Translation:**
+> "Currently enemies in COMBAT state don't exit cover, the timer just restarts in a loop.
+> They should exit to the line from which they could last shoot at the player."
+
+### Root Cause Analysis
+
+The `_is_bullet_spawn_clear()` check correctly prevented shooting into walls, but created a new issue:
+
+1. Enemy in IN_COVER state sees player and transitions to COMBAT
+2. In COMBAT state, `_is_bullet_spawn_clear()` returns false (wall blocking bullet spawn)
+3. Enemy tries to sidestep to find clear shot position
+4. Sidestep fails (no clear position nearby due to wall geometry)
+5. After timeout, enemy transitions to SEEKING_COVER or PURSUING
+6. PURSUING leads back to IN_COVER
+7. Loop repeats indefinitely
+
+**The core issue:** When the enemy can't find a clear shot by sidestepping, they need to **move out from cover** entirely, not just cycle back to cover.
+
+### Solution Implemented
+
+Added a new "clear shot seeking" phase to the COMBAT state:
+
+```gdscript
+## --- Clear Shot Movement (move out from cover to get clear shot) ---
+var _clear_shot_target: Vector2 = Vector2.ZERO
+var _seeking_clear_shot: bool = false
+var _clear_shot_timer: float = 0.0
+const CLEAR_SHOT_MAX_TIME: float = 3.0
+const CLEAR_SHOT_EXIT_DISTANCE: float = 60.0
+```
+
+**New behavior flow:**
+
+1. Enemy enters COMBAT from IN_COVER
+2. `_is_bullet_spawn_clear()` returns false
+3. **NEW:** Enemy enters "seeking clear shot" phase
+4. **NEW:** `_calculate_clear_shot_exit_position()` calculates a target position that:
+   - Is perpendicular to the player direction (moves around cover edge)
+   - Has a clear path from current position
+   - Would allow the bullet spawn point to be unobstructed
+5. Enemy moves toward that target position
+6. When bullet spawn becomes clear, enemy immediately enters exposed shooting phase
+7. After shooting duration (2-3s), enemy returns to cover
+
+**Fallback behavior:**
+- If no clear shot found after 3 seconds, enemy transitions to FLANKING state
+- FLANKING attempts to navigate around obstacles from a different angle
+
+### Debug Visualization Added
+
+Added visual debug drawing when F7 debug mode is enabled:
+
+- **Red line:** Direction to player (when visible)
+- **Green circle:** Bullet spawn point (if clear)
+- **Red X:** Bullet spawn point (if blocked)
+- **Cyan line + circle:** Path to cover position
+- **Yellow line + triangle:** Path to clear shot target (when seeking clear shot)
+- **Orange line + circle:** Path to pursuit cover
+- **Magenta line + diamond/circle:** Path to flank target/cover
+
+The debug label also shows:
+- `(SEEK SHOT X.Xs)` - Time remaining in clear shot seeking phase
+- `(EXPOSED X.Xs)` - Time remaining in exposed shooting phase
+- `(APPROACH)` - Approaching player
+
+### Files Modified
+
+- `scripts/objects/enemy.gd`:
+  - Added clear shot seeking variables (~10 lines)
+  - Rewrote `_process_combat_state()` to include clear shot seeking phase (~100 lines)
+  - Added `_calculate_clear_shot_exit_position()` function (~50 lines)
+  - Added `_draw()` function for debug visualization (~70 lines)
+  - Updated `_transition_to_combat()` to reset clear shot variables (~3 lines)
+  - Updated `_update_debug_label()` to show clear shot seeking state (~3 lines)
+
+### Testing Plan
+
+- [ ] Enemies should move out from cover to find clear shot position
+- [ ] Debug mode (F7) should show:
+  - Yellow triangle at clear shot target
+  - Red X at bullet spawn point when blocked
+  - Green circle at bullet spawn point when clear
+- [ ] Enemies should shoot when they find a clear position
+- [ ] Enemies should return to cover after shooting for 2-3 seconds
+- [ ] Enemies should transition to FLANKING if no clear shot found
+
+## Collected User Log Files
+
+The `user-logs/` directory contains game log files uploaded by users:
+- `game_log_20260118_045534.txt` - Log showing enemy state cycling issue
+
 ## References
 
 - Issue: https://github.com/Jhon-Crow/godot-topdown-MVP/issues/94
 - Pull Request: https://github.com/Jhon-Crow/godot-topdown-MVP/pull/95
 - Main file: `scripts/objects/enemy.gd`
 - Key functions:
-  - `_shoot()` - Line 2395
-  - `_should_shoot_at_target()` - Line 1948
-  - `_is_bullet_spawn_clear()` - Line 1923 (NEW)
-  - `_is_shot_clear_of_cover()` - Line 1893
-  - `_find_sidestep_direction_for_clear_shot()` - Line 2000 (NEW)
+  - `_process_combat_state()` - Lines 779-966 (rewritten)
+  - `_calculate_clear_shot_exit_position()` - Lines 969-1019 (NEW)
+  - `_is_bullet_spawn_clear()` - Line 2007 (was 1923)
+  - `_draw()` - Lines 3140-3205 (NEW debug visualization)

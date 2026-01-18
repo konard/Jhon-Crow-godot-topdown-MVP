@@ -414,6 +414,22 @@ var _continuous_visibility_timer: float = 0.0
 ## Used to determine if lead prediction should be enabled.
 var _player_visibility_ratio: float = 0.0
 
+## --- Clear Shot Movement (move out from cover to get clear shot) ---
+## Target position to move to for getting a clear shot.
+var _clear_shot_target: Vector2 = Vector2.ZERO
+
+## Whether we're currently moving to find a clear shot position.
+var _seeking_clear_shot: bool = false
+
+## Timer for how long we've been trying to find a clear shot.
+var _clear_shot_timer: float = 0.0
+
+## Maximum time to spend finding a clear shot before giving up (seconds).
+const CLEAR_SHOT_MAX_TIME: float = 3.0
+
+## Distance to move when exiting cover to find a clear shot.
+const CLEAR_SHOT_EXIT_DISTANCE: float = 60.0
+
 
 
 func _ready() -> void:
@@ -592,6 +608,10 @@ func _physics_process(delta: float) -> void:
 	# Update debug label if enabled
 	_update_debug_label()
 
+	# Request redraw for debug visualization
+	if debug_label_enabled:
+		queue_redraw()
+
 	move_and_slide()
 
 
@@ -756,7 +776,8 @@ func _process_idle_state(delta: float) -> void:
 
 
 ## Process COMBAT state - approach player for direct contact, shoot for 2-3 seconds, return to cover.
-## Implements the combat cycling behavior: approach -> exposed shooting -> return to cover.
+## Implements the combat cycling behavior: exit cover -> exposed shooting -> return to cover.
+## Phase 0 (seeking clear shot): If bullet spawn blocked, move out from cover to find clear shot.
 ## Phase 1 (approaching): Move toward player to get into direct contact range.
 ## Phase 2 (exposed): Stand and shoot for 2-3 seconds.
 ## Phase 3: Return to cover via SEEKING_COVER state.
@@ -765,6 +786,7 @@ func _process_combat_state(delta: float) -> void:
 	if _under_fire and enable_cover:
 		_combat_exposed = false
 		_combat_approaching = false
+		_seeking_clear_shot = false
 		_transition_to_retreating()
 		return
 
@@ -774,6 +796,7 @@ func _process_combat_state(delta: float) -> void:
 		_log_debug("Multiple enemies in combat (%d), transitioning to ASSAULT" % enemies_in_combat)
 		_combat_exposed = false
 		_combat_approaching = false
+		_seeking_clear_shot = false
 		_transition_to_assault()
 		return
 
@@ -781,6 +804,7 @@ func _process_combat_state(delta: float) -> void:
 	if not _can_see_player:
 		_combat_exposed = false
 		_combat_approaching = false
+		_seeking_clear_shot = false
 		_log_debug("Lost sight of player in COMBAT, transitioning to PURSUING")
 		_transition_to_pursuing()
 		return
@@ -802,8 +826,12 @@ func _process_combat_state(delta: float) -> void:
 	if _player:
 		distance_to_player = global_position.distance_to(_player.global_position)
 
-	# Determine if we should be in approach phase or exposed shooting phase
-	var in_direct_contact := distance_to_player <= COMBAT_DIRECT_CONTACT_DISTANCE
+	# Check if we have a clear shot (no wall blocking bullet spawn)
+	var direction_to_player := Vector2.ZERO
+	var has_clear_shot := true
+	if _player:
+		direction_to_player = (_player.global_position - global_position).normalized()
+		has_clear_shot = _is_bullet_spawn_clear(direction_to_player)
 
 	# If already exposed (shooting phase), handle shooting and timer
 	if _combat_exposed:
@@ -818,20 +846,18 @@ func _process_combat_state(delta: float) -> void:
 			_transition_to_seeking_cover()
 			return
 
-		# Check if we have a clear shot - if not, move sideways to find one
-		if _player:
-			var direction_to_player := (_player.global_position - global_position).normalized()
-			if not _is_bullet_spawn_clear(direction_to_player):
-				# Bullet spawn is blocked - move sideways to find a clear shot position
-				var sidestep_dir := _find_sidestep_direction_for_clear_shot(direction_to_player)
-				if sidestep_dir != Vector2.ZERO:
-					velocity = sidestep_dir * combat_move_speed * 0.7
-					rotation = direction_to_player.angle()  # Keep facing player while sidestepping
-					_log_debug("COMBAT: sidestepping to find clear shot")
-				else:
-					# No clear sidestep found - stay put but don't waste time
-					velocity = Vector2.ZERO
-				return
+		# Check if we still have a clear shot - if not, move sideways to find one
+		if _player and not has_clear_shot:
+			# Bullet spawn is blocked - move sideways to find a clear shot position
+			var sidestep_dir := _find_sidestep_direction_for_clear_shot(direction_to_player)
+			if sidestep_dir != Vector2.ZERO:
+				velocity = sidestep_dir * combat_move_speed * 0.7
+				rotation = direction_to_player.angle()  # Keep facing player while sidestepping
+				_log_debug("COMBAT exposed: sidestepping to maintain clear shot")
+			else:
+				# No sidestep works - stay still, the shot might clear up
+				velocity = Vector2.ZERO
+			return
 
 		# In exposed phase with clear shot, stand still and shoot
 		velocity = Vector2.ZERO
@@ -844,15 +870,69 @@ func _process_combat_state(delta: float) -> void:
 				_shoot_timer = 0.0
 		return
 
-	# Not in exposed phase yet - determine if we need to approach or can start shooting
-	# Check if we have a clear shot (no wall blocking bullet spawn)
-	var has_clear_shot := true
-	if _player:
-		var direction_to_player := (_player.global_position - global_position).normalized()
-		has_clear_shot = _is_bullet_spawn_clear(direction_to_player)
+	# --- CLEAR SHOT SEEKING PHASE ---
+	# If bullet spawn is blocked and we're not already exposed, we need to move out from cover
+	if not has_clear_shot and _player:
+		# Start seeking clear shot if not already doing so
+		if not _seeking_clear_shot:
+			_seeking_clear_shot = true
+			_clear_shot_timer = 0.0
+			# Calculate target position: move perpendicular to player direction (around cover edge)
+			_clear_shot_target = _calculate_clear_shot_exit_position(direction_to_player)
+			_log_debug("COMBAT: bullet spawn blocked, seeking clear shot at %s" % _clear_shot_target)
 
-	# Only enter exposed phase if we have a clear shot (or reached max approach time and still trying)
-	if (in_direct_contact or _combat_approach_timer >= COMBAT_APPROACH_MAX_TIME) and has_clear_shot:
+		_clear_shot_timer += delta
+
+		# Check if we've exceeded the max time trying to find a clear shot
+		if _clear_shot_timer >= CLEAR_SHOT_MAX_TIME:
+			_log_debug("COMBAT: clear shot timeout, trying flanking")
+			_seeking_clear_shot = false
+			_clear_shot_timer = 0.0
+			# Try flanking to get around the obstacle
+			if enable_flanking:
+				_transition_to_flanking()
+			else:
+				_transition_to_pursuing()
+			return
+
+		# Move toward the clear shot target position
+		var distance_to_target := global_position.distance_to(_clear_shot_target)
+		if distance_to_target > 15.0:
+			var move_direction := (_clear_shot_target - global_position).normalized()
+
+			# Apply wall avoidance
+			var avoidance := _check_wall_ahead(move_direction)
+			if avoidance != Vector2.ZERO:
+				move_direction = (move_direction * 0.5 + avoidance * 0.5).normalized()
+
+			velocity = move_direction * combat_move_speed
+			rotation = direction_to_player.angle()  # Keep facing player
+
+			# Check if the new position now has a clear shot
+			if _is_bullet_spawn_clear(direction_to_player):
+				_log_debug("COMBAT: found clear shot position while moving")
+				_seeking_clear_shot = false
+				_clear_shot_timer = 0.0
+				# Continue to exposed phase check below
+			else:
+				return  # Keep moving toward target
+		else:
+			# Reached target but still no clear shot - recalculate target
+			_log_debug("COMBAT: reached target but no clear shot, recalculating")
+			_clear_shot_target = _calculate_clear_shot_exit_position(direction_to_player)
+			return
+
+	# Reset seeking state if we now have a clear shot
+	if _seeking_clear_shot and has_clear_shot:
+		_log_debug("COMBAT: clear shot acquired")
+		_seeking_clear_shot = false
+		_clear_shot_timer = 0.0
+
+	# Determine if we should be in approach phase or exposed shooting phase
+	var in_direct_contact := distance_to_player <= COMBAT_DIRECT_CONTACT_DISTANCE
+
+	# Enter exposed phase if we have a clear shot and are either close enough or have approached long enough
+	if has_clear_shot and (in_direct_contact or _combat_approach_timer >= COMBAT_APPROACH_MAX_TIME):
 		# Close enough AND have clear shot - start exposed shooting phase
 		_combat_exposed = true
 		_combat_approaching = false
@@ -862,18 +942,6 @@ func _process_combat_state(delta: float) -> void:
 		_combat_shoot_duration = randf_range(2.0, 3.0)
 		_log_debug("COMBAT exposed phase started (distance: %.0f), will shoot for %.1fs" % [distance_to_player, _combat_shoot_duration])
 		return
-
-	# If approach timer exceeded but no clear shot, keep trying to find position with clear shot
-	if _combat_approach_timer >= COMBAT_APPROACH_MAX_TIME and not has_clear_shot:
-		_log_debug("COMBAT: approach time exceeded but no clear shot, continuing to seek position")
-		# Reset approach timer to keep trying, but extend the duration to avoid infinite loop
-		if _combat_approach_timer >= COMBAT_APPROACH_MAX_TIME * 2:
-			# Gave up finding clear shot - transition to pursuing for cover-to-cover movement
-			_log_debug("COMBAT: could not find clear shot, transitioning to PURSUING")
-			_combat_approaching = false
-			_combat_approach_timer = 0.0
-			_transition_to_pursuing()
-			return
 
 	# Need to approach player - move toward them
 	if not _combat_approaching:
@@ -885,15 +953,7 @@ func _process_combat_state(delta: float) -> void:
 
 	# Move toward player while approaching
 	if _player:
-		var direction_to_player := (_player.global_position - global_position).normalized()
-
-		# Check if shot is blocked by wall - if so, try to sidestep
 		var move_direction := direction_to_player
-		if not _is_bullet_spawn_clear(direction_to_player):
-			var sidestep_dir := _find_sidestep_direction_for_clear_shot(direction_to_player)
-			if sidestep_dir != Vector2.ZERO:
-				# Blend sidestep with forward movement for smooth navigation around cover
-				move_direction = (direction_to_player * 0.3 + sidestep_dir * 0.7).normalized()
 
 		# Apply wall avoidance
 		var avoidance := _check_wall_ahead(move_direction)
@@ -903,11 +963,64 @@ func _process_combat_state(delta: float) -> void:
 		velocity = move_direction * combat_move_speed
 		rotation = direction_to_player.angle()  # Always face player
 
-		# Can shoot while approaching (only after detection delay)
-		if _detection_delay_elapsed and _shoot_timer >= shoot_cooldown:
+		# Can shoot while approaching (only after detection delay and if have clear shot)
+		if has_clear_shot and _detection_delay_elapsed and _shoot_timer >= shoot_cooldown:
 			_aim_at_player()
 			_shoot()
 			_shoot_timer = 0.0
+
+
+## Calculate a target position to exit cover and get a clear shot.
+## Returns a position that should allow the bullet spawn point to be unobstructed.
+func _calculate_clear_shot_exit_position(direction_to_player: Vector2) -> Vector2:
+	# Calculate perpendicular directions to the player
+	var perpendicular := Vector2(-direction_to_player.y, direction_to_player.x)
+
+	# Try both perpendicular directions and pick the one that's more likely to work
+	# Also blend with forward movement toward player to help navigate around cover
+	var best_position := global_position
+	var best_score := -1.0
+
+	for side_multiplier: float in [1.0, -1.0]:
+		var sidestep_dir: Vector2 = perpendicular * side_multiplier
+		# Blend sidestep with forward movement for better cover navigation
+		var exit_dir: Vector2 = (sidestep_dir * 0.7 + direction_to_player * 0.3).normalized()
+		var test_position: Vector2 = global_position + exit_dir * CLEAR_SHOT_EXIT_DISTANCE
+
+		# Score this position based on:
+		# 1. Does it have a clear path? (no walls in the way)
+		# 2. Would the bullet spawn be clear from there?
+		var score: float = 0.0
+
+		# Check if we can move to this position
+		if _has_clear_path_to(test_position):
+			score += 1.0
+
+		# Check if bullet spawn would be clear from this position
+		# This is a rough estimate - we check from the test position toward player
+		var world_2d := get_world_2d()
+		if world_2d != null:
+			var space_state := world_2d.direct_space_state
+			if space_state != null:
+				var check_distance := bullet_spawn_offset + 5.0
+				var query := PhysicsRayQueryParameters2D.new()
+				query.from = test_position
+				query.to = test_position + direction_to_player * check_distance
+				query.collision_mask = 4  # Only check obstacles
+				query.exclude = [get_rid()]
+				var result := space_state.intersect_ray(query)
+				if result.is_empty():
+					score += 2.0  # Higher score for clear bullet spawn
+
+		if score > best_score:
+			best_score = score
+			best_position = test_position
+
+	# If no good position found, just move forward toward player
+	if best_score < 0.5:
+		best_position = global_position + direction_to_player * CLEAR_SHOT_EXIT_DISTANCE
+
+	return best_position
 
 
 ## Process SEEKING_COVER state - moving to cover position.
@@ -1637,6 +1750,10 @@ func _transition_to_combat() -> void:
 	_combat_approaching = false
 	_combat_shoot_timer = 0.0
 	_combat_approach_timer = 0.0
+	# Reset clear shot seeking variables
+	_seeking_clear_shot = false
+	_clear_shot_timer = 0.0
+	_clear_shot_target = Vector2.ZERO
 
 
 ## Transition to SEEKING_COVER state.
@@ -2940,6 +3057,9 @@ func _update_debug_label() -> void:
 		if _combat_exposed:
 			var time_left := _combat_shoot_duration - _combat_shoot_timer
 			state_text += "\n(EXPOSED %.1fs)" % time_left
+		elif _seeking_clear_shot:
+			var time_left := CLEAR_SHOT_MAX_TIME - _clear_shot_timer
+			state_text += "\n(SEEK SHOT %.1fs)" % time_left
 		elif _combat_approaching:
 			state_text += "\n(APPROACH)"
 
@@ -3013,3 +3133,73 @@ func has_ammo() -> bool:
 ## Returns 0.0 if player is completely hidden, 1.0 if fully visible.
 func get_player_visibility_ratio() -> float:
 	return _player_visibility_ratio
+
+
+## Draw debug visualization when debug mode is enabled.
+## Shows: line to target (cover, clear shot, player), bullet spawn point status.
+func _draw() -> void:
+	if not debug_label_enabled:
+		return
+
+	# Colors for different debug elements
+	var color_to_cover := Color.CYAN  # Line to cover position
+	var color_to_player := Color.RED  # Line to player (when visible)
+	var color_clear_shot := Color.YELLOW  # Line to clear shot target
+	var color_pursuit := Color.ORANGE  # Line to pursuit cover
+	var color_flank := Color.MAGENTA  # Line to flank position
+	var color_bullet_spawn := Color.GREEN  # Bullet spawn point indicator
+	var color_blocked := Color.RED  # Blocked path indicator
+
+	# Draw line to player if visible
+	if _can_see_player and _player:
+		var to_player := _player.global_position - global_position
+		draw_line(Vector2.ZERO, to_player, color_to_player, 1.5)
+
+		# Draw bullet spawn point and check if blocked
+		var direction_to_player := to_player.normalized()
+		var spawn_point := direction_to_player * bullet_spawn_offset
+		if _is_bullet_spawn_clear(direction_to_player):
+			draw_circle(spawn_point, 5.0, color_bullet_spawn)
+		else:
+			# Draw X for blocked spawn point
+			draw_line(spawn_point + Vector2(-5, -5), spawn_point + Vector2(5, 5), color_blocked, 2.0)
+			draw_line(spawn_point + Vector2(-5, 5), spawn_point + Vector2(5, -5), color_blocked, 2.0)
+
+	# Draw line to cover position if we have one
+	if _has_valid_cover:
+		var to_cover := _cover_position - global_position
+		draw_line(Vector2.ZERO, to_cover, color_to_cover, 1.5)
+		# Draw small circle at cover position
+		draw_circle(to_cover, 8.0, color_to_cover)
+
+	# Draw line to clear shot target if seeking clear shot
+	if _seeking_clear_shot and _clear_shot_target != Vector2.ZERO:
+		var to_target := _clear_shot_target - global_position
+		draw_line(Vector2.ZERO, to_target, color_clear_shot, 2.0)
+		# Draw triangle at target position
+		var target_pos := to_target
+		draw_line(target_pos + Vector2(-6, 6), target_pos + Vector2(6, 6), color_clear_shot, 2.0)
+		draw_line(target_pos + Vector2(6, 6), target_pos + Vector2(0, -8), color_clear_shot, 2.0)
+		draw_line(target_pos + Vector2(0, -8), target_pos + Vector2(-6, 6), color_clear_shot, 2.0)
+
+	# Draw line to pursuit cover if pursuing
+	if _current_state == AIState.PURSUING and _has_pursuit_cover:
+		var to_pursuit := _pursuit_next_cover - global_position
+		draw_line(Vector2.ZERO, to_pursuit, color_pursuit, 2.0)
+		draw_circle(to_pursuit, 8.0, color_pursuit)
+
+	# Draw line to flank target if flanking
+	if _current_state == AIState.FLANKING:
+		if _has_flank_cover:
+			var to_flank_cover := _flank_next_cover - global_position
+			draw_line(Vector2.ZERO, to_flank_cover, color_flank, 2.0)
+			draw_circle(to_flank_cover, 8.0, color_flank)
+		elif _flank_target != Vector2.ZERO:
+			var to_flank := _flank_target - global_position
+			draw_line(Vector2.ZERO, to_flank, color_flank, 1.5)
+			# Draw diamond at flank target
+			var flank_pos := to_flank
+			draw_line(flank_pos + Vector2(0, -8), flank_pos + Vector2(8, 0), color_flank, 2.0)
+			draw_line(flank_pos + Vector2(8, 0), flank_pos + Vector2(0, 8), color_flank, 2.0)
+			draw_line(flank_pos + Vector2(0, 8), flank_pos + Vector2(-8, 0), color_flank, 2.0)
+			draw_line(flank_pos + Vector2(-8, 0), flank_pos + Vector2(0, -8), color_flank, 2.0)
