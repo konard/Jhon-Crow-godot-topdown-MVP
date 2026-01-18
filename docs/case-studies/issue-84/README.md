@@ -236,6 +236,73 @@ This diagnostic information will help identify whether the issue is:
 - Intensity below threshold
 - State-based filtering
 
+## User Feedback: Third Iteration (v4)
+
+### Problem Description
+User reported that enemies still don't hear gunshots at all (even when behind the same cover). Provided game logs:
+- `game_log_20260118_095938.txt`
+- `game_log_20260118_100135.txt`
+
+Both logs show the same critical error:
+```
+[ENEMY] [Enemy1] WARNING: Could not register as sound listener (SoundPropagation not found)
+```
+
+This warning appears for ALL enemies, meaning the SoundPropagation autoload is NOT being loaded at all.
+
+### Root Cause Analysis (v4)
+
+**Critical Finding:** The SoundPropagation autoload script is failing to compile during Godot export.
+
+Downloaded and analyzed the CI build logs (`ci-logs/build-windows-21107682693.log`), which revealed:
+
+```
+SCRIPT ERROR: Parse Error: Cannot infer the type of "distance" variable because the value doesn't have a set type.
+           at: GDScript::reload (res://scripts/autoload/sound_propagation.gd:163)
+SCRIPT ERROR: Parse Error: The variable type is being inferred from a Variant value, so it will be typed as Variant. (Warning treated as error.)
+           at: GDScript::reload (res://scripts/autoload/sound_propagation.gd:123)
+ERROR: Failed to load script "res://scripts/autoload/sound_propagation.gd" with error "Parse error".
+ERROR: Failed to create an autoload, script 'res://scripts/autoload/sound_propagation.gd' is not compiling.
+   at: _create_autoload (editor/editor_autoload_settings.cpp:417)
+```
+
+**Root Cause:** Godot 4.3's export mode treats type inference warnings as errors. The following patterns caused parse failures:
+
+1. **Variant from Dictionary.get():** `var propagation_distance := PROPAGATION_DISTANCES.get(sound_type, 1000.0)` returns Variant
+2. **Conditional expression with Variant:** The ternary expression with a Variant branch cannot be type-inferred
+3. **Array iteration without typed iterator:** `for listener in _listeners:` where `_listeners` is an untyped Array
+4. **Function return inference:** Variables assigned from functions returning float weren't being inferred correctly
+
+### Solution (v4)
+
+Added explicit type annotations to resolve all type inference issues:
+
+```gdscript
+# Before (caused errors):
+var propagation_distance := custom_range if custom_range > 0 else PROPAGATION_DISTANCES.get(sound_type, 1000.0)
+var source_name := source_node.name if source_node else "null"
+for listener in _listeners:
+    var distance := listener.global_position.distance_to(position)
+    var intensity := calculate_intensity(distance)
+
+# After (fixed):
+var propagation_distance: float = custom_range if custom_range > 0 else float(PROPAGATION_DISTANCES.get(sound_type, 1000.0))
+var source_name: String = source_node.name if source_node else "null"
+for listener: Node2D in _listeners:
+    var distance: float = listener.global_position.distance_to(position)
+    var intensity: float = calculate_intensity(distance)
+```
+
+Also fixed similar issues in `test_sound_propagation.gd` to prevent test failures.
+
+### Key Insight
+The autoload was working perfectly in the Godot editor (where warnings are not treated as errors), but failing silently in exported builds. The only visible symptom was the "SoundPropagation not found" warning from enemies trying to register.
+
+This is why the user's game logs showed:
+- No `[SoundPropagation] SoundPropagation autoload initialized` message
+- All enemies reporting `WARNING: Could not register as sound listener (SoundPropagation not found)`
+- Enemies only reacting to visual detection (COMBAT states), not sound
+
 ## Lessons Learned
 
 1. **Tie game parameters to meaningful metrics**: Using viewport size as a reference for sound propagation makes the system more intuitive and gameplay-aligned.
@@ -253,3 +320,13 @@ This diagnostic information will help identify whether the issue is:
 7. **Make parameters configurable at the source**: Properties like weapon loudness should be defined on the weapon/entity that produces the sound, allowing different weapons to have different characteristics.
 
 8. **Fail with visibility**: When critical systems fail to initialize (like listener registration), log warnings that will be visible in game logs.
+
+9. **ALWAYS use explicit type annotations in GDScript**: Godot 4.x export mode treats type inference warnings as errors. Always use explicit types for:
+   - Variables assigned from Dictionary.get() (returns Variant)
+   - Variables assigned from untyped Array iteration
+   - Variables in conditional expressions with mixed types
+   - Variables assigned from functions that might not be type-inferred correctly
+
+10. **Test in exported builds, not just editor**: The editor has more lenient parsing than export mode. Code that works in the editor may fail to compile when exporting.
+
+11. **Check CI build logs, not just test results**: Even when builds "succeed" (artifact is created), there may be critical errors in the build log that cause functionality to fail at runtime.
