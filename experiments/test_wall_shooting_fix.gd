@@ -26,9 +26,9 @@ func _ready() -> void:
 	print("   - Enemy should reposition or wait for clear shot")
 	print("")
 	print("To verify the fix, enable debug_logging on the enemy and watch for:")
-	print("   '[Enemy] Immediate path blocked:' messages")
-	print("   '[Enemy] Cannot enter exposed phase - wall blocking shot' messages")
-	print("   '[Enemy] Cannot hit player from exposed position' messages")
+	print("   '[Enemy] Bullet spawn blocked: wall at distance...' messages")
+	print("   '[Enemy] Inaccurate shot blocked: wall in path after rotation' messages")
+	print("   '[Enemy] Burst shot blocked: wall in path after rotation' messages")
 	print("")
 
 
@@ -42,10 +42,10 @@ func spawn_test_enemy(position: Vector2) -> Node:
 	return enemy
 
 
-## Helper to verify immediate path clear function
-func test_immediate_path_logic() -> void:
+## Helper to verify bullet spawn clear function
+func test_bullet_spawn_logic() -> void:
 	# This would need to be run in the context of an enemy instance
-	# with access to the _is_immediate_path_clear function
+	# with access to the _is_bullet_spawn_clear function
 	print("To test path logic, attach an enemy to the scene and call:")
-	print("  enemy._is_immediate_path_clear(direction)")
+	print("  enemy._is_bullet_spawn_clear(direction)")
 	print("where direction is normalized vector toward player")

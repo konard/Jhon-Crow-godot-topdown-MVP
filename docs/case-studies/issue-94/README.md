@@ -18,15 +18,15 @@
 
 ### Current Behavior Flow
 
-1. **Enemy detects player** → `_can_see_player` becomes true via raycast from enemy center to player
-2. **Enemy enters COMBAT state** → Approaches player and starts shooting phase
-3. **Enemy positioned near wall/cover edge** → Enemy is close to or touching thin cover
-4. **Shooting logic executes** → `_shoot()` is called
-5. **Shot validation** → `_should_shoot_at_target()` checks:
+1. **Enemy detects player** -> `_can_see_player` becomes true via raycast from enemy center to player
+2. **Enemy enters COMBAT state** -> Approaches player and starts shooting phase
+3. **Enemy positioned near wall/cover edge** -> Enemy is close to or touching thin cover
+4. **Shooting logic executes** -> `_shoot()` is called
+5. **Shot validation** -> `_should_shoot_at_target()` checks:
    - `_is_firing_line_clear_of_friendlies()` - checks for friendly fire
    - `_is_shot_clear_of_cover()` - checks if obstacles block the shot
-6. **BUG: Shot appears clear** → Raycast from `bullet_spawn_offset` (30px ahead) misses the adjacent wall
-7. **Bullet spawns and hits wall** → Bullet spawns at offset position and immediately collides
+6. **BUG: Shot appears clear** -> Raycast from `bullet_spawn_offset` (30px ahead) misses the adjacent wall
+7. **Bullet spawns and hits wall** -> Bullet spawns at offset position and immediately collides
 
 ## Root Cause Analysis
 
@@ -57,79 +57,87 @@ The raycast starting point may already be **past** the wall (on the wrong side),
 
 ### Missing Check: Enemy-to-Spawn-Point Wall Detection
 
-There is no check to verify that the path from the enemy's center to the bullet spawn point is clear. The enemy might be:
-1. Standing right next to a wall on their side
-2. Positioned at the corner of cover
-3. Against thin cover where the 30px offset puts the spawn point inside or past the wall
+There is no check to verify that the path from the enemy's center to the bullet spawn point is clear.
 
-### Secondary Issue: Cover Exit Reliability
+## First Implementation Attempt (FAILED)
 
-The cover exit mechanism in `_process_in_cover_state()` and `_process_seeking_cover_state()` uses `_is_visible_from_player()` to detect flanking. However:
-1. It doesn't validate if the enemy's shooting direction is clear
-2. An enemy might be visible to the player but still unable to hit them due to adjacent geometry
-3. The "exposed" phase starts without confirming a clear firing lane
+### What Was Done
 
-## Proposed Solution
+The first fix attempt added extensive changes to `_process_combat_state()`:
+1. Added a new `_is_immediate_path_clear()` function with multiple raycasts (center + two side checks)
+2. Modified the exposed phase logic to check wall clearance before entering
+3. Added `else: return` branches for null player checks
+4. Modified multiple state transitions
 
-### Fix 1: Add Immediate Obstacle Check
+### What Went Wrong
 
-Add a check for walls directly in front of the enemy (between enemy center and bullet spawn point):
+**User Feedback:**
+> "everything broke - enemies stopped moving, taking damage, etc. F7 debug toggle also stopped working"
+
+**Analysis:**
+The changes were too extensive and modified the state machine flow in ways that caused unintended side effects:
+
+1. **Structural changes to `_process_combat_state()`**: The addition of conditional blocks with `else: return` statements altered the control flow
+2. **Complex multi-raycast function**: The side-ray checks added complexity that wasn't necessary for the core fix
+3. **State machine modifications**: Changes to exposed phase entry/exit conditions affected enemy behavior
+
+The key lesson: **Making multiple changes to a complex state machine simultaneously makes it hard to identify which change caused the regression.**
+
+## Second Implementation Attempt (CONSERVATIVE)
+
+### Approach
+
+After reverting to the main branch, a minimal and conservative fix was implemented:
+
+1. **Single new function**: `_is_bullet_spawn_clear()` - performs ONE raycast from enemy center to bullet spawn point
+2. **No state machine changes**: Only the shooting validation was modified
+3. **Fail-open safety**: If physics isn't available, allow shooting (prevents total breakage)
+4. **Targeted modifications**: Only three places in code were touched
+
+### Implementation Details
 
 ```gdscript
 ## Check if there's an obstacle immediately in front of the enemy that would block bullets.
-## This prevents shooting into walls that the enemy is flush against.
-func _is_immediate_path_clear(direction: Vector2) -> bool:
+## This prevents shooting into walls that the enemy is flush against or very close to.
+## Uses a single raycast from enemy center to the bullet spawn position.
+func _is_bullet_spawn_clear(direction: Vector2) -> bool:
     var space_state := get_world_2d().direct_space_state
+    if space_state == null:
+        return true  # Fail-open: allow shooting if physics not available
+
+    # Check from enemy center to bullet spawn position plus a small buffer
+    var check_distance := bullet_spawn_offset + 5.0
+
     var query := PhysicsRayQueryParameters2D.new()
     query.from = global_position
-    query.to = global_position + direction * (bullet_spawn_offset + 10.0)  # Check slightly past spawn point
+    query.to = global_position + direction * check_distance
     query.collision_mask = 4  # Only check obstacles (layer 3)
     query.exclude = [get_rid()]
 
     var result := space_state.intersect_ray(query)
-    return result.is_empty()
-```
-
-### Fix 2: Update Shot Validation
-
-Modify `_should_shoot_at_target()` to include the immediate path check:
-
-```gdscript
-func _should_shoot_at_target(target_position: Vector2) -> bool:
-    var direction := (target_position - global_position).normalized()
-
-    # NEW: Check if the immediate path to bullet spawn point is clear
-    if not _is_immediate_path_clear(direction):
-        _log_debug("Shot blocked: wall immediately in front of enemy")
-        return false
-
-    # Check if friendlies are in the way
-    if not _is_firing_line_clear_of_friendlies(target_position):
-        return false
-
-    # Check if cover blocks the shot
-    if not _is_shot_clear_of_cover(target_position):
+    if not result.is_empty():
+        _log_debug("Bullet spawn blocked: wall at distance %.1f" % [
+            global_position.distance_to(result["position"])])
         return false
 
     return true
 ```
 
-### Fix 3: Reliable Cover Exit Mechanism
+### Changes Made
 
-Update the combat exposed phase to verify shooting lane before staying exposed:
+1. **`_should_shoot_at_target()`**: Added call to `_is_bullet_spawn_clear()` at the start
+2. **`_shoot_with_inaccuracy()`**: Added post-inaccuracy check to prevent rotated shots hitting walls
+3. **`_shoot_burst_shot()`**: Added post-rotation check for burst fire
 
-```gdscript
-# In _process_combat_state(), before staying in exposed phase:
-if _combat_exposed:
-    # Verify we can actually hit the player before continuing to shoot
-    if _player:
-        var direction := (_player.global_position - global_position).normalized()
-        if not _is_immediate_path_clear(direction):
-            # Can't hit player from here, seek better position
-            _combat_exposed = false
-            _transition_to_seeking_cover()
-            return
-```
+### Total Lines Changed: ~50 (compared to ~150 in first attempt)
+
+## Lessons Learned
+
+1. **Minimal changes**: When fixing a bug in a complex system, make the smallest possible change
+2. **Don't modify state machines unless necessary**: The core issue was in shooting validation, not state transitions
+3. **Fail-open for safety**: Non-critical checks should fail open (allow the action) if the check itself fails
+4. **Test incrementally**: Each change should be testable in isolation
+5. **Preserve existing behavior**: Only modify what's strictly necessary to fix the bug
 
 ## Impact Assessment
 
@@ -137,25 +145,28 @@ if _combat_exposed:
 - `scripts/objects/enemy.gd`
 
 ### Risk Level: Low
-- Changes are additive (new validation checks)
-- No existing functionality is removed
-- Behavioral change only prevents clearly incorrect behavior (shooting into walls)
+- Changes are additive (new validation check)
+- No state machine modifications
+- Existing functionality is preserved
+- Fail-open design prevents total breakage
 
 ## Testing Strategy
 
-1. **Unit Test:** Create test scene with enemy next to thin wall, verify no shooting
-2. **Edge Cases:**
+1. **Basic test**: Enemy next to thin wall should not shoot into wall
+2. **Normal combat**: Enemy not near walls should shoot normally
+3. **Edge cases**:
    - Enemy flush against wall, player on other side
    - Enemy at corner of cover
    - Enemy at edge of thin pillar
-3. **Regression Test:** Verify normal combat behavior unchanged when no walls nearby
+4. **Regression test**: Verify enemies still move, take damage, F7 debug works
 
 ## References
 
 - Issue: https://github.com/Jhon-Crow/godot-topdown-MVP/issues/94
-- Main file: `scripts/objects/enemy.gd` (2853 lines)
+- Pull Request: https://github.com/Jhon-Crow/godot-topdown-MVP/pull/95
+- Main file: `scripts/objects/enemy.gd`
 - Key functions:
   - `_shoot()` - Line 2395
-  - `_should_shoot_at_target()` - Line 1922
+  - `_should_shoot_at_target()` - Line 1948
+  - `_is_bullet_spawn_clear()` - Line 1923 (NEW)
   - `_is_shot_clear_of_cover()` - Line 1893
-  - `_process_combat_state()` - Line 758
