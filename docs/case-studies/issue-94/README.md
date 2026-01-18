@@ -160,6 +160,59 @@ func _is_bullet_spawn_clear(direction: Vector2) -> bool:
    - Enemy at edge of thin pillar
 4. **Regression test**: Verify enemies still move, take damage, F7 debug works
 
+## Third Implementation Attempt: Critical Bug Fix
+
+### Problem Discovery
+
+After the second implementation, users reported that AI was completely broken - enemies didn't move, didn't respond to damage, and F7 debug toggle didn't work.
+
+### Root Cause Analysis
+
+Upon examining the CI build logs, we discovered **GDScript parse errors** in the `enemy.gd` file:
+
+```
+SCRIPT ERROR: Parse Error: Cannot infer the type of "sidestep_dir" variable because the value doesn't have a set type.
+SCRIPT ERROR: Parse Error: Cannot infer the type of "test_position" variable because the value doesn't have a set type.
+ERROR: Failed to load script "res://scripts/objects/enemy.gd" with error "Parse error".
+```
+
+**The script failed to load entirely**, which explains why:
+- Enemies didn't move (no AI logic running)
+- Enemies didn't take damage (no hit processing)
+- F7 debug toggle didn't work (no debug label toggling)
+
+### Technical Details
+
+The issue was in the `_find_sidestep_direction_for_clear_shot()` function:
+
+```gdscript
+# BROKEN - type inference fails inside for loop with untyped iterator
+for side_multiplier in [1.0, -1.0]:
+    var sidestep_dir := perpendicular * side_multiplier  # Error: Can't infer type
+    var test_position := global_position + sidestep_dir * check_distance  # Error: Can't infer type
+```
+
+When using `:=` (inferred type) for variables inside a for loop where the iterator variable is untyped, Godot's parser can't infer the type because it doesn't know that `side_multiplier` is a `float`.
+
+### Fix Applied
+
+```gdscript
+# FIXED - explicit types for loop iterator and variables
+for side_multiplier: float in [1.0, -1.0]:
+    var sidestep_dir: Vector2 = perpendicular * side_multiplier
+    var test_position: Vector2 = global_position + sidestep_dir * check_distance
+```
+
+### Additional Improvements
+
+1. **Added FileLogger autoload**: Writes log files next to the EXE for debugging exported builds
+2. **Enhanced null checking**: Defensive coding for `get_world_2d()` and `direct_space_state`
+3. **Added logging calls**: Enemy spawn, hit, death, and state change events are logged to file
+
+### Lesson Learned
+
+**Always check CI build logs for parse errors.** The build can succeed (producing an EXE) even if scripts have parse errors. In Godot, a script with parse errors simply won't load, causing silent failures at runtime.
+
 ## References
 
 - Issue: https://github.com/Jhon-Crow/godot-topdown-MVP/issues/94
@@ -170,3 +223,4 @@ func _is_bullet_spawn_clear(direction: Vector2) -> bool:
   - `_should_shoot_at_target()` - Line 1948
   - `_is_bullet_spawn_clear()` - Line 1923 (NEW)
   - `_is_shot_clear_of_cover()` - Line 1893
+  - `_find_sidestep_direction_for_clear_shot()` - Line 2000 (NEW)

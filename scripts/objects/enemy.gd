@@ -430,6 +430,9 @@ func _ready() -> void:
 	_connect_debug_mode_signal()
 	_update_debug_label()
 
+	# Log that this enemy is ready (use call_deferred to ensure FileLogger is loaded)
+	call_deferred("_log_spawn_info")
+
 	# Preload bullet scene if not set in inspector
 	if bullet_scene == null:
 		bullet_scene = preload("res://scenes/projectiles/Bullet.tscn")
@@ -733,6 +736,8 @@ func _process_ai_state(delta: float) -> void:
 	if previous_state != _current_state:
 		state_changed.emit(_current_state)
 		_log_debug("State changed: %s -> %s" % [AIState.keys()[previous_state], AIState.keys()[_current_state]])
+		# Also log to file for exported build debugging
+		_log_to_file("State: %s -> %s" % [AIState.keys()[previous_state], AIState.keys()[_current_state]])
 
 
 ## Process IDLE state - patrol or guard behavior.
@@ -1973,9 +1978,13 @@ func _is_shot_clear_of_cover(target_position: Vector2) -> bool:
 ## This prevents shooting into walls that the enemy is flush against or very close to.
 ## Uses a single raycast from enemy center to the bullet spawn position.
 func _is_bullet_spawn_clear(direction: Vector2) -> bool:
-	var space_state := get_world_2d().direct_space_state
+	# Fail-open: allow shooting if physics is not ready
+	var world_2d := get_world_2d()
+	if world_2d == null:
+		return true
+	var space_state := world_2d.direct_space_state
 	if space_state == null:
-		return true  # Fail-open: allow shooting if physics not available
+		return true
 
 	# Check from enemy center to bullet spawn position plus a small buffer
 	var check_distance := bullet_spawn_offset + 5.0
@@ -2000,7 +2009,11 @@ func _is_bullet_spawn_clear(direction: Vector2) -> bool:
 ## that would allow the bullet spawn point to be clear.
 ## Returns Vector2.ZERO if no clear direction is found.
 func _find_sidestep_direction_for_clear_shot(direction_to_player: Vector2) -> Vector2:
-	var space_state := get_world_2d().direct_space_state
+	# Fail-safe: allow normal behavior if physics is not ready
+	var world_2d := get_world_2d()
+	if world_2d == null:
+		return Vector2.ZERO
+	var space_state := world_2d.direct_space_state
 	if space_state == null:
 		return Vector2.ZERO
 
@@ -2011,8 +2024,8 @@ func _find_sidestep_direction_for_clear_shot(direction_to_player: Vector2) -> Ve
 	var check_distance := 50.0  # Check if moving 50 pixels in this direction would help
 	var bullet_check_distance := bullet_spawn_offset + 5.0
 
-	for side_multiplier in [1.0, -1.0]:  # Try both sides
-		var sidestep_dir := perpendicular * side_multiplier
+	for side_multiplier: float in [1.0, -1.0]:  # Try both sides
+		var sidestep_dir: Vector2 = perpendicular * side_multiplier
 
 		# First check if we can actually move in this direction (no wall blocking movement)
 		var move_query := PhysicsRayQueryParameters2D.new()
@@ -2026,7 +2039,7 @@ func _find_sidestep_direction_for_clear_shot(direction_to_player: Vector2) -> Ve
 			continue  # Can't move this way, wall is blocking
 
 		# Check if after sidestepping, we'd have a clear shot
-		var test_position := global_position + sidestep_dir * check_distance
+		var test_position: Vector2 = global_position + sidestep_dir * check_distance
 		var shot_query := PhysicsRayQueryParameters2D.new()
 		shot_query.from = test_position
 		shot_query.to = test_position + direction_to_player * bullet_check_distance
@@ -2724,6 +2737,7 @@ func on_hit() -> void:
 	# Track hits for retreat behavior
 	_hits_taken_in_encounter += 1
 	_log_debug("Hit taken! Total hits in encounter: %d" % _hits_taken_in_encounter)
+	_log_to_file("Hit taken, health: %d/%d" % [_current_health - 1, _max_health])
 
 	# Show hit flash effect
 	_show_hit_flash()
@@ -2779,6 +2793,7 @@ func _get_health_percent() -> float:
 ## Called when the enemy dies.
 func _on_death() -> void:
 	_is_alive = false
+	_log_to_file("Enemy died")
 	died.emit()
 
 	if destroy_on_death:
@@ -2847,6 +2862,23 @@ func _reset() -> void:
 func _log_debug(message: String) -> void:
 	if debug_logging:
 		print("[Enemy %s] %s" % [name, message])
+
+
+## Log a message to the file logger (always logs, regardless of debug_logging setting).
+## Use for important events like spawning, dying, or critical state changes.
+func _log_to_file(message: String) -> void:
+	if not is_inside_tree():
+		return
+	var file_logger: Node = get_node_or_null("/root/FileLogger")
+	if file_logger and file_logger.has_method("log_enemy"):
+		file_logger.log_enemy(name, message)
+
+
+## Log spawn info (called via call_deferred to ensure FileLogger is loaded).
+func _log_spawn_info() -> void:
+	_log_to_file("Enemy spawned at %s, health: %d, behavior: %s, player_found: %s" % [
+		global_position, _max_health, BehaviorMode.keys()[behavior_mode],
+		"yes" if _player != null else "no"])
 
 
 ## Get AI state name as a human-readable string.
