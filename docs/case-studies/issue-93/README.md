@@ -619,5 +619,110 @@ These changes will create more natural enemy movement that doesn't stop unnecess
 
 ---
 
-*Case Study Compiled: 2026-01-18*
+## Addendum: Second Analysis (2026-01-18)
+
+### New User Feedback
+
+The repository owner provided additional feedback with game logs:
+
+> "враг должен обходить последнее укрытие. сейчас утыкается в него в том месте, за которым игрок."
+> (Translation: "Enemy should go around the last cover. Currently runs into it at the spot behind which the player is.")
+>
+> "возможно проблема так же в COMBAT или FLANKING состоянии."
+> (Translation: "Possibly the problem is also in the COMBAT or FLANKING state.")
+
+### New Game Logs Analysis
+
+Two new game logs were provided:
+- `logs/game_log_20260118_064145.txt`
+- `logs/game_log_20260118_065215.txt`
+
+**Key Observations from Log 1:**
+- Enemy10 shows `PURSUING -> FLANKING -> COMBAT -> PURSUING` rapid cycling (lines 33-44)
+- Enemy3 shows `PURSUING -> COMBAT -> PURSUING` rapid cycling (lines 107-122)
+- Enemy3 goes `PURSUING -> FLANKING -> COMBAT -> PURSUING` (lines 111-113, 118-120)
+
+**Key Observations from Log 2:**
+- Enemy10 shows rapid `SUPPRESSED -> SEEKING_COVER -> IN_COVER -> SUPPRESSED` cycling (lines 54-92) - this is a separate bug
+- Enemy7 shows repeated `PURSUING -> FLANKING -> COMBAT -> PURSUING` rapid cycles (lines 140-195)
+- Many FLANKING state transitions that immediately go back to COMBAT → PURSUING
+
+### Root Cause: FLANKING State Premature Transition
+
+**Critical Bug Found**: In `_process_flanking_state()` (line 1194-1196):
+
+```gdscript
+# If can see player, engage in combat
+if _can_see_player:
+    _transition_to_combat()
+    return
+```
+
+This causes the FLANKING state to immediately exit if the enemy can see the player, even if the enemy **cannot actually hit** the player due to a wall blocking the shot.
+
+**Bug Sequence:**
+1. Enemy at last cover, player visible but wall blocks shot
+2. Enemy in PURSUING can't find better cover
+3. Transitions to FLANKING to get around obstacle
+4. FLANKING checks `_can_see_player` → true → immediately goes to COMBAT
+5. COMBAT checks if can hit → can't → goes to seeking clear shot → times out → FLANKING
+6. Loop repeats every few seconds without enemy actually moving around the obstacle
+
+### Additional Bug: Random Flank Side Each Frame
+
+In `_calculate_flank_position()` (line 2590):
+
+```gdscript
+var flank_side := 1.0 if randf() > 0.5 else -1.0
+```
+
+This is called every frame in FLANKING state, causing the flank direction to randomly switch. The enemy never commits to going around one side of the obstacle.
+
+### Fix Implemented
+
+**Fix 1**: Changed FLANKING state to check `_can_hit_player_from_current_position()` instead of just `_can_see_player`:
+
+```gdscript
+# Only transition to combat if we can ACTUALLY HIT the player, not just see them.
+if _can_see_player and _can_hit_player_from_current_position():
+    _log_debug("Can see AND hit player from flanking position, engaging")
+    _transition_to_combat()
+    return
+```
+
+**Fix 2**: Added `_flank_side` variable that is set once when entering FLANKING state, and `_choose_best_flank_side()` function to intelligently select the side with fewer obstacles:
+
+```gdscript
+## The side to flank on (1.0 = right, -1.0 = left). Set once when entering FLANKING state.
+var _flank_side: float = 1.0
+
+## Whether flank side has been initialized for this flanking maneuver.
+var _flank_side_initialized: bool = false
+
+func _transition_to_flanking() -> void:
+    _current_state = AIState.FLANKING
+    # Initialize flank side only once per flanking maneuver
+    _flank_side = _choose_best_flank_side()
+    _flank_side_initialized = true
+    # ...
+```
+
+**Fix 3**: Updated debug label to show flank direction (L/R) for easier debugging.
+
+### Testing Recommendations
+
+1. **Last Cover Flanking Test:**
+   - Enemy at cover, player behind same cover on other side
+   - Enemy should enter FLANKING and consistently move in one direction
+   - Should NOT rapidly cycle between states
+   - Should eventually reach a position with clear shot
+
+2. **Blocked Shot Continuation Test:**
+   - Enemy can see player but wall blocks shot
+   - FLANKING should continue until clear shot is available
+   - Should NOT immediately transition to COMBAT just because player is visible
+
+---
+
+*Case Study Updated: 2026-01-18*
 *Author: AI Issue Solver (Claude)*

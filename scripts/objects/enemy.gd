@@ -401,6 +401,12 @@ var _flank_next_cover: Vector2 = Vector2.ZERO
 ## Whether the enemy has a valid flank cover target.
 var _has_flank_cover: bool = false
 
+## The side to flank on (1.0 = right, -1.0 = left). Set once when entering FLANKING state.
+var _flank_side: float = 1.0
+
+## Whether flank side has been initialized for this flanking maneuver.
+var _flank_side_initialized: bool = false
+
 ## --- Assault State (coordinated multi-enemy rush) ---
 ## Timer for assault wait period (5 seconds before rushing).
 var _assault_wait_timer: float = 0.0
@@ -1187,19 +1193,27 @@ func _process_in_cover_state(delta: float) -> void:
 func _process_flanking_state(delta: float) -> void:
 	# If under fire, retreat with shooting behavior
 	if _under_fire and enable_cover:
+		_flank_side_initialized = false
 		_transition_to_retreating()
 		return
 
-	# If can see player, engage in combat
-	if _can_see_player:
+	# Only transition to combat if we can ACTUALLY HIT the player, not just see them.
+	# This is critical for the "last cover" scenario where enemy can see player
+	# but there's a wall blocking the shot. We must continue flanking until we
+	# have a clear shot, otherwise we get stuck in a FLANKING->COMBAT->PURSUING loop.
+	if _can_see_player and _can_hit_player_from_current_position():
+		_log_debug("Can see AND hit player from flanking position, engaging")
+		_flank_side_initialized = false
 		_transition_to_combat()
 		return
 
 	if _player == null:
+		_flank_side_initialized = false
 		_transition_to_idle()
 		return
 
 	# Recalculate flank position (player may have moved)
+	# Note: _flank_side is stable, only the target position is recalculated
 	_calculate_flank_position()
 
 	var distance_to_flank := global_position.distance_to(_flank_target)
@@ -1207,6 +1221,7 @@ func _process_flanking_state(delta: float) -> void:
 	# Check if we've reached the flank target
 	if distance_to_flank < 30.0:
 		_log_debug("Reached flank position, engaging")
+		_flank_side_initialized = false
 		_transition_to_combat()
 		return
 
@@ -1837,6 +1852,10 @@ func _transition_to_in_cover() -> void:
 ## Transition to FLANKING state.
 func _transition_to_flanking() -> void:
 	_current_state = AIState.FLANKING
+	# Initialize flank side only once per flanking maneuver
+	# Choose the side based on which direction has fewer obstacles
+	_flank_side = _choose_best_flank_side()
+	_flank_side_initialized = true
 	_calculate_flank_position()
 	_flank_cover_wait_timer = 0.0
 	_has_flank_cover = false
@@ -2569,6 +2588,7 @@ func _find_cover_position() -> void:
 
 
 ## Calculate flank position based on player location.
+## Uses the stored _flank_side which is set once when entering FLANKING state.
 func _calculate_flank_position() -> void:
 	if _player == null:
 		return
@@ -2576,12 +2596,53 @@ func _calculate_flank_position() -> void:
 	var player_pos := _player.global_position
 	var player_to_enemy := (global_position - player_pos).normalized()
 
-	# Choose left or right flank based on current position
-	var flank_side := 1.0 if randf() > 0.5 else -1.0
-	var flank_direction := player_to_enemy.rotated(flank_angle * flank_side)
+	# Use the stored flank side (initialized in _transition_to_flanking)
+	var flank_direction := player_to_enemy.rotated(flank_angle * _flank_side)
 
 	_flank_target = player_pos + flank_direction * flank_distance
-	_log_debug("Flank target: %s" % _flank_target)
+	_log_debug("Flank target: %s (side: %s)" % [_flank_target, "right" if _flank_side > 0 else "left"])
+
+
+## Choose the best flank side (left or right) based on obstacle presence.
+## Returns 1.0 for right, -1.0 for left.
+## Checks which side has fewer obstacles to the flank position.
+func _choose_best_flank_side() -> float:
+	if _player == null:
+		return 1.0 if randf() > 0.5 else -1.0
+
+	var player_pos := _player.global_position
+	var player_to_enemy := (global_position - player_pos).normalized()
+
+	# Calculate potential flank positions for both sides
+	var right_flank_dir := player_to_enemy.rotated(flank_angle * 1.0)
+	var left_flank_dir := player_to_enemy.rotated(flank_angle * -1.0)
+
+	var right_flank_pos := player_pos + right_flank_dir * flank_distance
+	var left_flank_pos := player_pos + left_flank_dir * flank_distance
+
+	# Check if paths are clear for both sides
+	var right_clear := _has_clear_path_to(right_flank_pos)
+	var left_clear := _has_clear_path_to(left_flank_pos)
+
+	# If only one side is clear, use that side
+	if right_clear and not left_clear:
+		_log_debug("Choosing right flank (left blocked)")
+		return 1.0
+	elif left_clear and not right_clear:
+		_log_debug("Choosing left flank (right blocked)")
+		return -1.0
+
+	# If both or neither are clear, choose based on which side we're already closer to
+	# This creates more natural movement patterns
+	var right_distance := global_position.distance_to(right_flank_pos)
+	var left_distance := global_position.distance_to(left_flank_pos)
+
+	if right_distance < left_distance:
+		_log_debug("Choosing right flank (closer)")
+		return 1.0
+	else:
+		_log_debug("Choosing left flank (closer)")
+		return -1.0
 
 
 ## Check if there's a clear path (no obstacles) to the target position.
@@ -3205,13 +3266,14 @@ func _update_debug_label() -> void:
 
 	# Add flanking phase info if flanking
 	if _current_state == AIState.FLANKING:
+		var side_label := "R" if _flank_side > 0 else "L"
 		if _has_valid_cover and not _has_flank_cover:
 			var time_left := FLANK_COVER_WAIT_DURATION - _flank_cover_wait_timer
-			state_text += "\n(WAIT %.1fs)" % time_left
+			state_text += "\n(%s WAIT %.1fs)" % [side_label, time_left]
 		elif _has_flank_cover:
-			state_text += "\n(MOVING)"
+			state_text += "\n(%s MOVING)" % side_label
 		else:
-			state_text += "\n(DIRECT)"
+			state_text += "\n(%s DIRECT)" % side_label
 
 	_debug_label.text = state_text
 
