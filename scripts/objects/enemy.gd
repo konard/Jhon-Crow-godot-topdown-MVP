@@ -196,6 +196,10 @@ signal ammo_depleted
 ## NavigationAgent2D for pathfinding around obstacles.
 @onready var _nav_agent: NavigationAgent2D = $NavigationAgent2D
 
+## HitArea for bullet collision detection.
+## Used to disable collision when enemy dies so bullets pass through.
+@onready var _hit_area: Area2D = $HitArea
+
 ## Wall detection raycasts for obstacle avoidance (created at runtime).
 var _wall_raycasts: Array[RayCast2D] = []
 
@@ -3363,6 +3367,12 @@ func _on_death() -> void:
 	_log_to_file("Enemy died")
 	died.emit()
 
+	# Disable hit area collision so bullets pass through dead enemies
+	# This prevents dead enemies from "absorbing" bullets before respawn/deletion
+	if _hit_area:
+		_hit_area.set_deferred("monitorable", false)
+		_hit_area.set_deferred("monitoring", false)
+
 	# Unregister from sound propagation when dying
 	_unregister_sound_listener()
 
@@ -3436,6 +3446,10 @@ func _reset() -> void:
 	_initialize_ammo()
 	_update_health_visual()
 	_initialize_goap_state()
+	# Re-enable hit area collision after respawning
+	if _hit_area:
+		_hit_area.monitorable = true
+		_hit_area.monitoring = true
 	# Re-register for sound propagation after respawning
 	_register_sound_listener()
 
