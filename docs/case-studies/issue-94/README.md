@@ -213,6 +213,18 @@ for side_multiplier: float in [1.0, -1.0]:
 
 **Always check CI build logs for parse errors.** The build can succeed (producing an EXE) even if scripts have parse errors. In Godot, a script with parse errors simply won't load, causing silent failures at runtime.
 
+## Collected Data
+
+### CI Build Logs
+
+The `ci-logs/` directory contains the CI build logs collected during the investigation:
+- `build-21103908270.log` - Build after sidestep behavior commit
+- `build-21104089330.log` - Build after parse error fixes
+- `build-21104116910.log` - Build after type inference fixes
+- `latest-build.log` - Most recent CI build log
+
+These logs were essential for discovering the GDScript parse errors that caused the AI to completely fail in exported builds.
+
 ## References
 
 - Issue: https://github.com/Jhon-Crow/godot-topdown-MVP/issues/94
