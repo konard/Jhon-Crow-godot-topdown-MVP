@@ -438,6 +438,18 @@ const FLANK_STUCK_MAX_TIME: float = 2.0
 ## Minimum distance that counts as progress toward flank target.
 const FLANK_PROGRESS_THRESHOLD: float = 10.0
 
+## Counter for consecutive flanking failures (to prevent infinite loops).
+var _flank_fail_count: int = 0
+
+## Maximum number of consecutive flanking failures before disabling flanking temporarily.
+const FLANK_FAIL_MAX_COUNT: int = 2
+
+## Cooldown timer after flanking failures (prevents immediate retry).
+var _flank_cooldown_timer: float = 0.0
+
+## Duration to wait after flanking failures before allowing retry (seconds).
+const FLANK_COOLDOWN_DURATION: float = 5.0
+
 ## --- Assault State (coordinated multi-enemy rush) ---
 ## Timer for assault wait period (5 seconds before rushing).
 var _assault_wait_timer: float = 0.0
@@ -652,6 +664,14 @@ func _physics_process(delta: float) -> void:
 
 	# Update reload timer
 	_update_reload(delta)
+
+	# Update flank cooldown timer (allows flanking to re-enable after failures)
+	if _flank_cooldown_timer > 0.0:
+		_flank_cooldown_timer -= delta
+		if _flank_cooldown_timer <= 0.0:
+			_flank_cooldown_timer = 0.0
+			# Reset failure count when cooldown expires
+			_flank_fail_count = 0
 
 	# Check for player visibility and try to find player if not found
 	if _player == null:
@@ -948,7 +968,7 @@ func _process_combat_state(delta: float) -> void:
 			_seeking_clear_shot = false
 			_clear_shot_timer = 0.0
 			# Try flanking to get around the obstacle
-			if enable_flanking:
+			if _can_attempt_flanking():
 				_transition_to_flanking()
 			else:
 				_transition_to_pursuing()
@@ -1233,11 +1253,22 @@ func _process_flanking_state(delta: float) -> void:
 	if distance_moved < FLANK_PROGRESS_THRESHOLD:
 		_flank_stuck_timer += delta
 		if _flank_stuck_timer >= FLANK_STUCK_MAX_TIME:
-			var msg := "FLANKING stuck (%.1fs no progress), target=%s, pos=%s" % [_flank_stuck_timer, _flank_target, global_position]
+			var msg := "FLANKING stuck (%.1fs no progress), target=%s, pos=%s, fail_count=%d" % [_flank_stuck_timer, _flank_target, global_position, _flank_fail_count + 1]
 			_log_debug(msg)
 			_log_to_file(msg)
 			_flank_side_initialized = false
-			# Try the other flank side or give up
+			# Increment failure counter and start cooldown
+			_flank_fail_count += 1
+			_flank_cooldown_timer = FLANK_COOLDOWN_DURATION
+			# After multiple failures, go directly to combat or assault to break the loop
+			if _flank_fail_count >= FLANK_FAIL_MAX_COUNT:
+				var msg2 := "FLANKING disabled after %d failures, switching to direct engagement" % _flank_fail_count
+				_log_debug(msg2)
+				_log_to_file(msg2)
+				# Go to combat instead of pursuing to break the FLANKING->PURSUING->FLANKING loop
+				_transition_to_combat()
+				return
+			# Try combat if we can see the player, otherwise pursue
 			if _can_see_player:
 				_transition_to_combat()
 			else:
@@ -1247,6 +1278,9 @@ func _process_flanking_state(delta: float) -> void:
 		# Making progress - reset stuck timer and update last position
 		_flank_stuck_timer = 0.0
 		_flank_last_position = global_position
+		# Success clears failure count
+		if _flank_fail_count > 0:
+			_flank_fail_count = 0
 
 	# If under fire, retreat with shooting behavior
 	if _under_fire and enable_cover:
@@ -1558,7 +1592,7 @@ func _process_pursuing_state(delta: float) -> void:
 					_pursuit_approach_timer = 0.0
 					return
 				# Try flanking if player not visible
-				if enable_flanking and _player:
+				if _can_attempt_flanking() and _player:
 					_log_debug("Attempting flanking maneuver")
 					_transition_to_flanking()
 					return
@@ -1593,7 +1627,7 @@ func _process_pursuing_state(delta: float) -> void:
 	_find_pursuit_cover_toward_player()
 	if not _has_pursuit_cover:
 		# Can't find cover to pursue, try flanking or combat
-		if enable_flanking and _player:
+		if _can_attempt_flanking() and _player:
 			_transition_to_flanking()
 		else:
 			_transition_to_combat()
@@ -1806,14 +1840,50 @@ func _transition_to_in_cover() -> void:
 	_current_state = AIState.IN_COVER
 
 
+## Check if flanking is available (not on cooldown from failures).
+func _can_attempt_flanking() -> bool:
+	# Check if flanking is enabled
+	if not enable_flanking:
+		return false
+	# Check if we're on cooldown from failures
+	if _flank_cooldown_timer > 0.0:
+		_log_debug("Flanking on cooldown (%.1fs remaining)" % _flank_cooldown_timer)
+		return false
+	# Check if we've hit the failure limit
+	if _flank_fail_count >= FLANK_FAIL_MAX_COUNT:
+		_log_debug("Flanking disabled due to %d failures" % _flank_fail_count)
+		return false
+	return true
+
+
 ## Transition to FLANKING state.
-func _transition_to_flanking() -> void:
+## Returns true if transition succeeded, false if flanking is unavailable.
+func _transition_to_flanking() -> bool:
+	# Check if flanking is available
+	if not _can_attempt_flanking():
+		_log_debug("Cannot transition to FLANKING - disabled or on cooldown")
+		# Fallback to combat instead
+		_transition_to_combat()
+		return false
+
 	_current_state = AIState.FLANKING
 	# Initialize flank side only once per flanking maneuver
 	# Choose the side based on which direction has fewer obstacles
 	_flank_side = _choose_best_flank_side()
 	_flank_side_initialized = true
 	_calculate_flank_position()
+
+	# Validate that the flank target is reachable via navigation
+	if not _is_flank_target_reachable():
+		var msg := "Flank target unreachable via navigation, skipping flanking"
+		_log_debug(msg)
+		_log_to_file(msg)
+		_flank_fail_count += 1
+		_flank_cooldown_timer = FLANK_COOLDOWN_DURATION / 2.0  # Shorter cooldown for path check
+		# Fallback to combat
+		_transition_to_combat()
+		return false
+
 	_flank_cover_wait_timer = 0.0
 	_has_flank_cover = false
 	_has_valid_cover = false
@@ -1824,6 +1894,36 @@ func _transition_to_flanking() -> void:
 	var msg := "FLANKING started: target=%s, side=%s, pos=%s" % [_flank_target, "right" if _flank_side > 0 else "left", global_position]
 	_log_debug(msg)
 	_log_to_file(msg)
+	return true
+
+
+## Check if the current flank target is reachable via navigation mesh.
+## Returns true if a path exists, false otherwise.
+func _is_flank_target_reachable() -> bool:
+	if _nav_agent == null:
+		return true  # Assume reachable if no nav agent
+
+	# Set target and check if path exists
+	_nav_agent.target_position = _flank_target
+
+	# If navigation says we're already finished, the target might be unreachable
+	# or we're already there. Check distance to determine.
+	if _nav_agent.is_navigation_finished():
+		var distance: float = global_position.distance_to(_flank_target)
+		# If we're far from target but navigation is "finished", it's unreachable
+		if distance > 50.0:
+			return false
+
+	# Check if the path distance is reasonable (not excessively long)
+	var path_distance: float = _nav_agent.distance_to_target()
+	var straight_distance: float = global_position.distance_to(_flank_target)
+
+	# If path distance is more than 3x the straight line distance, consider it blocked
+	if path_distance > straight_distance * 3.0 and path_distance > 500.0:
+		_log_debug("Flank path too long: %.0f vs straight %.0f" % [path_distance, straight_distance])
+		return false
+
+	return true
 
 
 ## Transition to SUPPRESSED state.
@@ -3198,6 +3298,8 @@ func _reset() -> void:
 	_flank_state_timer = 0.0
 	_flank_stuck_timer = 0.0
 	_flank_last_position = Vector2.ZERO
+	_flank_fail_count = 0
+	_flank_cooldown_timer = 0.0
 	_initialize_health()
 	_initialize_ammo()
 	_update_health_visual()
