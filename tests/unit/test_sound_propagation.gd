@@ -110,7 +110,7 @@ func test_emit_sound_notifies_listener_in_range() -> void:
 
 func test_emit_sound_does_not_notify_listener_out_of_range() -> void:
 	var listener := MockListener.new()
-	listener.global_position = Vector2(2000, 0)  # Beyond 1500 pixel gunshot range
+	listener.global_position = Vector2(1600, 0)  # Beyond ~1468.6 pixel gunshot range
 	add_child(listener)
 
 	_sound_propagation.register_listener(listener)
@@ -227,16 +227,16 @@ func test_multiple_listeners_receive_sound() -> void:
 
 
 func test_get_propagation_distance_for_known_types() -> void:
-	# GUNSHOT = 0
-	assert_eq(_sound_propagation.get_propagation_distance(0), 1500.0, "Gunshot should have 1500 range")
-	# EXPLOSION = 1
-	assert_eq(_sound_propagation.get_propagation_distance(1), 2500.0, "Explosion should have 2500 range")
+	# GUNSHOT = 0 (viewport diagonal ≈ 1468.6)
+	assert_almost_eq(_sound_propagation.get_propagation_distance(0), 1468.6, 0.1, "Gunshot should have viewport diagonal range")
+	# EXPLOSION = 1 (1.5x viewport diagonal)
+	assert_almost_eq(_sound_propagation.get_propagation_distance(1), 2200.0, 0.1, "Explosion should have 2200 range")
 	# FOOTSTEP = 2
-	assert_eq(_sound_propagation.get_propagation_distance(2), 200.0, "Footstep should have 200 range")
+	assert_almost_eq(_sound_propagation.get_propagation_distance(2), 180.0, 0.1, "Footstep should have 180 range")
 	# RELOAD = 3
-	assert_eq(_sound_propagation.get_propagation_distance(3), 400.0, "Reload should have 400 range")
+	assert_almost_eq(_sound_propagation.get_propagation_distance(3), 360.0, 0.1, "Reload should have 360 range")
 	# IMPACT = 4
-	assert_eq(_sound_propagation.get_propagation_distance(4), 600.0, "Impact should have 600 range")
+	assert_almost_eq(_sound_propagation.get_propagation_distance(4), 550.0, 0.1, "Impact should have 550 range")
 
 
 func test_get_propagation_distance_for_unknown_type_returns_default() -> void:
@@ -266,3 +266,120 @@ func test_null_listener_is_not_registered() -> void:
 	_sound_propagation.register_listener(null)
 
 	assert_eq(_sound_propagation.get_listener_count(), 0, "Null listener should not be registered")
+
+
+# =====================================================
+# Tests for physically-based sound intensity calculation
+# =====================================================
+
+func test_calculate_intensity_at_reference_distance() -> void:
+	# At reference distance (50 pixels), intensity should be 1.0
+	var intensity := _sound_propagation.calculate_intensity(50.0)
+	assert_almost_eq(intensity, 1.0, 0.001, "Intensity at reference distance should be 1.0")
+
+
+func test_calculate_intensity_closer_than_reference() -> void:
+	# Closer than reference distance should still be 1.0 (clamped)
+	var intensity := _sound_propagation.calculate_intensity(25.0)
+	assert_almost_eq(intensity, 1.0, 0.001, "Intensity closer than reference should be 1.0")
+
+
+func test_calculate_intensity_at_zero_distance() -> void:
+	# At zero distance should be 1.0
+	var intensity := _sound_propagation.calculate_intensity(0.0)
+	assert_almost_eq(intensity, 1.0, 0.001, "Intensity at zero distance should be 1.0")
+
+
+func test_calculate_intensity_inverse_square_law() -> void:
+	# At double reference distance (100), intensity should be 1/4 = 0.25
+	# Using formula: (50/100)² = 0.25
+	var intensity := _sound_propagation.calculate_intensity(100.0)
+	assert_almost_eq(intensity, 0.25, 0.001, "Intensity at 2x reference should be 0.25")
+
+
+func test_calculate_intensity_at_triple_reference() -> void:
+	# At triple reference distance (150), intensity should be 1/9 ≈ 0.111
+	# Using formula: (50/150)² = 0.111
+	var intensity := _sound_propagation.calculate_intensity(150.0)
+	assert_almost_eq(intensity, 0.111, 0.01, "Intensity at 3x reference should be ~0.111")
+
+
+func test_calculate_intensity_at_viewport_distance() -> void:
+	# At viewport diagonal distance (~1468.6), intensity should be very low
+	# Using formula: (50/1468.6)² ≈ 0.00116
+	var intensity := _sound_propagation.calculate_intensity(1468.6)
+	assert_lt(intensity, 0.01, "Intensity at viewport distance should be less than 0.01")
+	assert_gt(intensity, 0.0, "Intensity at viewport distance should be greater than 0")
+
+
+func test_calculate_intensity_with_absorption() -> void:
+	# With absorption, intensity should be lower than without
+	var base_intensity := _sound_propagation.calculate_intensity(500.0)
+	var absorbed_intensity := _sound_propagation.calculate_intensity_with_absorption(500.0)
+	assert_lt(absorbed_intensity, base_intensity, "Absorbed intensity should be less than base")
+
+
+func test_intensity_decreases_with_distance() -> void:
+	# Intensity should monotonically decrease with distance
+	var i1 := _sound_propagation.calculate_intensity(100.0)
+	var i2 := _sound_propagation.calculate_intensity(200.0)
+	var i3 := _sound_propagation.calculate_intensity(400.0)
+
+	assert_gt(i1, i2, "Intensity at 100 should be greater than at 200")
+	assert_gt(i2, i3, "Intensity at 200 should be greater than at 400")
+
+
+## Mock listener with intensity support for testing.
+class MockListenerWithIntensity extends Node2D:
+	var sounds_heard: Array = []
+	var last_intensity: float = 0.0
+
+	func on_sound_heard_with_intensity(sound_type: int, position: Vector2, source_type: int, source_node: Node2D, intensity: float) -> void:
+		sounds_heard.append({
+			"type": sound_type,
+			"position": position,
+			"source_type": source_type,
+			"source_node": source_node,
+			"intensity": intensity
+		})
+		last_intensity = intensity
+
+	func get_sound_count() -> int:
+		return sounds_heard.size()
+
+
+func test_emit_sound_passes_intensity_to_listener() -> void:
+	var listener := MockListenerWithIntensity.new()
+	listener.global_position = Vector2(100, 0)  # 100 pixels from origin
+	add_child(listener)
+
+	_sound_propagation.register_listener(listener)
+
+	# Emit a gunshot at origin
+	_sound_propagation.emit_sound(0, Vector2.ZERO, 0, null)
+
+	assert_eq(listener.get_sound_count(), 1, "Listener should receive 1 sound")
+	# At 100 pixels, intensity should be (50/100)² = 0.25
+	assert_almost_eq(listener.last_intensity, 0.25, 0.01, "Intensity at 100 pixels should be 0.25")
+
+	listener.queue_free()
+
+
+func test_emit_sound_respects_min_intensity_threshold() -> void:
+	var listener := MockListenerWithIntensity.new()
+	# Place listener at a distance where intensity is below threshold
+	# At 1000 pixels, intensity = (50/1000)² = 0.0025
+	# With threshold of 0.01, this should still be received
+	# But at 2000 pixels, intensity = (50/2000)² = 0.000625, below threshold
+	listener.global_position = Vector2(2000, 0)
+	add_child(listener)
+
+	_sound_propagation.register_listener(listener)
+
+	# Use custom range to ensure listener is in range
+	_sound_propagation.emit_sound(0, Vector2.ZERO, 0, null, 3000.0)
+
+	# Listener should NOT receive sound because intensity is below threshold
+	assert_eq(listener.get_sound_count(), 0, "Listener should not receive very low intensity sound")
+
+	listener.queue_free()

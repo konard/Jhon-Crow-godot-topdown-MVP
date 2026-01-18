@@ -599,10 +599,17 @@ func _setup_threat_sphere() -> void:
 
 ## Register this enemy as a listener for in-game sound propagation.
 ## This allows the enemy to react to sounds like gunshots even when not in direct combat.
+## Uses call_deferred to ensure SoundPropagation autoload is fully initialized.
 func _register_sound_listener() -> void:
+	call_deferred("_deferred_register_sound_listener")
+
+
+## Deferred registration to ensure SoundPropagation is ready.
+func _deferred_register_sound_listener() -> void:
 	var sound_propagation: Node = get_node_or_null("/root/SoundPropagation")
 	if sound_propagation and sound_propagation.has_method("register_listener"):
 		sound_propagation.register_listener(self)
+		_log_debug("Registered as sound listener")
 
 
 ## Unregister this enemy from sound propagation when dying or being destroyed.
@@ -621,6 +628,20 @@ func _unregister_sound_listener() -> void:
 ## - source_type: Whether sound is from PLAYER, ENEMY, or NEUTRAL (from SoundPropagation.SourceType)
 ## - source_node: The node that produced the sound (can be null)
 func on_sound_heard(sound_type: int, position: Vector2, source_type: int, source_node: Node2D) -> void:
+	# Default to full intensity if called without intensity parameter
+	on_sound_heard_with_intensity(sound_type, position, source_type, source_node, 1.0)
+
+
+## Called by SoundPropagation when a sound is heard within range (with intensity).
+## This version includes physically-calculated sound intensity.
+##
+## Parameters:
+## - sound_type: The type of sound (from SoundPropagation.SoundType enum)
+## - position: World position where the sound originated
+## - source_type: Whether sound is from PLAYER, ENEMY, or NEUTRAL (from SoundPropagation.SourceType)
+## - source_node: The node that produced the sound (can be null)
+## - intensity: Sound intensity from 0.0 to 1.0 based on inverse square law
+func on_sound_heard_with_intensity(sound_type: int, position: Vector2, source_type: int, source_node: Node2D, intensity: float) -> void:
 	# Only react if alive
 	if not _is_alive:
 		return
@@ -629,16 +650,38 @@ func on_sound_heard(sound_type: int, position: Vector2, source_type: int, source
 	if sound_type != 0:
 		return
 
-	# If already in combat or a combat-related state, no need to react
-	if _current_state != AIState.IDLE:
+	# Calculate distance to sound for logging
+	var distance := global_position.distance_to(position)
+
+	# React based on current state:
+	# - IDLE: Always react to loud sounds
+	# - Other states: Only react to very loud, close sounds (intensity > 0.5)
+	var should_react := false
+
+	if _current_state == AIState.IDLE:
+		# In IDLE state, always investigate sounds above minimal threshold
+		should_react = intensity >= 0.01
+	elif _current_state in [AIState.FLANKING, AIState.RETREATING]:
+		# In tactical movement states, react to loud nearby sounds
+		should_react = intensity >= 0.3
+	else:
+		# In combat-related states, only react to very loud sounds
+		# This prevents enemies from being distracted during active combat
+		should_react = false
+
+	if not should_react:
 		return
 
 	# React to sounds: transition to combat mode to investigate
-	_log_debug("Heard gunshot from %s at %s, entering COMBAT to investigate" % [
+	_log_debug("Heard gunshot (intensity=%.2f, distance=%.0f) from %s at %s, entering COMBAT" % [
+		intensity,
+		distance,
 		"player" if source_type == 0 else ("enemy" if source_type == 1 else "neutral"),
 		position
 	])
-	_log_to_file("Heard gunshot at %s, source_type=%d" % [position, source_type])
+	_log_to_file("Heard gunshot at %s, source_type=%d, intensity=%.2f, distance=%.0f" % [
+		position, source_type, intensity, distance
+	])
 
 	# Store the position of the sound as a point of interest
 	# The enemy will investigate this location

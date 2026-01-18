@@ -32,15 +32,30 @@ enum SourceType {
 	NEUTRAL   ## Sound came from environment or unknown source
 }
 
+## Viewport dimensions for reference (from project settings).
+## Used to calculate viewport-relative propagation distances.
+const VIEWPORT_WIDTH: float = 1280.0
+const VIEWPORT_HEIGHT: float = 720.0
+const VIEWPORT_DIAGONAL: float = 1468.6  # sqrt(1280^2 + 720^2) ≈ 1468.6 pixels
+
 ## Propagation distances for each sound type (in pixels).
+## Gunshot range is approximately viewport diagonal for realistic gameplay.
 ## These define how far a sound can travel before becoming inaudible.
 const PROPAGATION_DISTANCES: Dictionary = {
-	SoundType.GUNSHOT: 1500.0,
-	SoundType.EXPLOSION: 2500.0,
-	SoundType.FOOTSTEP: 200.0,
-	SoundType.RELOAD: 400.0,
-	SoundType.IMPACT: 600.0
+	SoundType.GUNSHOT: 1468.6,      ## Approximately viewport diagonal
+	SoundType.EXPLOSION: 2200.0,    ## 1.5x viewport diagonal
+	SoundType.FOOTSTEP: 180.0,      ## Very short range
+	SoundType.RELOAD: 360.0,        ## Short range
+	SoundType.IMPACT: 550.0         ## Medium range
 }
+
+## Reference distance for sound intensity calculations (in pixels).
+## At this distance, sound is at "full" intensity (1.0).
+const REFERENCE_DISTANCE: float = 50.0
+
+## Minimum intensity threshold below which sound is not propagated.
+## This prevents computation for very distant, inaudible sounds.
+const MIN_INTENSITY_THRESHOLD: float = 0.01
 
 ## Registered sound listeners (typically enemies).
 ## Each listener must have an on_sound_heard(sound_type, position, source_type, source_node) method.
@@ -83,6 +98,7 @@ func unregister_listener(listener: Node2D) -> void:
 
 ## Emit a sound at a given position.
 ## All registered listeners within range will be notified.
+## Uses physically-based inverse square law for intensity calculation.
 ##
 ## Parameters:
 ## - sound_type: The type of sound being emitted
@@ -117,13 +133,62 @@ func emit_sound(sound_type: SoundType, position: Vector2, source_type: SourceTyp
 		# Check if listener is within propagation range
 		var distance := listener.global_position.distance_to(position)
 		if distance <= propagation_distance:
-			# Notify the listener
-			if listener.has_method("on_sound_heard"):
-				listener.on_sound_heard(sound_type, position, source_type, source_node)
-				listeners_notified += 1
+			# Calculate sound intensity using inverse square law
+			# Intensity = 1.0 at reference distance, falls off with 1/r²
+			var intensity := calculate_intensity(distance)
+
+			# Only notify if intensity is above threshold
+			if intensity >= MIN_INTENSITY_THRESHOLD:
+				# Notify the listener with intensity information
+				if listener.has_method("on_sound_heard_with_intensity"):
+					listener.on_sound_heard_with_intensity(sound_type, position, source_type, source_node, intensity)
+					listeners_notified += 1
+				elif listener.has_method("on_sound_heard"):
+					listener.on_sound_heard(sound_type, position, source_type, source_node)
+					listeners_notified += 1
 
 	if listeners_notified > 0:
 		_log_debug("Sound notified %d listeners" % listeners_notified)
+
+
+## Calculate sound intensity at a given distance using inverse square law.
+## Uses physically-inspired attenuation: intensity = (reference_distance / distance)²
+##
+## Parameters:
+## - distance: Distance from sound source in pixels
+##
+## Returns:
+## - Intensity value from 0.0 to 1.0 (clamped)
+func calculate_intensity(distance: float) -> float:
+	# At or closer than reference distance, full intensity
+	if distance <= REFERENCE_DISTANCE:
+		return 1.0
+
+	# Inverse square law: I = I₀ * (r₀/r)²
+	# Where I₀ = 1.0 at reference distance r₀
+	var intensity := pow(REFERENCE_DISTANCE / distance, 2.0)
+
+	return clampf(intensity, 0.0, 1.0)
+
+
+## Calculate sound intensity with atmospheric absorption for more realism.
+## Includes both inverse square law and high-frequency absorption.
+##
+## Parameters:
+## - distance: Distance from sound source in pixels
+## - absorption_coefficient: How quickly high frequencies are absorbed (default 0.001)
+##
+## Returns:
+## - Intensity value from 0.0 to 1.0 (clamped)
+func calculate_intensity_with_absorption(distance: float, absorption_coefficient: float = 0.001) -> float:
+	# Start with inverse square law intensity
+	var base_intensity := calculate_intensity(distance)
+
+	# Apply exponential atmospheric absorption
+	# This simulates high-frequency content being absorbed over distance
+	var absorption_factor := exp(-absorption_coefficient * distance)
+
+	return clampf(base_intensity * absorption_factor, 0.0, 1.0)
 
 
 ## Convenience method to emit a gunshot sound from the player.
