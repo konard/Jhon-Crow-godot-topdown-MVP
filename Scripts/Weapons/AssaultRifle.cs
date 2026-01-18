@@ -82,6 +82,17 @@ public partial class AssaultRifle : BaseWeapon
     private Vector2 _aimDirection = Vector2.Right;
 
     /// <summary>
+    /// Current aim angle in radians. Used for sensitivity-based aiming
+    /// where the aim interpolates smoothly toward the target angle.
+    /// </summary>
+    private float _currentAimAngle = 0.0f;
+
+    /// <summary>
+    /// Whether the aim angle has been initialized.
+    /// </summary>
+    private bool _aimAngleInitialized = false;
+
+    /// <summary>
     /// Whether the weapon is currently firing a burst.
     /// </summary>
     private bool _isBurstFiring;
@@ -171,6 +182,10 @@ public partial class AssaultRifle : BaseWeapon
     /// Updates the laser sight to point towards the mouse cursor.
     /// Uses raycasting to stop at obstacles.
     /// Also stores the aim direction for use when shooting.
+    /// Applies sensitivity setting from WeaponData to create a "leash" effect:
+    /// - Sensitivity > 0: Aim interpolates toward cursor at speed proportional to sensitivity.
+    ///   Higher sensitivity = faster rotation, feels like cursor is on a shorter "leash".
+    /// - Sensitivity = 0: Direct aim at cursor (automatic mode, instant response).
     /// </summary>
     private void UpdateLaserSight()
     {
@@ -181,14 +196,66 @@ public partial class AssaultRifle : BaseWeapon
 
         // Get direction to mouse
         Vector2 mousePos = GetGlobalMousePosition();
-        Vector2 direction = (mousePos - GlobalPosition).Normalized();
+        Vector2 toMouse = mousePos - GlobalPosition;
+
+        // Calculate target angle from player to mouse
+        float targetAngle = toMouse.Angle();
+
+        // Initialize aim angle on first frame
+        if (!_aimAngleInitialized)
+        {
+            _currentAimAngle = targetAngle;
+            _aimAngleInitialized = true;
+        }
+
+        Vector2 direction;
+
+        // Apply sensitivity "leash" effect when sensitivity is set
+        // This makes the aiming consistent regardless of actual cursor position
+        if (WeaponData != null && WeaponData.Sensitivity > 0)
+        {
+            // Calculate angle difference, normalized to [-PI, PI]
+            float angleDiff = Mathf.Wrap(targetAngle - _currentAimAngle, -Mathf.Pi, Mathf.Pi);
+
+            // Sensitivity controls rotation speed
+            // Higher sensitivity = faster interpolation toward target
+            // Base rotation speed is multiplied by sensitivity
+            // Sensitivity of 1 = base speed, Sensitivity of 4 = 4x speed
+            float rotationSpeed = WeaponData.Sensitivity * 10.0f; // radians per second base
+
+            // Calculate maximum rotation this frame
+            float delta = (float)GetProcessDeltaTime();
+            float maxRotation = rotationSpeed * delta;
+
+            // Clamp the rotation to not overshoot
+            float actualRotation = Mathf.Clamp(angleDiff, -maxRotation, maxRotation);
+
+            // Apply rotation
+            _currentAimAngle += actualRotation;
+
+            // Convert angle to direction
+            direction = new Vector2(Mathf.Cos(_currentAimAngle), Mathf.Sin(_currentAimAngle));
+        }
+        else
+        {
+            // Automatic mode: direct aim at cursor (instant response)
+            if (toMouse.LengthSquared() > 0.001f)
+            {
+                direction = toMouse.Normalized();
+                _currentAimAngle = targetAngle; // Keep angle in sync
+            }
+            else
+            {
+                direction = _aimDirection; // Keep previous direction if cursor is at player position
+            }
+        }
 
         // Store the aim direction for shooting
         _aimDirection = direction;
 
         // Calculate maximum laser length based on viewport size
         // This ensures the laser extends to viewport edges regardless of direction
-        var viewport = GetViewport();
+        Viewport? viewport = GetViewport();
         if (viewport == null)
         {
             return;

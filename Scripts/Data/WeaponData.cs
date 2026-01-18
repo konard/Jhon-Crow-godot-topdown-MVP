@@ -81,4 +81,14 @@ public partial class WeaponData : Resource
     /// </summary>
     [Export]
     public float Loudness { get; set; } = 1469.0f;
+
+    /// <summary>
+    /// Aiming sensitivity for the weapon. Controls how fast the weapon rotates toward the cursor.
+    /// Works like a "leash" - the virtual cursor distance from player is divided by this value.
+    /// Higher sensitivity = faster rotation (cursor feels closer).
+    /// When set to 0 (default), uses automatic sensitivity based on actual cursor distance.
+    /// Recommended values: 1-10, with 4 being a good middle ground.
+    /// </summary>
+    [Export(PropertyHint.Range, "0,20,0.1")]
+    public float Sensitivity { get; set; } = 0.0f;
 }
