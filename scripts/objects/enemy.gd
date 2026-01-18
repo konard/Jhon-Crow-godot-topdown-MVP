@@ -947,7 +947,10 @@ func _process_ai_state(delta: float) -> void:
 	# immediately shoot from ANY state. This is the highest priority action
 	# that bypasses ALL other state logic including timers.
 	# The enemy must seize the opportunity when the player is not focused on them.
-	if _goap_world_state.get("player_distracted", false) and _can_see_player and _player:
+	# NOTE: This behavior is ONLY enabled in Hard difficulty mode.
+	var difficulty_manager: Node = get_node_or_null("/root/DifficultyManager")
+	var is_distraction_enabled: bool = difficulty_manager != null and difficulty_manager.is_distraction_attack_enabled()
+	if is_distraction_enabled and _goap_world_state.get("player_distracted", false) and _can_see_player and _player:
 		# Check if we have a clear shot (no wall blocking bullet spawn)
 		var direction_to_player := (_player.global_position - global_position).normalized()
 		var has_clear_shot := _is_bullet_spawn_clear(direction_to_player)
