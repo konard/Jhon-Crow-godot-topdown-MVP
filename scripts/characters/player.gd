@@ -222,6 +222,11 @@ func _shoot() -> void:
 	if audio_manager and audio_manager.has_method("play_m16_shot"):
 		audio_manager.play_m16_shot(global_position)
 
+	# Emit gunshot sound for in-game sound propagation (alerts enemies)
+	var sound_propagation: Node = get_node_or_null("/root/SoundPropagation")
+	if sound_propagation and sound_propagation.has_method("emit_player_gunshot"):
+		sound_propagation.emit_player_gunshot(global_position, self)
+
 	# Play shell casing sound with a small delay
 	if audio_manager and audio_manager.has_method("play_shell_rifle"):
 		_play_delayed_shell_sound()
