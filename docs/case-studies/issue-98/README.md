@@ -379,6 +379,88 @@ Instead of relying solely on raycast-based wall avoidance, the solution integrat
 
 ---
 
+---
+
+## Fourth Implementation: FLANKING→PURSUING Infinite Loop Fix
+
+### Problem Identified
+
+Despite NavMesh integration, the game log still showed a specific "stomping in place" pattern affecting Enemy7 and Enemy10:
+
+```
+[ENEMY] [Enemy10] FLANKING stuck (2.0s no progress), target=(1534.44, 484.0432), pos=(1412.007, 824.0698)
+[ENEMY] [Enemy10] State: FLANKING -> PURSUING
+[ENEMY] [Enemy10] FLANKING started: target=(1534.441, 484.0421), side=left, pos=(1412.003, 824.0698)
+```
+
+**Pattern Analysis**:
+1. Enemy detects it's stuck in FLANKING state (no progress for 2 seconds)
+2. Enemy transitions to PURSUING state
+3. PURSUING state can't find cover, calls `_transition_to_flanking()`
+4. Enemy immediately restarts flanking with nearly identical unreachable target
+5. Loop repeats indefinitely for the remaining 40 seconds of gameplay
+
+**Root Cause**: The FLANKING state transitions to PURSUING on failure, and PURSUING transitions back to FLANKING when it can't find cover. Neither state remembers that flanking just failed, creating an infinite loop.
+
+### Solution Implemented
+
+**New Variables Added**:
+```gdscript
+## Counter for consecutive flanking failures (to prevent infinite loops).
+var _flank_fail_count: int = 0
+
+## Maximum number of consecutive flanking failures before disabling flanking temporarily.
+const FLANK_FAIL_MAX_COUNT: int = 2
+
+## Cooldown timer after flanking failures (prevents immediate retry).
+var _flank_cooldown_timer: float = 0.0
+
+## Duration to wait after flanking failures before allowing retry (seconds).
+const FLANK_COOLDOWN_DURATION: float = 5.0
+```
+
+**New Functions Added**:
+1. `_can_attempt_flanking() -> bool` - Checks if flanking is available (not on cooldown)
+2. `_is_flank_target_reachable() -> bool` - Validates flank target is reachable via NavMesh
+
+**Key Changes**:
+1. When stuck detection triggers, increment `_flank_fail_count` and start cooldown
+2. After 2 consecutive failures, go directly to COMBAT instead of PURSUING
+3. All calls to `_transition_to_flanking()` now check `_can_attempt_flanking()` first
+4. `_transition_to_flanking()` validates target is reachable before committing
+5. Cooldown timer (5 seconds) allows flanking to re-enable after failures
+
+**Stuck Detection Updated**:
+```gdscript
+if _flank_stuck_timer >= FLANK_STUCK_MAX_TIME:
+    _flank_fail_count += 1
+    _flank_cooldown_timer = FLANK_COOLDOWN_DURATION
+
+    # After multiple failures, break the loop by going to COMBAT
+    if _flank_fail_count >= FLANK_FAIL_MAX_COUNT:
+        _transition_to_combat()  # Not PURSUING!
+        return
+```
+
+**Expected Behavior After Fix**:
+1. First flanking failure: tries PURSUING, which may try flanking again
+2. Second flanking failure: goes directly to COMBAT, breaking the loop
+3. After 5 seconds cooldown: flanking becomes available again
+4. Successful flanking clears the failure counter
+
+### Files Modified
+
+1. `scripts/objects/enemy.gd`:
+   - Added failure tracking variables
+   - Added `_can_attempt_flanking()` function
+   - Added `_is_flank_target_reachable()` function
+   - Updated `_transition_to_flanking()` to return bool and check availability
+   - Updated all callers to use `_can_attempt_flanking()` instead of just `enable_flanking`
+   - Updated `_reset()` to clear failure count and cooldown
+   - Added cooldown timer update in `_physics_process()`
+
+---
+
 ## Updated Timeline
 
 - **2026-01-18 04:50**: Issue #98 created
@@ -388,3 +470,4 @@ Instead of relying solely on raycast-based wall avoidance, the solution integrat
 - **2026-01-18 08:34**: User provides game log showing stomping behavior
 - **2026-01-18 08:43**: Game log downloaded to case study folder
 - **2026-01-18 XX:XX**: Third implementation - NavMesh integration for proper pathfinding
+- **2026-01-18 XX:XX**: Fourth implementation - FLANKING→PURSUING loop fix with failure tracking
