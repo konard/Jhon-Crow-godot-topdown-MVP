@@ -32,6 +32,9 @@ size = Vector2(80, 80)
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_cover_cabinet"]
 size = Vector2(48, 96)
 
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_corner_fill"]
+size = Vector2(24, 24)
+
 [node name="BuildingLevel" type="Node2D"]
 script = ExtResource("1_building_level")
 
@@ -412,6 +415,113 @@ color = Color(0.35, 0.3, 0.25, 1)
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Environment/InteriorWalls/MainHall_WallTop"]
 shape = SubResource("RectangleShape2D_interior_wall_h")
+
+[node name="CornerFills" type="Node2D" parent="Environment"]
+
+[node name="Room2_CornerBL" type="StaticBody2D" parent="Environment/CornerFills"]
+position = Vector2(512, 1000)
+collision_layer = 4
+collision_mask = 0
+
+[node name="ColorRect" type="ColorRect" parent="Environment/CornerFills/Room2_CornerBL"]
+offset_left = -12.0
+offset_top = -12.0
+offset_right = 12.0
+offset_bottom = 12.0
+color = Color(0.35, 0.3, 0.25, 1)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Environment/CornerFills/Room2_CornerBL"]
+shape = SubResource("RectangleShape2D_corner_fill")
+
+[node name="Room2_CornerBR" type="StaticBody2D" parent="Environment/CornerFills"]
+position = Vector2(912, 1000)
+collision_layer = 4
+collision_mask = 0
+
+[node name="ColorRect" type="ColorRect" parent="Environment/CornerFills/Room2_CornerBR"]
+offset_left = -12.0
+offset_top = -12.0
+offset_right = 12.0
+offset_bottom = 12.0
+color = Color(0.35, 0.3, 0.25, 1)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Environment/CornerFills/Room2_CornerBR"]
+shape = SubResource("RectangleShape2D_corner_fill")
+
+[node name="Corridor_CornerTR" type="StaticBody2D" parent="Environment/CornerFills"]
+position = Vector2(1364, 700)
+collision_layer = 4
+collision_mask = 0
+
+[node name="ColorRect" type="ColorRect" parent="Environment/CornerFills/Corridor_CornerTR"]
+offset_left = -12.0
+offset_top = -12.0
+offset_right = 12.0
+offset_bottom = 12.0
+color = Color(0.35, 0.3, 0.25, 1)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Environment/CornerFills/Corridor_CornerTR"]
+shape = SubResource("RectangleShape2D_corner_fill")
+
+[node name="Corridor_CornerBR" type="StaticBody2D" parent="Environment/CornerFills"]
+position = Vector2(1364, 1012)
+collision_layer = 4
+collision_mask = 0
+
+[node name="ColorRect" type="ColorRect" parent="Environment/CornerFills/Corridor_CornerBR"]
+offset_left = -12.0
+offset_top = -12.0
+offset_right = 12.0
+offset_bottom = 12.0
+color = Color(0.35, 0.3, 0.25, 1)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Environment/CornerFills/Corridor_CornerBR"]
+shape = SubResource("RectangleShape2D_corner_fill")
+
+[node name="MainHall_CornerTL" type="StaticBody2D" parent="Environment/CornerFills"]
+position = Vector2(1000, 1388)
+collision_layer = 4
+collision_mask = 0
+
+[node name="ColorRect" type="ColorRect" parent="Environment/CornerFills/MainHall_CornerTL"]
+offset_left = -12.0
+offset_top = -12.0
+offset_right = 12.0
+offset_bottom = 12.0
+color = Color(0.35, 0.3, 0.25, 1)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Environment/CornerFills/MainHall_CornerTL"]
+shape = SubResource("RectangleShape2D_corner_fill")
+
+[node name="MainHall_CornerTR" type="StaticBody2D" parent="Environment/CornerFills"]
+position = Vector2(1400, 1388)
+collision_layer = 4
+collision_mask = 0
+
+[node name="ColorRect" type="ColorRect" parent="Environment/CornerFills/MainHall_CornerTR"]
+offset_left = -12.0
+offset_top = -12.0
+offset_right = 12.0
+offset_bottom = 12.0
+color = Color(0.35, 0.3, 0.25, 1)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Environment/CornerFills/MainHall_CornerTR"]
+shape = SubResource("RectangleShape2D_corner_fill")
+
+[node name="StorageRoom_CornerTR" type="StaticBody2D" parent="Environment/CornerFills"]
+position = Vector2(500, 1600)
+collision_layer = 4
+collision_mask = 0
+
+[node name="ColorRect" type="ColorRect" parent="Environment/CornerFills/StorageRoom_CornerTR"]
+offset_left = -12.0
+offset_top = -12.0
+offset_right = 12.0
+offset_bottom = 12.0
+color = Color(0.35, 0.3, 0.25, 1)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Environment/CornerFills/StorageRoom_CornerTR"]
+shape = SubResource("RectangleShape2D_corner_fill")
 
 [node name="Cover" type="Node2D" parent="Environment"]
 

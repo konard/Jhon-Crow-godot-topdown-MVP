@@ -407,6 +407,24 @@ var _flank_side: float = 1.0
 ## Whether flank side has been initialized for this flanking maneuver.
 var _flank_side_initialized: bool = false
 
+## Timer for total time spent in FLANKING state (for timeout detection).
+var _flank_state_timer: float = 0.0
+
+## Maximum time to spend in FLANKING state before giving up (seconds).
+const FLANK_STATE_MAX_TIME: float = 5.0
+
+## Last recorded position for progress tracking during flanking.
+var _flank_last_position: Vector2 = Vector2.ZERO
+
+## Timer for checking if stuck (no progress toward flank target).
+var _flank_stuck_timer: float = 0.0
+
+## Maximum time without progress before considering stuck (seconds).
+const FLANK_STUCK_MAX_TIME: float = 2.0
+
+## Minimum distance that counts as progress toward flank target.
+const FLANK_PROGRESS_THRESHOLD: float = 10.0
+
 ## --- Assault State (coordinated multi-enemy rush) ---
 ## Timer for assault wait period (5 seconds before rushing).
 var _assault_wait_timer: float = 0.0
@@ -1191,6 +1209,42 @@ func _process_in_cover_state(delta: float) -> void:
 ## Uses intermediate cover positions to navigate around obstacles instead of walking
 ## directly toward the flank target.
 func _process_flanking_state(delta: float) -> void:
+	# Update state timer
+	_flank_state_timer += delta
+
+	# Check for overall FLANKING state timeout
+	if _flank_state_timer >= FLANK_STATE_MAX_TIME:
+		var msg := "FLANKING timeout (%.1fs), target=%s, pos=%s" % [_flank_state_timer, _flank_target, global_position]
+		_log_debug(msg)
+		_log_to_file(msg)
+		_flank_side_initialized = false
+		# Try combat if we can see the player, otherwise pursue
+		if _can_see_player:
+			_transition_to_combat()
+		else:
+			_transition_to_pursuing()
+		return
+
+	# Check for stuck detection - not making progress toward flank target
+	var distance_moved := global_position.distance_to(_flank_last_position)
+	if distance_moved < FLANK_PROGRESS_THRESHOLD:
+		_flank_stuck_timer += delta
+		if _flank_stuck_timer >= FLANK_STUCK_MAX_TIME:
+			var msg := "FLANKING stuck (%.1fs no progress), target=%s, pos=%s" % [_flank_stuck_timer, _flank_target, global_position]
+			_log_debug(msg)
+			_log_to_file(msg)
+			_flank_side_initialized = false
+			# Try the other flank side or give up
+			if _can_see_player:
+				_transition_to_combat()
+			else:
+				_transition_to_pursuing()
+			return
+	else:
+		# Making progress - reset stuck timer and update last position
+		_flank_stuck_timer = 0.0
+		_flank_last_position = global_position
+
 	# If under fire, retreat with shooting behavior
 	if _under_fire and enable_cover:
 		_flank_side_initialized = false
@@ -1860,6 +1914,13 @@ func _transition_to_flanking() -> void:
 	_flank_cover_wait_timer = 0.0
 	_has_flank_cover = false
 	_has_valid_cover = false
+	# Initialize timeout and progress tracking for stuck detection
+	_flank_state_timer = 0.0
+	_flank_stuck_timer = 0.0
+	_flank_last_position = global_position
+	var msg := "FLANKING started: target=%s, side=%s, pos=%s" % [_flank_target, "right" if _flank_side > 0 else "left", global_position]
+	_log_debug(msg)
+	_log_to_file(msg)
 
 
 ## Transition to SUPPRESSED state.
@@ -3159,6 +3220,9 @@ func _reset() -> void:
 	_flank_cover_wait_timer = 0.0
 	_flank_next_cover = Vector2.ZERO
 	_has_flank_cover = false
+	_flank_state_timer = 0.0
+	_flank_stuck_timer = 0.0
+	_flank_last_position = Vector2.ZERO
 	_initialize_health()
 	_initialize_ammo()
 	_update_health_visual()
