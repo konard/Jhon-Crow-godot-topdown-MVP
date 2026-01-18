@@ -98,6 +98,10 @@ reload_step={
 
 project/assembly_name="GodotTopDownTemplate"
 
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/gut/plugin.cfg")
+
 [rendering]
 
 renderer/rendering_method="gl_compatibility"
