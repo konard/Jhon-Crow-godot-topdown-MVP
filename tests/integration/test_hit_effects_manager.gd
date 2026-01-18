@@ -301,11 +301,12 @@ func test_very_large_delta() -> void:
 	assert_eq(manager.time_scale, 1.0, "Time scale should be restored")
 
 
-func test_effect_ends_exactly_at_duration() -> void:
+func test_effect_ends_at_duration_boundary() -> void:
 	manager.on_player_hit_enemy()
 
-	# Process exactly enough time
-	# At 0.8 time scale, 2.4 real seconds = 3.0 game seconds
-	manager.process(2.4)
+	# Process just enough time to cross the boundary
+	# At 0.8 time scale, need > 2.4 real seconds to exceed 3.0 game seconds
+	# Using 2.41 to avoid floating-point precision issues with exact boundary
+	manager.process(2.41)
 
 	assert_false(manager._is_slow_active, "Effects should end at duration boundary")
