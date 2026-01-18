@@ -39,6 +39,9 @@ signal debug_mode_toggled(enabled: bool)
 func _ready() -> void:
 	# Reset stats when starting
 	_reset_stats()
+	# Set mouse mode: confined and hidden (keeps cursor within window and hides it)
+	# This provides immersive fullscreen gameplay experience
+	Input.set_mouse_mode(Input.MOUSE_MODE_CONFINED_HIDDEN)
 	# Log that GameManager is ready
 	_log_to_file("GameManager ready")
 

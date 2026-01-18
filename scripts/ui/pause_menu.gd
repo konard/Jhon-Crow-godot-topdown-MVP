@@ -49,6 +49,8 @@ func toggle_pause() -> void:
 ## Pauses the game and shows the menu.
 func pause_game() -> void:
 	get_tree().paused = true
+	# Show cursor for menu interaction (still confined to window)
+	Input.set_mouse_mode(Input.MOUSE_MODE_CONFINED)
 	show()
 	resume_button.grab_focus()
 
@@ -56,6 +58,8 @@ func pause_game() -> void:
 ## Resumes the game and hides the menu.
 func resume_game() -> void:
 	get_tree().paused = false
+	# Hide cursor again for gameplay (confined and hidden)
+	Input.set_mouse_mode(Input.MOUSE_MODE_CONFINED_HIDDEN)
 	hide()
 
 	# Also close controls menu if open
