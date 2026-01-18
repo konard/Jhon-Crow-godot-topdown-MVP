@@ -275,3 +275,84 @@ When `debug_label_enabled` is true (toggle with F7 in-game):
 - White circle: Current target inspection point
 - Gray circles: Already checked inspection points
 - White line: Path to current inspection point
+
+---
+
+## Post-Implementation Issue: Regression Report
+
+### Date: 2026-01-18
+
+### Issue Description
+
+After deploying the SEARCHING state implementation, user reported:
+- "всё поведение сломалось" (all behavior is broken)
+- "враги не получают урон и не действуют" (enemies don't take damage and don't act)
+
+### Log Files Analyzed
+
+Two log files were provided:
+- `logs/game_log_20260118_060214.txt`
+- `logs/game_log_20260118_060254.txt`
+
+#### Log Content Summary
+
+```
+[06:02:14] [INFO] ============================================================
+[06:02:14] [INFO] GAME LOG STARTED
+[06:02:14] [INFO] ============================================================
+[06:02:14] [INFO] [GameManager] GameManager ready
+[06:02:19] [INFO] [GameManager] Debug mode toggled: ON
+[06:02:26] [INFO] ------------------------------------------------------------
+[06:02:26] [INFO] GAME LOG ENDED
+```
+
+**Critical Observation**: NO enemy spawn logs appeared despite:
+- BuildingLevel.tscn containing 10 enemy instances
+- Enemy.gd calling `_log_spawn_info()` in `_ready()` via `call_deferred()`
+
+### Regression Analysis
+
+#### Change Made
+
+```gdscript
+# In _process_combat_state():
+# Changed from:
+if not _can_see_player:
+    _transition_to_pursuing()
+
+# To:
+if not _can_see_player:
+    _transition_to_searching()
+```
+
+#### Potential Root Causes
+
+1. **State Transition Edge Case**: The `_transition_to_searching()` function checks if `_last_known_player_position != Vector2.ZERO`. If zero, it falls back to `_transition_to_pursuing()`. However, if there's a timing issue or the position is never set, this could cause unexpected behavior.
+
+2. **Raycast in Search Zone Generation**: The `_generate_inspection_points()` function uses `get_world_2d().direct_space_state.intersect_ray()` which may behave differently in exported builds.
+
+3. **Physics Process Timing**: The SEARCHING state processes physics-based operations that may have export-specific behaviors.
+
+### Resolution
+
+The fix is to revert the combat state transition while preserving the SEARCHING implementation for future activation:
+
+```gdscript
+# In _process_combat_state(), restore original behavior:
+if not _can_see_player:
+    _combat_exposed = false
+    _combat_approaching = false
+    _seeking_clear_shot = false
+    _log_debug("Lost sight of player in COMBAT, transitioning to PURSUING")
+    _transition_to_pursuing()
+    return
+```
+
+The SEARCHING state code will remain in the codebase but won't be activated from the main combat loop until properly tested in isolation.
+
+### Lessons Learned
+
+1. **Test exported builds thoroughly** - Editor and export behavior can differ
+2. **Keep existing behavior paths** - Don't replace known-working transitions
+3. **Incremental feature activation** - Add new features behind flags or guards
+4. **Monitor enemy spawn logs** - Absence of expected logs indicates critical issues

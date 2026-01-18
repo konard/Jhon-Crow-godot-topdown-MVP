@@ -848,13 +848,15 @@ func _process_combat_state(delta: float) -> void:
 		_transition_to_assault()
 		return
 
-	# If can't see player, transition to SEARCHING to investigate last-known position
+	# If can't see player, pursue them (move cover-to-cover toward player)
+	# NOTE: SEARCHING state is available but disabled until properly tested in exported builds.
+	# The _transition_to_searching() function and SEARCHING state code remain for future use.
 	if not _can_see_player:
 		_combat_exposed = false
 		_combat_approaching = false
 		_seeking_clear_shot = false
-		_log_debug("Lost sight of player in COMBAT, transitioning to SEARCHING")
-		_transition_to_searching()
+		_log_debug("Lost sight of player in COMBAT, transitioning to PURSUING")
+		_transition_to_pursuing()
 		return
 
 	# Update detection delay timer
