@@ -944,19 +944,38 @@ func _process_ai_state(delta: float) -> void:
 	var previous_state := _current_state
 
 	# HIGHEST PRIORITY: If player is distracted (aim > 23° away from enemy),
-	# immediately transition to COMBAT and attack. This overrides all other states.
-	# This ensures the enemy seizes the opportunity when the player is not focused on them.
-	if _goap_world_state.get("player_distracted", false) and _can_see_player:
-		if _current_state != AIState.COMBAT:
-			_log_debug("Player distracted! Seizing opportunity to attack (priority override)")
+	# immediately shoot from ANY state. This is the highest priority action
+	# that bypasses ALL other state logic including timers.
+	# The enemy must seize the opportunity when the player is not focused on them.
+	if _goap_world_state.get("player_distracted", false) and _can_see_player and _player:
+		# Check if we have a clear shot (no wall blocking bullet spawn)
+		var direction_to_player := (_player.global_position - global_position).normalized()
+		var has_clear_shot := _is_bullet_spawn_clear(direction_to_player)
+
+		if has_clear_shot and _can_shoot():
+			# Log the distraction attack
 			_log_to_file("Player distracted - priority attack triggered")
-			_transition_to_combat()
-			# Skip detection delay when player is distracted - attack immediately
+
+			# Aim at player immediately
+			rotation = direction_to_player.angle()
+
+			# Shoot immediately - bypassing ALL timers and state restrictions
+			# This is the highest priority action in the game
+			_shoot()
+			_shoot_timer = 0.0  # Reset shoot timer after distraction shot
+
+			# Ensure detection delay is bypassed for any subsequent normal shots
 			_detection_delay_elapsed = true
-		# Even if already in COMBAT, ensure we're actively engaging
-		# by processing combat state with shortened detection
-		if not _detection_delay_elapsed:
-			_detection_delay_elapsed = true
+
+			# Transition to COMBAT if not already in a combat-related state
+			# This ensures proper follow-up behavior after the distraction shot
+			if _current_state == AIState.IDLE:
+				_transition_to_combat()
+				_detection_delay_elapsed = true  # Re-set after transition resets it
+
+			# Return early - we've taken the highest priority action
+			# The state machine will continue normally in the next frame
+			return
 
 	# State transitions based on conditions
 	match _current_state:

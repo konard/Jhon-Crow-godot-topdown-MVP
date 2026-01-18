@@ -22,8 +22,8 @@ extends CharacterBody2D
 ## Offset from player center for bullet spawn position.
 @export var bullet_spawn_offset: float = 20.0
 
-## Maximum ammunition (90 bullets = 3 magazines of 30).
-@export var max_ammo: int = 90
+## Maximum ammunition (60 bullets = 2 magazines of 30).
+@export var max_ammo: int = 60
 
 ## Maximum health of the player.
 @export var max_health: int = 5
@@ -52,7 +52,7 @@ extends CharacterBody2D
 @export var hit_flash_duration: float = 0.1
 
 ## Current ammunition count.
-var _current_ammo: int = 90
+var _current_ammo: int = 60
 
 ## Current health of the player.
 var _current_health: int = 5
