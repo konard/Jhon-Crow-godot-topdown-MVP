@@ -54,7 +54,9 @@ const SHELL_PISTOL: String = "res://assets/audio/падает гильза пи�
 
 ## Fire mode toggle sound.
 ## Note: Renamed from Cyrillic to ASCII for export compatibility (see issue #64).
+## Using preload() instead of load() to ensure the resource is included in exports.
 const FIRE_MODE_TOGGLE: String = "res://assets/audio/fire_mode_toggle.wav"
+var _fire_mode_toggle_stream: AudioStream = preload("res://assets/audio/fire_mode_toggle.wav")
 
 ## Volume settings (in dB).
 const VOLUME_SHOT: float = -5.0
@@ -116,13 +118,17 @@ func _preload_all_sounds() -> void:
 	all_sounds.append(BULLET_COVER_NEAR_PLAYER)
 	all_sounds.append(SHELL_RIFLE)
 	all_sounds.append(SHELL_PISTOL)
-	all_sounds.append(FIRE_MODE_TOGGLE)
+	# Note: FIRE_MODE_TOGGLE is preloaded at class level, not added to dynamic load list
 
 	for path in all_sounds:
 		if not _audio_cache.has(path):
 			var stream := load(path) as AudioStream
 			if stream:
 				_audio_cache[path] = stream
+
+	# Add the preloaded fire mode toggle stream to cache
+	if _fire_mode_toggle_stream:
+		_audio_cache[FIRE_MODE_TOGGLE] = _fire_mode_toggle_stream
 
 
 ## Gets an available non-positional audio player from the pool.

@@ -6,17 +6,53 @@
 
 **Reported Symptom**: The fire mode toggle sound (B key) works correctly in the Godot editor but does not play in the exported Windows executable.
 
-**Audio File**: `игрок изменил режим стрельбы (нажал b).wav` (Cyrillic filename meaning "player changed fire mode (pressed b)")
+**Audio File**: Originally `игрок изменил режим стрельбы (нажал b).wav` (Cyrillic filename), renamed to `fire_mode_toggle.wav`
+
+## Solution Applied
+
+The fix involves two parts:
+
+1. **Renamed the audio file** from Cyrillic to ASCII: `fire_mode_toggle.wav`
+2. **Used `preload()` instead of `load()`** to ensure the resource is compiled into the export
+
+### Key Code Change
+
+```gdscript
+# In audio_manager.gd:
+# Use preload() at class level to ensure the resource is included in exports
+var _fire_mode_toggle_stream: AudioStream = preload("res://assets/audio/fire_mode_toggle.wav")
+```
+
+This approach works because `preload()` happens at compile-time, forcing Godot to include the resource in the export package, while `load()` happens at runtime and may fail if the resource isn't properly detected as a dependency.
 
 ## Investigation Summary
 
-### Code Implementation Analysis
+### Root Cause Analysis
 
-The implementation follows the correct pattern:
+Based on extensive research, two issues were identified:
+
+#### Issue 1: Cyrillic Filename Characters
+
+The original audio file used Cyrillic (Russian) characters in the filename: `игрок изменил режим стрельбы (нажал b).wav`
+
+**Evidence from Godot Issues**:
+- [GitHub Issue #56406](https://github.com/godotengine/godot/issues/56406): "Android build crashes after adding AudioStream due to audio filename containing non-ASCII characters"
+- [GitHub PR #56517](https://github.com/godotengine/godot/pull/56517): "Fix decoding UTF-8 filenames on unzipping"
+
+#### Issue 2: Dynamic Loading with `load()` in Exports
+
+Even after renaming to ASCII, the sound still didn't work. This is because:
+- The AudioManager uses `load()` at runtime in `_preload_all_sounds()`
+- In exported builds, `load()` may fail if resources aren't properly detected as dependencies
+- [Forum Thread](https://forum.godotengine.org/t/stream-audio-not-working-in-exported-game/119312): Confirms that dynamically loaded audio using `load()` may not work in exports
+
+**Solution**: Use `preload()` instead of `load()` for critical audio resources. `preload()` happens at compile-time, ensuring the resource is bundled with the export.
+
+### Code Implementation
 
 1. **AudioManager (`scripts/autoload/audio_manager.gd`)**:
-   - Sound constant defined: `FIRE_MODE_TOGGLE: String = "res://assets/audio/игрок изменил режим стрельбы (нажал b).wav"`
-   - Sound is added to preload list in `_preload_all_sounds()`
+   - Sound constant defined: `FIRE_MODE_TOGGLE: String = "res://assets/audio/fire_mode_toggle.wav"`
+   - Sound is preloaded at class level: `var _fire_mode_toggle_stream: AudioStream = preload(...)`
    - Method `play_fire_mode_toggle(position: Vector2)` implemented correctly
    - Volume set to `-3.0 dB`
 
@@ -26,34 +62,6 @@ The implementation follows the correct pattern:
 
 3. **Player (`Scripts/Characters/Player.cs`)**:
    - Input handling on B key (`toggle_fire_mode` action) triggers `ToggleFireMode()`
-
-### Root Cause Analysis
-
-Based on extensive research, the most likely root causes are:
-
-#### Primary Hypothesis: Cyrillic Filename Characters
-
-The audio file uses Cyrillic (Russian) characters in the filename: `игрок изменил режим стрельбы (нажал b).wav`
-
-**Evidence from Godot Issues**:
-- [GitHub Issue #56406](https://github.com/godotengine/godot/issues/56406): "Android build crashes after adding AudioStream due to audio filename containing non-ASCII characters"
-- [GitHub PR #56517](https://github.com/godotengine/godot/pull/56517): "Fix decoding UTF-8 filenames on unzipping" - explicitly mentions this affects exports
-- The Godot maintainer confirmed: "The MP3 filename in the MRP contains non-ASCII characters, which are known to work poorly on Android"
-
-While the fix (PR #56517) was implemented in Godot 4.0, 3.5, and 3.4.3, there are still reports of issues with non-ASCII filenames in exports, especially on certain platforms.
-
-#### Secondary Hypotheses
-
-1. **Dynamic Loading Issues (Godot 4.4+)**
-   - [Forum Thread](https://forum.godotengine.org/t/after-moving-my-project-to-godot-4-4-almost-all-the-sound-effects-that-i-play-dynamically-stopped-working/104218): Reports of dynamically loaded audio not playing after Godot 4.4 migration
-   - Only sounds assigned in the editor work; runtime-loaded sounds fail silently
-
-2. **Export Settings**
-   - Although `export_filter="all_resources"` is set, `load()` at runtime may not properly reference files with Unicode paths
-
-3. **Cross-Language Autoload Access**
-   - C# code uses `GetNodeOrNull("/root/AudioManager")` to access GDScript autoload
-   - This works in editor but may have timing or initialization issues in exports
 
 ## Testing Methodology
 
@@ -109,7 +117,12 @@ include_filter="assets/audio/*"
 
 ## Recommended Action
 
-**Primary Fix**: Rename all audio files with non-ASCII characters to use ASCII-only filenames. This is the most reliable solution based on the documented Godot issues and ensures cross-platform compatibility.
+**Primary Fix**: Use `preload()` instead of `load()` for audio resources that must work in exports. Additionally, rename files with non-ASCII characters to ASCII-only filenames for cross-platform compatibility.
+
+**Why `preload()` works**:
+- `preload()` happens at compile-time, forcing Godot to include the resource in the export
+- `load()` happens at runtime and may fail if resources aren't detected as dependencies
+- This is the standard solution for audio not playing in Godot exports
 
 ## References
 
