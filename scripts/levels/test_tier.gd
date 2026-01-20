@@ -298,6 +298,12 @@ func _on_magazines_changed(magazine_ammo_counts: Array) -> void:
 func _on_player_ammo_depleted() -> void:
 	# Notify all enemies that player tried to shoot with empty weapon
 	_broadcast_player_ammo_empty(true)
+	# Emit empty click sound via SoundPropagation system so enemies can hear through walls
+	# This has shorter range than reload sound but still propagates through obstacles
+	if _player:
+		var sound_propagation: Node = get_node_or_null("/root/SoundPropagation")
+		if sound_propagation and sound_propagation.has_method("emit_player_empty_click"):
+			sound_propagation.emit_player_empty_click(_player.global_position, _player)
 
 	# For GDScript player, check if truly out of all ammo (no reserve)
 	# For C# player, game over is handled in _on_weapon_ammo_changed
@@ -310,9 +316,15 @@ func _on_player_ammo_depleted() -> void:
 
 
 ## Called when player starts reloading.
-## Notifies nearby enemies that player is vulnerable.
+## Notifies nearby enemies that player is vulnerable via sound propagation.
+## The reload sound can be heard through walls at greater distance than line of sight.
 func _on_player_reload_started() -> void:
 	_broadcast_player_reloading(true)
+	# Emit reload sound via SoundPropagation system so enemies can hear through walls
+	if _player:
+		var sound_propagation: Node = get_node_or_null("/root/SoundPropagation")
+		if sound_propagation and sound_propagation.has_method("emit_player_reload"):
+			sound_propagation.emit_player_reload(_player.global_position, _player)
 
 
 ## Called when player finishes reloading.

@@ -668,6 +668,7 @@ func on_sound_heard(sound_type: int, position: Vector2, source_type: int, source
 ##
 ## Parameters:
 ## - sound_type: The type of sound (from SoundPropagation.SoundType enum)
+##   0=GUNSHOT, 1=EXPLOSION, 2=FOOTSTEP, 3=RELOAD, 4=IMPACT, 5=EMPTY_CLICK
 ## - position: World position where the sound originated
 ## - source_type: Whether sound is from PLAYER, ENEMY, or NEUTRAL (from SoundPropagation.SourceType)
 ## - source_node: The node that produced the sound (can be null)
@@ -677,12 +678,58 @@ func on_sound_heard_with_intensity(sound_type: int, position: Vector2, source_ty
 	if not _is_alive:
 		return
 
-	# Only react to gunshots for now (sound_type 0 = GUNSHOT in SoundPropagation.SoundType)
-	if sound_type != 0:
-		return
-
 	# Calculate distance to sound for logging
 	var distance := global_position.distance_to(position)
+
+	# Handle reload sound (sound_type 3 = RELOAD) - player is vulnerable!
+	# This sound propagates through walls and alerts enemies even behind cover.
+	if sound_type == 3 and source_type == 0:  # RELOAD from PLAYER
+		_log_debug("Heard player RELOAD (intensity=%.2f, distance=%.0f) at %s" % [
+			intensity, distance, position
+		])
+		_log_to_file("Heard player RELOAD at %s, intensity=%.2f, distance=%.0f" % [
+			position, intensity, distance
+		])
+
+		# Set player vulnerability state - reloading
+		_goap_world_state["player_reloading"] = true
+		_last_known_player_position = position
+
+		# React to vulnerable player sound - transition to combat/pursuing
+		# Always react to reload sounds from player regardless of current state
+		if _current_state == AIState.IDLE:
+			_transition_to_combat()
+		elif _current_state in [AIState.IN_COVER, AIState.SUPPRESSED]:
+			# Leave cover to attack vulnerable player
+			_transition_to_pursuing()
+		return
+
+	# Handle empty click sound (sound_type 5 = EMPTY_CLICK) - player is vulnerable!
+	# This sound has shorter range than reload but still propagates through walls.
+	if sound_type == 5 and source_type == 0:  # EMPTY_CLICK from PLAYER
+		_log_debug("Heard player EMPTY_CLICK (intensity=%.2f, distance=%.0f) at %s" % [
+			intensity, distance, position
+		])
+		_log_to_file("Heard player EMPTY_CLICK at %s, intensity=%.2f, distance=%.0f" % [
+			position, intensity, distance
+		])
+
+		# Set player vulnerability state - out of ammo
+		_goap_world_state["player_ammo_empty"] = true
+		_last_known_player_position = position
+
+		# React to vulnerable player sound - transition to combat/pursuing
+		# Always react to empty click sounds from player regardless of current state
+		if _current_state == AIState.IDLE:
+			_transition_to_combat()
+		elif _current_state in [AIState.IN_COVER, AIState.SUPPRESSED]:
+			# Leave cover to attack vulnerable player
+			_transition_to_pursuing()
+		return
+
+	# Handle gunshot sounds (sound_type 0 = GUNSHOT)
+	if sound_type != 0:
+		return
 
 	# React based on current state:
 	# - IDLE: Always react to loud sounds
