@@ -259,6 +259,55 @@ The complete fix consists of:
    - Line2D trail with gradient fade
    - Rotation to match travel direction
 
+## Third Investigation (2026-01-20 17:05)
+
+User feedback: "у врагов правильные трассеры, у игрока всё те же старые пули" (enemies have correct tracers, player still has the old bullets).
+
+### Root Cause
+
+The project has **two separate bullet implementations**:
+
+1. **GDScript** (`scenes/projectiles/Bullet.tscn` + `scripts/projectiles/bullet.gd`)
+   - Used by: `enemy.gd`, `player.gd`
+   - Status: Updated with tracer effect ✓
+
+2. **C#** (`scenes/projectiles/csharp/Bullet.tscn` + `Scripts/Projectiles/Bullet.cs`)
+   - Used by: `AssaultRifle.cs` → loaded by C# player
+   - Status: **NOT updated** (was still using 8x8 sprite, no trail, speed 600 instead of 2500)
+
+The user was testing with the **C# version** of the game (which uses `csharp/Player.tscn` and `csharp/Bullet.tscn`), while the tracer fixes were only applied to the GDScript version.
+
+### Fix Applied
+
+#### `scenes/projectiles/csharp/Bullet.tscn`
+
+Updated to match GDScript version:
+- Changed sprite from 8x8 to 16x4 pixels
+- Added Line2D "Trail" node with gradient and width curve
+- Kept same collision (CircleShape2D radius 4.0)
+
+#### `Scripts/Projectiles/Bullet.cs`
+
+Added trail functionality:
+- `TrailLength` export property (default: 8)
+- `_trail` reference to Line2D node
+- `_positionHistory` list for tracking positions
+- `UpdateRotation()` method to orient bullet in travel direction
+- `UpdateTrail()` method to manage Line2D points
+- Trail uses `TopLevel = true` for global coordinates
+- Updated default speed from 600 to 2500 (matching GDScript)
+
+### Key Lesson
+
+**When a project has both GDScript and C# implementations, ALL parallel implementations must be updated.**
+
+The project structure mirrors GDScript scenes in `/csharp/` subdirectories:
+- `scenes/characters/Player.tscn` ↔ `scenes/characters/csharp/Player.tscn`
+- `scenes/projectiles/Bullet.tscn` ↔ `scenes/projectiles/csharp/Bullet.tscn`
+- `scripts/projectiles/bullet.gd` ↔ `Scripts/Projectiles/Bullet.cs`
+
+Future changes must update both implementations to maintain parity.
+
 ## References
 
 - https://forum.godotengine.org/t/godot-4-2d-movement-causing-ghost-jitter-blur-fix/62706
