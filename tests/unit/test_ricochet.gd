@@ -16,8 +16,7 @@ func test_caliber_data_exists() -> void:
 
 
 func test_caliber_data_default_values() -> void:
-	var CaliberDataClass := load("res://scripts/data/caliber_data.gd")
-	var caliber := CaliberDataClass.new()
+	var caliber := CaliberData.new()
 
 	assert_eq(caliber.caliber_name, "5.45x39mm", "Default caliber name")
 	assert_eq(caliber.diameter_mm, 5.45, "Default diameter")
@@ -27,8 +26,7 @@ func test_caliber_data_default_values() -> void:
 
 
 func test_caliber_data_ricochet_probability_at_zero_angle() -> void:
-	var CaliberDataClass := load("res://scripts/data/caliber_data.gd")
-	var caliber := CaliberDataClass.new()
+	var caliber := CaliberData.new()
 
 	# At 0 degrees (parallel to surface), probability should be at maximum
 	var probability := caliber.calculate_ricochet_probability(0.0)
@@ -36,8 +34,7 @@ func test_caliber_data_ricochet_probability_at_zero_angle() -> void:
 
 
 func test_caliber_data_ricochet_probability_at_max_angle() -> void:
-	var CaliberDataClass := load("res://scripts/data/caliber_data.gd")
-	var caliber := CaliberDataClass.new()
+	var caliber := CaliberData.new()
 
 	# At max angle, probability should be 0
 	var probability := caliber.calculate_ricochet_probability(caliber.max_ricochet_angle)
@@ -45,8 +42,7 @@ func test_caliber_data_ricochet_probability_at_max_angle() -> void:
 
 
 func test_caliber_data_ricochet_probability_beyond_max_angle() -> void:
-	var CaliberDataClass := load("res://scripts/data/caliber_data.gd")
-	var caliber := CaliberDataClass.new()
+	var caliber := CaliberData.new()
 
 	# Beyond max angle, probability should be 0
 	var probability := caliber.calculate_ricochet_probability(caliber.max_ricochet_angle + 10.0)
@@ -54,8 +50,7 @@ func test_caliber_data_ricochet_probability_beyond_max_angle() -> void:
 
 
 func test_caliber_data_ricochet_probability_interpolation() -> void:
-	var CaliberDataClass := load("res://scripts/data/caliber_data.gd")
-	var caliber := CaliberDataClass.new()
+	var caliber := CaliberData.new()
 
 	# At half the max angle, probability should be half the base
 	var half_angle := caliber.max_ricochet_angle / 2.0
@@ -65,8 +60,7 @@ func test_caliber_data_ricochet_probability_interpolation() -> void:
 
 
 func test_caliber_data_can_ricochet_false_returns_zero() -> void:
-	var CaliberDataClass := load("res://scripts/data/caliber_data.gd")
-	var caliber := CaliberDataClass.new()
+	var caliber := CaliberData.new()
 	caliber.can_ricochet = false
 
 	var probability := caliber.calculate_ricochet_probability(0.0)
@@ -74,8 +68,7 @@ func test_caliber_data_can_ricochet_false_returns_zero() -> void:
 
 
 func test_caliber_data_post_ricochet_velocity() -> void:
-	var CaliberDataClass := load("res://scripts/data/caliber_data.gd")
-	var caliber := CaliberDataClass.new()
+	var caliber := CaliberData.new()
 
 	var initial_velocity := 2500.0
 	var new_velocity := caliber.calculate_post_ricochet_velocity(initial_velocity)
@@ -85,8 +78,7 @@ func test_caliber_data_post_ricochet_velocity() -> void:
 
 
 func test_caliber_data_ricochet_deviation_range() -> void:
-	var CaliberDataClass := load("res://scripts/data/caliber_data.gd")
-	var caliber := CaliberDataClass.new()
+	var caliber := CaliberData.new()
 
 	# Test multiple random deviations to ensure they're within range
 	var max_deviation_rad := deg_to_rad(caliber.ricochet_angle_deviation)
@@ -333,8 +325,7 @@ func test_bullet_ricochet_with_zero_length_direction() -> void:
 
 
 func test_caliber_data_with_custom_values() -> void:
-	var CaliberDataClass := load("res://scripts/data/caliber_data.gd")
-	var caliber := CaliberDataClass.new()
+	var caliber := CaliberData.new()
 
 	# Set custom values
 	caliber.max_ricochet_angle = 45.0
