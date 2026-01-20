@@ -192,4 +192,13 @@ grow_horizontal = 0
 text = "Обучение"
 horizontal_alignment = 2
 
+[node name="AmmoLabel" type="Label" parent="CanvasLayer/UI"]
+layout_mode = 1
+anchors_preset = 0
+offset_left = 10.0
+offset_top = 10.0
+offset_right = 200.0
+offset_bottom = 45.0
+text = "AMMO: 30/30"
+
 [node name="PauseMenu" parent="." instance=ExtResource("4_pause_menu")]

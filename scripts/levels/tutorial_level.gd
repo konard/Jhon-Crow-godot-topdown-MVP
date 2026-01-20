@@ -15,6 +15,9 @@ var _player: Node2D = null
 ## Reference to the UI container.
 var _ui: Control = null
 
+## Reference to the ammo count label.
+var _ammo_label: Label = null
+
 ## Tutorial state tracking.
 enum TutorialStep {
 	MOVE_TO_TARGETS,
@@ -60,8 +63,14 @@ func _ready() -> void:
 	# Find UI container
 	_ui = get_node_or_null("CanvasLayer/UI")
 
+	# Find the ammo label
+	_ammo_label = get_node_or_null("CanvasLayer/UI/AmmoLabel")
+
 	# Connect to player signals for tracking actions
 	_connect_player_signals()
+
+	# Setup ammo tracking
+	_setup_ammo_tracking()
 
 	# Find and setup targets
 	_setup_targets()
@@ -113,6 +122,72 @@ func _connect_player_signals() -> void:
 		# GDScript player
 		if _player.has_signal("reload_completed"):
 			_player.reload_completed.connect(_on_player_reload_completed)
+
+
+## Setup ammo tracking for the player's weapon.
+func _setup_ammo_tracking() -> void:
+	if _player == null:
+		return
+
+	# Try to get the player's weapon for C# Player
+	var weapon = _player.get_node_or_null("AssaultRifle")
+	if weapon != null:
+		# C# Player with weapon - connect to weapon signals
+		if weapon.has_signal("AmmoChanged"):
+			weapon.AmmoChanged.connect(_on_weapon_ammo_changed)
+		# Initial ammo display from weapon
+		if weapon.get("CurrentAmmo") != null and weapon.get("ReserveAmmo") != null:
+			_update_ammo_label_magazine(weapon.CurrentAmmo, weapon.ReserveAmmo)
+	else:
+		# GDScript Player - connect to player signals
+		if _player.has_signal("ammo_changed"):
+			_player.ammo_changed.connect(_on_player_ammo_changed)
+		# Initial ammo display
+		if _player.has_method("get_current_ammo") and _player.has_method("get_max_ammo"):
+			_update_ammo_label(_player.get_current_ammo(), _player.get_max_ammo())
+
+
+## Called when weapon ammo changes (C# Player).
+func _on_weapon_ammo_changed(current_ammo: int, reserve_ammo: int) -> void:
+	_update_ammo_label_magazine(current_ammo, reserve_ammo)
+
+
+## Called when player ammo changes (GDScript Player).
+func _on_player_ammo_changed(current: int, maximum: int) -> void:
+	_update_ammo_label(current, maximum)
+
+
+## Update the ammo label with color coding (simple format for GDScript Player).
+func _update_ammo_label(current: int, maximum: int) -> void:
+	if _ammo_label == null:
+		return
+
+	_ammo_label.text = "AMMO: %d/%d" % [current, maximum]
+
+	# Color coding: red at <=5, yellow at <=10, white otherwise
+	if current <= 5:
+		_ammo_label.add_theme_color_override("font_color", Color(1.0, 0.2, 0.2, 1.0))
+	elif current <= 10:
+		_ammo_label.add_theme_color_override("font_color", Color(1.0, 1.0, 0.2, 1.0))
+	else:
+		_ammo_label.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
+
+
+## Update the ammo label with magazine format (for C# Player with weapon).
+## Shows format: AMMO: magazine/reserve (e.g., "AMMO: 30/60")
+func _update_ammo_label_magazine(current_mag: int, reserve: int) -> void:
+	if _ammo_label == null:
+		return
+
+	_ammo_label.text = "AMMO: %d/%d" % [current_mag, reserve]
+
+	# Color coding: red when mag <=5, yellow when mag <=10
+	if current_mag <= 5:
+		_ammo_label.add_theme_color_override("font_color", Color(1.0, 0.2, 0.2, 1.0))
+	elif current_mag <= 10:
+		_ammo_label.add_theme_color_override("font_color", Color(1.0, 1.0, 0.2, 1.0))
+	else:
+		_ammo_label.add_theme_color_override("font_color", Color(1.0, 1.0, 1.0, 1.0))
 
 
 ## Setup targets and connect to their hit signals.
@@ -203,10 +278,16 @@ func _create_floating_prompt() -> void:
 	_prompt_label.add_theme_constant_override("shadow_offset_x", 2)
 	_prompt_label.add_theme_constant_override("shadow_offset_y", 2)
 
+	# Set minimum size for consistent width
+	_prompt_label.custom_minimum_size = Vector2(300, 30)
+
 	# Add to CanvasLayer so it's always visible on screen
 	var canvas_layer := get_node_or_null("CanvasLayer")
 	if canvas_layer:
 		canvas_layer.add_child(_prompt_label)
+		print("Tutorial: Floating prompt created and added to CanvasLayer")
+	else:
+		push_error("Tutorial: CanvasLayer not found - prompts will not be displayed!")
 
 
 ## Update the prompt position to follow the player.
@@ -220,16 +301,15 @@ func _update_prompt_position() -> void:
 
 	_prompt_label.visible = true
 
-	# Get camera to convert world position to screen position
-	var camera := get_viewport().get_camera_2d()
-	if camera:
-		# Calculate screen position relative to player
-		var screen_pos := _player.global_position - camera.global_position + get_viewport().size / 2.0
-		# Position above the player
-		_prompt_label.position = screen_pos + Vector2(-_prompt_label.size.x / 2, -80)
-	else:
-		# Fallback: position relative to player in world space
-		_prompt_label.position = _player.global_position + Vector2(-_prompt_label.size.x / 2, -80)
+	# Get the canvas transform to convert world position to screen position
+	# This works correctly in both editor and exported builds
+	var canvas_transform: Transform2D = get_viewport().get_canvas_transform()
+	var screen_pos: Vector2 = canvas_transform * _player.global_position
+
+	# Position above the player
+	# Use custom_minimum_size to ensure we get consistent label width
+	_prompt_label.custom_minimum_size = Vector2(300, 30)
+	_prompt_label.position = screen_pos + Vector2(-150, -80)
 
 
 ## Update the prompt text based on current tutorial step.
