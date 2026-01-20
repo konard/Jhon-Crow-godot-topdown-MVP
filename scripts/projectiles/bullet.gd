@@ -54,7 +54,7 @@ var _ricochet_count: int = 0
 ## Default ricochet settings (used when caliber_data is not set).
 ## -1 means unlimited ricochets.
 const DEFAULT_MAX_RICOCHETS: int = -1
-const DEFAULT_MAX_RICOCHET_ANGLE: float = 30.0
+const DEFAULT_MAX_RICOCHET_ANGLE: float = 90.0
 const DEFAULT_BASE_RICOCHET_PROBABILITY: float = 1.0
 const DEFAULT_VELOCITY_RETENTION: float = 0.85
 const DEFAULT_RICOCHET_DAMAGE_MULTIPLIER: float = 0.5
@@ -319,37 +319,33 @@ func _calculate_impact_angle(surface_normal: Vector2) -> float:
 
 
 ## Calculates the ricochet probability based on impact angle.
-## Uses a quadratic curve to make angles close to 90° (perpendicular) much less likely.
-## Shallow/grazing angles (close to 0°) have high probability.
+## Uses a custom curve designed for realistic 5.45x39mm behavior:
+## - 0-15°: ~100% (grazing shots always ricochet)
+## - 45°: ~80% (moderate angles have good ricochet chance)
+## - 90°: ~10% (perpendicular shots rarely ricochet)
 func _calculate_ricochet_probability(impact_angle_deg: float) -> float:
 	var max_angle: float
 	var base_probability: float
 
 	if caliber_data:
-		if caliber_data.has_method("calculate_ricochet_probability"):
-			# Note: caliber_data's method may use linear interpolation
-			# We override it here to use quadratic for better realism
-			max_angle = caliber_data.max_ricochet_angle if "max_ricochet_angle" in caliber_data else DEFAULT_MAX_RICOCHET_ANGLE
-			base_probability = caliber_data.base_ricochet_probability if "base_ricochet_probability" in caliber_data else DEFAULT_BASE_RICOCHET_PROBABILITY
-		else:
-			# Fallback to reading properties directly
-			max_angle = caliber_data.max_ricochet_angle if "max_ricochet_angle" in caliber_data else DEFAULT_MAX_RICOCHET_ANGLE
-			base_probability = caliber_data.base_ricochet_probability if "base_ricochet_probability" in caliber_data else DEFAULT_BASE_RICOCHET_PROBABILITY
+		max_angle = caliber_data.max_ricochet_angle if "max_ricochet_angle" in caliber_data else DEFAULT_MAX_RICOCHET_ANGLE
+		base_probability = caliber_data.base_ricochet_probability if "base_ricochet_probability" in caliber_data else DEFAULT_BASE_RICOCHET_PROBABILITY
 	else:
 		max_angle = DEFAULT_MAX_RICOCHET_ANGLE
 		base_probability = DEFAULT_BASE_RICOCHET_PROBABILITY
 
-	# No ricochet if angle is too steep (close to 90° perpendicular)
+	# No ricochet if angle exceeds maximum
 	if impact_angle_deg > max_angle:
 		return 0.0
 
-	# Quadratic interpolation: shallow angles (0°) have HIGH probability,
-	# angles approaching max_angle have MUCH LOWER probability.
-	# This makes ricochets at angles close to 90° significantly rarer.
-	# angle_factor goes from 1.0 (at 0°) to 0.0 (at max_angle)
-	var normalized_angle := impact_angle_deg / max_angle
-	# Quadratic curve: (1 - x)^2 drops off faster than linear
-	var angle_factor := (1.0 - normalized_angle) * (1.0 - normalized_angle)
+	# Custom curve for realistic ricochet probability:
+	# probability = base * (0.9 * (1 - (angle/90)^2.17) + 0.1)
+	# This gives approximately:
+	# - 0°: 100%, 15°: 98%, 45°: 80%, 90°: 10%
+	var normalized_angle := impact_angle_deg / 90.0
+	# Power of 2.17 creates a curve matching real-world ballistics
+	var power_factor := pow(normalized_angle, 2.17)
+	var angle_factor := (1.0 - power_factor) * 0.9 + 0.1
 	return base_probability * angle_factor
 
 

@@ -77,9 +77,9 @@ public partial class Bullet : Area2D
 
     /// <summary>
     /// Maximum angle (degrees) from surface at which ricochet is possible.
-    /// Angles above this will cause the bullet to be destroyed.
+    /// Set to 90 to allow ricochets at all angles with varying probability.
     /// </summary>
-    private const float MaxRicochetAngle = 30.0f;
+    private const float MaxRicochetAngle = 90.0f;
 
     /// <summary>
     /// Base probability of ricochet at optimal (grazing) angle.
@@ -587,24 +587,29 @@ public partial class Bullet : Area2D
 
     /// <summary>
     /// Calculates the ricochet probability based on impact angle.
-    /// Uses a quadratic curve to make angles close to 90° much less likely.
+    /// Uses a custom curve designed for realistic 5.45x39mm behavior:
+    /// - 0-15°: ~100% (grazing shots always ricochet)
+    /// - 45°: ~80% (moderate angles have good ricochet chance)
+    /// - 90°: ~10% (perpendicular shots rarely ricochet)
     /// </summary>
     /// <param name="impactAngleDeg">Impact angle in degrees.</param>
     /// <returns>Probability of ricochet (0.0 to 1.0).</returns>
     private float CalculateRicochetProbability(float impactAngleDeg)
     {
-        // No ricochet if angle is too steep (close to 90° perpendicular)
+        // No ricochet if angle exceeds maximum
         if (impactAngleDeg > MaxRicochetAngle)
         {
             return 0.0f;
         }
 
-        // Quadratic interpolation: shallow angles (0°) have HIGH probability,
-        // angles approaching max_angle have MUCH LOWER probability.
-        // This makes ricochets at angles close to 90° significantly rarer.
-        float normalizedAngle = impactAngleDeg / MaxRicochetAngle;
-        // Quadratic curve: (1 - x)^2 drops off faster than linear
-        float angleFactor = (1.0f - normalizedAngle) * (1.0f - normalizedAngle);
+        // Custom curve for realistic ricochet probability:
+        // probability = base * (0.9 * (1 - (angle/90)^2.17) + 0.1)
+        // This gives approximately:
+        // - 0°: 100%, 15°: 98%, 45°: 80%, 90°: 10%
+        float normalizedAngle = impactAngleDeg / 90.0f;
+        // Power of 2.17 creates a curve matching real-world ballistics
+        float powerFactor = Mathf.Pow(normalizedAngle, 2.17f);
+        float angleFactor = (1.0f - powerFactor) * 0.9f + 0.1f;
         return BaseRicochetProbability * angleFactor;
     }
 

@@ -39,9 +39,9 @@ func test_caliber_data_ricochet_probability_at_zero_angle() -> void:
 func test_caliber_data_ricochet_probability_at_max_angle() -> void:
 	var caliber := CaliberData.new()
 
-	# At max angle, probability should be 0
+	# At 90 degrees (max angle), probability should be ~10%
 	var probability := caliber.calculate_ricochet_probability(caliber.max_ricochet_angle)
-	assert_almost_eq(probability, 0.0, 0.01, "At max angle, probability should be 0")
+	assert_almost_eq(probability, 0.1, 0.02, "At max angle (90 degrees), probability should be ~10%")
 
 
 func test_caliber_data_ricochet_probability_beyond_max_angle() -> void:
@@ -55,12 +55,11 @@ func test_caliber_data_ricochet_probability_beyond_max_angle() -> void:
 func test_caliber_data_ricochet_probability_interpolation() -> void:
 	var caliber := CaliberData.new()
 
-	# At half the max angle, probability should follow quadratic curve
-	# At 50% of max angle, normalized = 0.5, factor = (1-0.5)^2 = 0.25
-	var half_angle := caliber.max_ricochet_angle / 2.0
+	# At 45 degrees (half of 90), probability should be ~80%
+	# Using the new curve: 0.9 * (1 - (0.5)^2.17) + 0.1 ≈ 0.80
+	var half_angle := 45.0
 	var probability := caliber.calculate_ricochet_probability(half_angle)
-	var expected := caliber.base_ricochet_probability * 0.25  # quadratic: (1-0.5)^2 = 0.25
-	assert_almost_eq(probability, expected, 0.01, "At half angle, should have quadratic probability (0.25 * base)")
+	assert_almost_eq(probability, 0.80, 0.05, "At 45 degrees, probability should be ~80%")
 
 
 func test_caliber_data_can_ricochet_false_returns_zero() -> void:
@@ -131,7 +130,7 @@ func test_bullet_default_ricochet_constants() -> void:
 
 	# Test default constants
 	assert_eq(bullet.DEFAULT_MAX_RICOCHETS, -1, "Default max ricochets should be -1 (unlimited)")
-	assert_almost_eq(bullet.DEFAULT_MAX_RICOCHET_ANGLE, 30.0, 0.1, "Default max ricochet angle")
+	assert_almost_eq(bullet.DEFAULT_MAX_RICOCHET_ANGLE, 90.0, 0.1, "Default max ricochet angle should be 90 degrees")
 	assert_almost_eq(bullet.DEFAULT_BASE_RICOCHET_PROBABILITY, 1.0, 0.01, "Default base probability")
 	assert_almost_eq(bullet.DEFAULT_VELOCITY_RETENTION, 0.85, 0.01, "Default velocity retention")
 	assert_almost_eq(bullet.DEFAULT_RICOCHET_DAMAGE_MULTIPLIER, 0.5, 0.01, "Default damage multiplier")
@@ -158,9 +157,9 @@ func test_bullet_can_ricochet_default() -> void:
 func test_bullet_calculate_ricochet_probability_steep_angle() -> void:
 	var bullet := _create_test_bullet()
 
-	# At steep angle (beyond max), probability should be 0
+	# At 45 degrees, probability should be ~80% with the new curve
 	var probability: float = bullet.call("_calculate_ricochet_probability", 45.0)
-	assert_eq(probability, 0.0, "At steep angle (45 degrees), probability should be 0")
+	assert_almost_eq(probability, 0.80, 0.05, "At 45 degrees, probability should be ~80%")
 
 
 func test_bullet_calculate_ricochet_probability_shallow_angle() -> void:
@@ -302,16 +301,17 @@ func test_caliber_data_with_custom_values() -> void:
 	var caliber := CaliberData.new()
 
 	# Set custom values
-	caliber.max_ricochet_angle = 45.0
+	caliber.max_ricochet_angle = 90.0
 	caliber.base_ricochet_probability = 0.9
 	caliber.velocity_retention = 0.8
 
-	# At 22.5 degrees (half of 45), with quadratic interpolation:
-	# normalized = 22.5/45 = 0.5, factor = (1-0.5)^2 = 0.25
-	# probability = 0.9 * 0.25 = 0.225
-	var probability := caliber.calculate_ricochet_probability(22.5)
-	var expected := 0.9 * 0.25  # quadratic: (1-0.5)^2 = 0.25
-	assert_almost_eq(probability, expected, 0.01, "Custom values should be respected with quadratic interpolation")
+	# At 45 degrees with the new curve:
+	# normalized = 45/90 = 0.5, power = 0.5^2.17 ≈ 0.222
+	# angle_factor = (1 - 0.222) * 0.9 + 0.1 ≈ 0.80
+	# probability = 0.9 * 0.80 ≈ 0.72
+	var probability := caliber.calculate_ricochet_probability(45.0)
+	var expected := 0.9 * ((1.0 - pow(0.5, 2.17)) * 0.9 + 0.1)
+	assert_almost_eq(probability, expected, 0.05, "Custom values should be respected with new probability curve")
 
 
 # ============================================================================
@@ -332,35 +332,29 @@ func test_caliber_data_limited_ricochets() -> void:
 
 
 # ============================================================================
-# Quadratic Probability Curve Tests
+# New Probability Curve Tests (5.45x39mm realistic curve)
 # ============================================================================
 
 
-func test_quadratic_probability_drops_faster_than_linear() -> void:
+func test_probability_at_15_degrees() -> void:
 	var caliber := CaliberData.new()
 
-	# At 25% of max angle (7.5 degrees for default 30 degree max):
-	# Linear would give: 1 - 0.25 = 0.75 factor
-	# Quadratic gives: (1 - 0.25)^2 = 0.5625 factor
-	var quarter_angle := caliber.max_ricochet_angle * 0.25
-	var prob_quarter := caliber.calculate_ricochet_probability(quarter_angle)
-	var expected_quarter := caliber.base_ricochet_probability * 0.5625
-	assert_almost_eq(prob_quarter, expected_quarter, 0.01, "Probability at 25% angle should follow quadratic")
-
-	# At 75% of max angle (22.5 degrees for default 30 degree max):
-	# Linear would give: 1 - 0.75 = 0.25 factor
-	# Quadratic gives: (1 - 0.75)^2 = 0.0625 factor
-	var three_quarter_angle := caliber.max_ricochet_angle * 0.75
-	var prob_three_quarter := caliber.calculate_ricochet_probability(three_quarter_angle)
-	var expected_three_quarter := caliber.base_ricochet_probability * 0.0625
-	assert_almost_eq(prob_three_quarter, expected_three_quarter, 0.01, "Probability at 75% angle should be very low")
+	# At 15 degrees, probability should be ~98-100%
+	var probability := caliber.calculate_ricochet_probability(15.0)
+	assert_gt(probability, 0.95, "Probability at 15 degrees should be ~100%")
 
 
-func test_quadratic_probability_approaches_zero_near_max_angle() -> void:
+func test_probability_at_45_degrees() -> void:
 	var caliber := CaliberData.new()
 
-	# At 90% of max angle, probability should be very low
-	var near_max_angle := caliber.max_ricochet_angle * 0.9
-	var probability := caliber.calculate_ricochet_probability(near_max_angle)
-	# (1 - 0.9)^2 = 0.01 factor, so probability = 1.0 * 0.01 = 0.01
-	assert_lt(probability, 0.02, "Probability near max angle should be very low")
+	# At 45 degrees, probability should be ~80%
+	var probability := caliber.calculate_ricochet_probability(45.0)
+	assert_almost_eq(probability, 0.80, 0.05, "Probability at 45 degrees should be ~80%")
+
+
+func test_probability_at_90_degrees() -> void:
+	var caliber := CaliberData.new()
+
+	# At 90 degrees, probability should be ~10%
+	var probability := caliber.calculate_ricochet_probability(90.0)
+	assert_almost_eq(probability, 0.10, 0.02, "Probability at 90 degrees should be ~10%")

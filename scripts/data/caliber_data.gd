@@ -37,9 +37,9 @@ class_name CaliberData
 
 ## Maximum angle (in degrees) from surface at which ricochet is possible.
 ## Shallow angles (close to parallel with surface) are more likely to ricochet.
-## Example: 30 degrees means bullets hitting at angles < 30 from surface can ricochet.
-## Bullets hitting at steeper angles (closer to perpendicular) will not ricochet.
-@export_range(5.0, 60.0, 1.0) var max_ricochet_angle: float = 30.0
+## Example: 90 degrees means bullets can ricochet at any angle (with varying probability).
+## The probability curve ensures steep angles (close to perpendicular) have low probability.
+@export_range(5.0, 90.0, 1.0) var max_ricochet_angle: float = 90.0
 
 ## Base probability of ricochet when hitting at the optimal angle (very shallow).
 ## The actual probability is scaled based on impact angle.
@@ -74,8 +74,11 @@ class_name CaliberData
 
 
 ## Calculates the ricochet probability based on impact angle.
-## Uses quadratic interpolation so angles close to 90° (perpendicular) are much less likely.
-## @param impact_angle_degrees: Angle between bullet direction and surface (0 = parallel).
+## Uses a custom curve designed for realistic 5.45x39mm behavior:
+## - 0-15°: ~100% (grazing shots always ricochet)
+## - 45°: ~80% (moderate angles have good ricochet chance)
+## - 90°: ~10% (perpendicular shots rarely ricochet)
+## @param impact_angle_degrees: Angle between bullet direction and surface (0 = grazing).
 ## @return: Probability of ricochet (0.0 to 1.0).
 func calculate_ricochet_probability(impact_angle_degrees: float) -> float:
 	if not can_ricochet:
@@ -84,13 +87,14 @@ func calculate_ricochet_probability(impact_angle_degrees: float) -> float:
 	if impact_angle_degrees > max_ricochet_angle:
 		return 0.0
 
-	# Quadratic interpolation: shallow angles (0°) have HIGH probability,
-	# angles approaching max_ricochet_angle have MUCH LOWER probability.
-	# At 0 degrees (parallel/grazing): full base probability
-	# At max_ricochet_angle: 0 probability
-	var normalized_angle := impact_angle_degrees / max_ricochet_angle
-	# Quadratic curve: (1 - x)^2 drops off faster than linear
-	var angle_factor := (1.0 - normalized_angle) * (1.0 - normalized_angle)
+	# Custom curve for realistic ricochet probability:
+	# probability = 0.9 * (1 - (angle/90)^2.17) + 0.1
+	# This gives approximately:
+	# - 0°: 100%, 15°: 98%, 45°: 80%, 90°: 10%
+	var normalized_angle := impact_angle_degrees / 90.0
+	# Power of 2.17 creates a curve matching real-world ballistics
+	var power_factor := pow(normalized_angle, 2.17)
+	var angle_factor := (1.0 - power_factor) * 0.9 + 0.1
 	return base_ricochet_probability * angle_factor
 
 
