@@ -369,6 +369,122 @@ This template follows Godot best practices:
 - **Input actions** instead of hardcoded key checks
 - **Named collision layers** for clear physics setup
 
+## Architecture Guidelines
+
+### Script Size Limits
+
+To maintain code readability and modularity:
+- **Target maximum**: 800 lines per script
+- **Warning threshold**: 800 lines (suggests refactoring)
+- **Ideal**: Under 300 lines per script
+
+When a script exceeds these limits, consider extracting functionality into reusable components.
+
+> **Note**: Some existing scripts (like `enemy.gd`) exceed these limits due to historical complexity.
+> The `scripts/components/` directory provides reusable component patterns for gradual refactoring.
+> See `HealthComponent`, `AmmoComponent`, `VisionComponent`, and `CoverComponent` for examples.
+
+### Component-Based Architecture
+
+The project uses a component-based architecture for reusable functionality:
+
+```
+scripts/
+├── components/           # Reusable components
+│   ├── health_component.gd      # Health management
+│   ├── ammo_component.gd        # Ammunition system
+│   ├── vision_component.gd      # Line-of-sight detection
+│   └── cover_component.gd       # Cover detection/evaluation
+├── ai/
+│   ├── states/           # AI state machine states
+│   │   ├── enemy_state.gd       # Base state class
+│   │   ├── idle_state.gd        # Idle/patrol behavior
+│   │   └── pursuing_state.gd    # Pursuit behavior
+│   ├── goap_action.gd    # GOAP action base class
+│   ├── goap_planner.gd   # GOAP planner
+│   └── enemy_actions.gd  # Enemy-specific GOAP actions
+└── autoload/             # Global singletons
+```
+
+### Component Guidelines
+
+1. **Use `class_name`** for all reusable components:
+   ```gdscript
+   class_name HealthComponent
+   extends Node
+   ```
+
+2. **Design for composition** - attach components to entities:
+   ```
+   Enemy
+   ├── Sprite2D
+   ├── CollisionShape2D
+   ├── HealthComponent     # Reusable health logic
+   ├── AmmoComponent       # Reusable ammo logic
+   └── VisionComponent     # Reusable vision logic
+   ```
+
+3. **Communicate via signals** for loose coupling:
+   ```gdscript
+   # In component
+   signal health_changed(current: int, maximum: int)
+   signal died
+
+   # In parent entity
+   func _ready() -> void:
+       $HealthComponent.died.connect(_on_death)
+   ```
+
+4. **Keep components focused** - one responsibility per component
+
+### AI State Machine Pattern
+
+For complex AI behaviors, use the state machine pattern:
+
+```gdscript
+class_name IdleState
+extends EnemyState
+
+func enter() -> void:
+    # Called when entering this state
+    pass
+
+func process(delta: float) -> EnemyState:
+    # Return new state to transition, or null to stay
+    if enemy._can_see_player:
+        return CombatState.new(enemy)
+    return null
+
+func exit() -> void:
+    # Called when leaving this state
+    pass
+```
+
+### Autoload Best Practices
+
+1. **Use get_node_or_null** for robust autoload access:
+   ```gdscript
+   var audio_manager: Node = get_node_or_null("/root/AudioManager")
+   if audio_manager and audio_manager.has_method("play_sound"):
+       audio_manager.play_sound(sound)
+   ```
+
+2. **Limit autoloads** to truly global systems:
+   - GameManager - game state, level management
+   - AudioManager - sound effects, music
+   - InputSettings - input configuration
+   - DifficultyManager - difficulty settings
+
+### CI Architecture Checks
+
+The project includes automated architecture checks (`.github/workflows/architecture-check.yml`):
+
+- **Script size limits**: Enforces max 800 lines per script
+- **class_name declarations**: Ensures components are properly named
+- **Folder structure**: Validates required directories exist
+- **Naming conventions**: Checks snake_case for GDScript files
+- **Coupling patterns**: Warns about potential tight coupling
+
 ## Extending the Template
 
 ### Adding a New Character
