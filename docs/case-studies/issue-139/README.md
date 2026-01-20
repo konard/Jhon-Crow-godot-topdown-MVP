@@ -156,12 +156,77 @@ elif _player.has_signal("reload_completed"):
 5. `scenes/levels/csharp/TestTier.tscn` - Added AmmoLabel node
 6. `scripts/levels/tutorial_level.gd` - Added ammo tracking and fixed prompt positioning
 
+### Phase 4: Additional User Feedback (2026-01-20T18:49:45Z)
+
+User @Jhon-Crow provided additional feedback after testing:
+
+1. **"перезарядка не r, а последовательность r -> f -> r"** (Reload is not R, but sequence R -> F -> R)
+   - The game uses a complex 3-step reload sequence for realism
+   - Step 1: Press R to eject magazine
+   - Step 2: Press F to insert new magazine
+   - Step 3: Press R to chamber a round (complete reload)
+
+2. **"добавь пункт обучения только если у игрока в руках штурмовая винтовка - нажать b чтобы переключить режим стрельбы"** (Add tutorial step only if player has assault rifle - press B to switch fire mode)
+   - The assault rifle supports Automatic and Burst fire modes
+   - This step should come BEFORE the reload step
+   - Should only appear if player has an assault rifle
+
+## Root Cause Analysis - Phase 4
+
+### Issue 4: Incorrect Reload Sequence in Tutorial
+
+**Root Cause:** The initial implementation assumed simple reload with just "R" key, but the C# Player.cs code shows a complex 3-step reload sequence (`HandleReloadSequenceInput()` method):
+
+```csharp
+// From Player.cs
+/// Step 0: Press R to start sequence (eject magazine)
+/// Step 1: Press F to continue (insert new magazine)
+/// Step 2: Press R to complete reload instantly (chamber round)
+private void HandleReloadSequenceInput()
+```
+
+**Fix Applied:**
+Changed the reload prompt from `[R] Перезарядись` to `[R] [F] [R] Перезарядись` to accurately reflect the game's reload mechanics.
+
+### Issue 5: Missing Fire Mode Switch Tutorial
+
+**Root Cause:** The AssaultRifle.cs supports fire mode toggling via B key (bound to `toggle_fire_mode` action), with `FireModeChanged` signal emitted on toggle. This feature was not covered in the tutorial.
+
+```csharp
+// From AssaultRifle.cs
+public void ToggleFireMode()
+{
+    CurrentFireMode = CurrentFireMode == FireMode.Automatic ? FireMode.Burst : FireMode.Automatic;
+    EmitSignal(SignalName.FireModeChanged, (int)CurrentFireMode);
+}
+```
+
+**Fix Applied:**
+1. Added `SWITCH_FIRE_MODE` step to the tutorial state machine (between `SHOOT_TARGETS` and `RELOAD`)
+2. Added detection for whether player has assault rifle (`_has_assault_rifle` flag)
+3. Connected to `FireModeChanged` signal from weapon to detect when player switches modes
+4. Added prompt `[B] Переключи режим стрельбы` for the fire mode step
+5. If player doesn't have assault rifle, the step is skipped automatically
+
+## Files Modified in Phase 4 Fix
+
+1. `scripts/levels/tutorial_level.gd`:
+   - Added `SWITCH_FIRE_MODE` enum value
+   - Added `_has_switched_fire_mode`, `_has_assault_rifle`, `_assault_rifle` variables
+   - Added connection to `FireModeChanged` signal
+   - Added `_on_fire_mode_changed()` callback
+   - Updated tutorial flow to include fire mode step before reload (only for assault rifle)
+   - Fixed reload prompt to show `[R] [F] [R]` sequence
+
 ## Lessons Learned
 
 1. **Test in Export Builds:** Always test gameplay features in exported builds, not just the editor
 2. **Complete Feature Implementation:** When adding a new level, ensure all UI elements from reference levels are included
 3. **Use Robust Positioning:** For UI that follows world objects, use canvas transforms instead of manual calculations
 4. **Check All Affected Files:** When removing a feature, search all files to ensure no references remain
+5. **Understand Game Mechanics Fully:** Read the source code carefully to understand complex mechanics like multi-step reload sequences
+6. **Document All Player Actions:** For tutorials, ensure all unique weapon/player actions are covered (fire modes, reload sequences)
+7. **Conditional Tutorial Steps:** Some tutorial steps should only appear based on player equipment (e.g., fire mode switch for assault rifle only)
 
 ## Related Files
 

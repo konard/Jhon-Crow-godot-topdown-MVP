@@ -4,8 +4,9 @@ extends Node2D
 ## This script handles the tutorial flow:
 ## 1. Player approaches the targets (WASD movement)
 ## 2. Player shoots at targets (LMB)
-## 3. Player reloads (R key)
-## 4. Shows completion message with Q restart hint
+## 3. Player switches fire mode (B key) - only if player has assault rifle
+## 4. Player reloads using R -> F -> R sequence
+## 5. Shows completion message with Q restart hint
 ##
 ## Floating key prompts appear near the player until the action is completed.
 
@@ -22,6 +23,7 @@ var _ammo_label: Label = null
 enum TutorialStep {
 	MOVE_TO_TARGETS,
 	SHOOT_TARGETS,
+	SWITCH_FIRE_MODE,
 	RELOAD,
 	COMPLETED
 }
@@ -37,6 +39,15 @@ var _total_targets: int = 0
 
 ## Whether the player has reloaded.
 var _has_reloaded: bool = false
+
+## Whether the player has switched fire mode.
+var _has_switched_fire_mode: bool = false
+
+## Whether the player has an assault rifle (for fire mode tutorial step).
+var _has_assault_rifle: bool = false
+
+## Reference to the player's assault rifle weapon (for fire mode tracking).
+var _assault_rifle: Node = null
 
 ## Floating prompt label that follows the player.
 var _prompt_label: Label = null
@@ -97,6 +108,9 @@ func _process(_delta: float) -> void:
 		TutorialStep.SHOOT_TARGETS:
 			# Shooting is tracked via target hit signals
 			pass
+		TutorialStep.SWITCH_FIRE_MODE:
+			# Fire mode switching is tracked via weapon signal
+			pass
 		TutorialStep.RELOAD:
 			# Reloading is tracked via player signal
 			pass
@@ -113,11 +127,20 @@ func _connect_player_signals() -> void:
 	# Try to connect to weapon signals (C# Player)
 	var weapon = _player.get_node_or_null("AssaultRifle")
 	if weapon != null:
+		_assault_rifle = weapon
+		_has_assault_rifle = true
+		print("Tutorial: Player has AssaultRifle - fire mode tutorial enabled")
+
 		# Connect to reload signals from player (C# Player)
 		if _player.has_signal("ReloadCompleted"):
 			_player.ReloadCompleted.connect(_on_player_reload_completed)
 		elif _player.has_signal("reload_completed"):
 			_player.reload_completed.connect(_on_player_reload_completed)
+
+		# Connect to fire mode changed signal from weapon
+		if weapon.has_signal("FireModeChanged"):
+			weapon.FireModeChanged.connect(_on_fire_mode_changed)
+			print("Tutorial: Connected to FireModeChanged signal")
 	else:
 		# GDScript player
 		if _player.has_signal("reload_completed"):
@@ -241,6 +264,22 @@ func _on_target_hit() -> void:
 	print("Tutorial: Target hit (%d/%d)" % [_targets_hit, _total_targets])
 
 	if _targets_hit >= _total_targets:
+		# If player has assault rifle, go to fire mode switch step
+		# Otherwise, skip directly to reload
+		if _has_assault_rifle:
+			_advance_to_step(TutorialStep.SWITCH_FIRE_MODE)
+		else:
+			_advance_to_step(TutorialStep.RELOAD)
+
+
+## Called when player switches fire mode.
+func _on_fire_mode_changed(_new_mode: int) -> void:
+	if _current_step != TutorialStep.SWITCH_FIRE_MODE:
+		return
+
+	if not _has_switched_fire_mode:
+		_has_switched_fire_mode = true
+		print("Tutorial: Player switched fire mode")
 		_advance_to_step(TutorialStep.RELOAD)
 
 
@@ -322,8 +361,10 @@ func _update_prompt_text() -> void:
 			_prompt_label.text = "[WASD] Подойди к мишеням"
 		TutorialStep.SHOOT_TARGETS:
 			_prompt_label.text = "[ЛКМ] Стреляй по мишеням"
+		TutorialStep.SWITCH_FIRE_MODE:
+			_prompt_label.text = "[B] Переключи режим стрельбы"
 		TutorialStep.RELOAD:
-			_prompt_label.text = "[R] Перезарядись"
+			_prompt_label.text = "[R] [F] [R] Перезарядись"
 		TutorialStep.COMPLETED:
 			_prompt_label.text = ""
 
