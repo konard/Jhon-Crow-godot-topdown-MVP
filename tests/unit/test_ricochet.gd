@@ -132,7 +132,7 @@ func test_bullet_default_ricochet_constants() -> void:
 	# Test default constants
 	assert_eq(bullet.DEFAULT_MAX_RICOCHETS, -1, "Default max ricochets should be -1 (unlimited)")
 	assert_almost_eq(bullet.DEFAULT_MAX_RICOCHET_ANGLE, 30.0, 0.1, "Default max ricochet angle")
-	assert_almost_eq(bullet.DEFAULT_BASE_RICOCHET_PROBABILITY, 0.7, 0.01, "Default base probability")
+	assert_almost_eq(bullet.DEFAULT_BASE_RICOCHET_PROBABILITY, 1.0, 0.01, "Default base probability")
 	assert_almost_eq(bullet.DEFAULT_VELOCITY_RETENTION, 0.85, 0.01, "Default velocity retention")
 	assert_almost_eq(bullet.DEFAULT_RICOCHET_DAMAGE_MULTIPLIER, 0.5, 0.01, "Default damage multiplier")
 
@@ -362,5 +362,5 @@ func test_quadratic_probability_approaches_zero_near_max_angle() -> void:
 	# At 90% of max angle, probability should be very low
 	var near_max_angle := caliber.max_ricochet_angle * 0.9
 	var probability := caliber.calculate_ricochet_probability(near_max_angle)
-	# (1 - 0.9)^2 = 0.01 factor, so probability = 0.7 * 0.01 = 0.007
-	assert_lt(probability, 0.01, "Probability near max angle should be very low")
+	# (1 - 0.9)^2 = 0.01 factor, so probability = 1.0 * 0.01 = 0.01
+	assert_lt(probability, 0.02, "Probability near max angle should be very low")

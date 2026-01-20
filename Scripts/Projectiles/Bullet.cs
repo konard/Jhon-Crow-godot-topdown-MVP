@@ -84,7 +84,7 @@ public partial class Bullet : Area2D
     /// <summary>
     /// Base probability of ricochet at optimal (grazing) angle.
     /// </summary>
-    private const float BaseRicochetProbability = 0.7f;
+    private const float BaseRicochetProbability = 1.0f;
 
     /// <summary>
     /// Velocity retention factor after ricochet (0-1).
@@ -351,12 +351,13 @@ public partial class Bullet : Area2D
         GD.Print($"[Bullet]: Hit {area.Name} (damage: {Damage})");
 
         // Check if this is a HitArea - if so, check against parent's instance ID
-        // This prevents the shooter from damaging themselves
+        // This prevents the shooter from damaging themselves with direct shots
+        // BUT ricocheted bullets CAN damage the shooter (realistic self-damage)
         var parent = area.GetParent();
-        if (parent != null && ShooterId == parent.GetInstanceId())
+        if (parent != null && ShooterId == parent.GetInstanceId() && !_hasRicocheted)
         {
-            GD.Print($"[Bullet]: Ignoring self-hit on {parent.Name}");
-            return; // Don't hit the shooter
+            GD.Print($"[Bullet]: Ignoring self-hit on {parent.Name} (not ricocheted)");
+            return; // Don't hit the shooter with direct shots
         }
 
         // Check if the parent is dead - bullets should pass through dead entities

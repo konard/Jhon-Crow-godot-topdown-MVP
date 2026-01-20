@@ -242,3 +242,80 @@ return asin(dot)  # 0° at grazing, 90° at direct hit - CORRECT!
 OLD: velocity_retention = 0.6  (too aggressive, 40% speed lost)
 NEW: velocity_retention = 0.85 (better feel, 15% speed lost)
 ```
+
+## Fourth Round of Feedback (PR #150 Comment)
+**Date:** 2026-01-20T23:33:40Z
+
+The owner reported additional requirements:
+1. "5.45 под острыми углами должен со 100% шансом рикошетить (у игрока и врагов.)" - 5.45 at sharp angles should ricochet with 100% chance (for both player and enemies)
+
+Attached logs:
+- `logs/game_log_20260121_023018.txt`
+- `logs/game_log_20260121_023229.txt`
+
+Additional feedback from comment at 2026-01-20T23:23:50Z:
+- "так же рикошеты игрока должны иметь возможность наносить урон игроку" - Player ricochets should be able to damage the player
+
+### Issue 7: Ricochet Probability Not 100% at Grazing Angles
+**Root Cause:** The `base_ricochet_probability` was set to 70% (0.7), meaning even at optimal grazing angles, there was still a 30% chance of no ricochet.
+
+**Resolution:** Changed `base_ricochet_probability` to 100% (1.0) in:
+- `resources/calibers/caliber_545x39.tres`
+- `scripts/data/caliber_data.gd` (default value)
+- `scripts/projectiles/bullet.gd` (DEFAULT_BASE_RICOCHET_PROBABILITY)
+- `Scripts/Projectiles/Bullet.cs` (BaseRicochetProbability)
+- `tests/unit/test_ricochet.gd` (updated test expectations)
+
+Now at optimal grazing angles (0°), 5.45x39mm ammunition will **always** ricochet. The quadratic curve still reduces probability at steeper angles.
+
+### Issue 8: Player Cannot Be Damaged By Their Own Ricochets
+**Root Cause:** Both bullet implementations explicitly blocked self-damage by checking if the hit target's parent matched the shooter ID:
+
+```gdscript
+# Old code (bullet.gd)
+if parent and shooter_id == parent.get_instance_id():
+    return  # Don't hit the shooter
+```
+
+```csharp
+// Old code (Bullet.cs)
+if (parent != null && ShooterId == parent.GetInstanceId())
+{
+    return; // Don't hit the shooter
+}
+```
+
+This prevented ALL self-damage, including from ricocheted bullets, which is unrealistic.
+
+**Resolution:** Modified both implementations to only block self-damage for **direct** shots, but allow ricocheted bullets to damage the shooter:
+
+```gdscript
+# New code (bullet.gd)
+if parent and shooter_id == parent.get_instance_id() and not _has_ricocheted:
+    return  # Don't hit the shooter with direct shots
+```
+
+```csharp
+// New code (Bullet.cs)
+if (parent != null && ShooterId == parent.GetInstanceId() && !_hasRicocheted)
+{
+    return; // Don't hit the shooter with direct shots
+}
+```
+
+This enables realistic gameplay where careless shooting can result in self-damage from ricochets, adding tactical depth to combat.
+
+## Updated Probability Settings
+
+| Setting | Previous Value | New Value | Reason |
+|---------|---------------|-----------|--------|
+| `base_ricochet_probability` | 0.7 (70%) | 1.0 (100%) | User feedback: 5.45 should always ricochet at grazing angles |
+| Self-damage from ricochets | Disabled | Enabled | User feedback: realistic self-damage |
+
+## Files Modified (Fourth Round)
+
+1. `resources/calibers/caliber_545x39.tres` - Updated base_ricochet_probability to 1.0
+2. `scripts/data/caliber_data.gd` - Updated default base_ricochet_probability to 1.0
+3. `scripts/projectiles/bullet.gd` - Updated DEFAULT_BASE_RICOCHET_PROBABILITY to 1.0, enabled ricochet self-damage
+4. `Scripts/Projectiles/Bullet.cs` - Updated BaseRicochetProbability to 1.0f, enabled ricochet self-damage
+5. `tests/unit/test_ricochet.gd` - Updated test expectations for 100% probability

@@ -55,7 +55,7 @@ var _ricochet_count: int = 0
 ## -1 means unlimited ricochets.
 const DEFAULT_MAX_RICOCHETS: int = -1
 const DEFAULT_MAX_RICOCHET_ANGLE: float = 30.0
-const DEFAULT_BASE_RICOCHET_PROBABILITY: float = 0.7
+const DEFAULT_BASE_RICOCHET_PROBABILITY: float = 1.0
 const DEFAULT_VELOCITY_RETENTION: float = 0.85
 const DEFAULT_RICOCHET_DAMAGE_MULTIPLIER: float = 0.5
 const DEFAULT_RICOCHET_ANGLE_DEVIATION: float = 10.0
@@ -200,10 +200,11 @@ func _on_area_entered(area: Area2D) -> void:
 	# This allows bullets to pass through detection-only areas like ThreatSpheres
 	if area.has_method("on_hit"):
 		# Check if this is a HitArea - if so, check against parent's instance ID
-		# This prevents the shooter from damaging themselves
+		# This prevents the shooter from damaging themselves with direct shots
+		# BUT ricocheted bullets CAN damage the shooter (realistic self-damage)
 		var parent: Node = area.get_parent()
-		if parent and shooter_id == parent.get_instance_id():
-			return  # Don't hit the shooter
+		if parent and shooter_id == parent.get_instance_id() and not _has_ricocheted:
+			return  # Don't hit the shooter with direct shots
 
 		# Check if the parent is dead - bullets should pass through dead entities
 		# This is a fallback check in case the collision shape/layer disabling

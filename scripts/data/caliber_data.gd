@@ -44,7 +44,7 @@ class_name CaliberData
 ## Base probability of ricochet when hitting at the optimal angle (very shallow).
 ## The actual probability is scaled based on impact angle.
 ## 0.0 = never ricochets, 1.0 = always ricochets at optimal angle.
-@export_range(0.0, 1.0, 0.05) var base_ricochet_probability: float = 0.7
+@export_range(0.0, 1.0, 0.05) var base_ricochet_probability: float = 1.0
 
 ## Velocity retention factor after ricochet (0.0 to 1.0).
 ## How much of the original velocity is retained after bouncing.
