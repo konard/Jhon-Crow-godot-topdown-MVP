@@ -382,11 +382,19 @@ var _combat_approaching: bool = false
 ## Timer for the approach phase of combat.
 var _combat_approach_timer: float = 0.0
 
+## Timer tracking total time spent in COMBAT state this cycle.
+## Used to prevent rapid state thrashing when visibility flickers.
+var _combat_state_timer: float = 0.0
+
 ## Maximum time to spend approaching player before starting to shoot (seconds).
 const COMBAT_APPROACH_MAX_TIME: float = 2.0
 
 ## Distance at which enemy is considered "close enough" to start shooting phase.
 const COMBAT_DIRECT_CONTACT_DISTANCE: float = 250.0
+
+## Minimum time in COMBAT state before allowing transition to PURSUING due to lost line of sight.
+## This prevents rapid state thrashing when visibility flickers at edges of walls/obstacles.
+const COMBAT_MIN_DURATION_BEFORE_PURSUE: float = 0.5
 
 ## --- Pursuit State (cover-to-cover movement) ---
 ## Timer for waiting at cover during pursuit.
@@ -412,8 +420,16 @@ var _pursuit_approaching: bool = false
 ## Timer for approach phase during pursuit.
 var _pursuit_approach_timer: float = 0.0
 
+## Timer tracking total time spent in PURSUING state this cycle.
+## Used to prevent rapid state thrashing when visibility flickers.
+var _pursuing_state_timer: float = 0.0
+
 ## Maximum time to approach during pursuit before transitioning to COMBAT (seconds).
 const PURSUIT_APPROACH_MAX_TIME: float = 3.0
+
+## Minimum time in PURSUING state before allowing transition to COMBAT.
+## This prevents rapid state thrashing when visibility flickers at edges of walls/obstacles.
+const PURSUING_MIN_DURATION_BEFORE_COMBAT: float = 0.3
 
 ## Minimum distance progress required for a valid pursuit cover (as fraction of current distance).
 ## Covers that don't make at least this much progress toward the player are skipped.
@@ -527,6 +543,10 @@ const CLEAR_SHOT_EXIT_DISTANCE: float = 60.0
 ## Last known position of a sound source (e.g., player or enemy gunshot).
 ## Used when the enemy hears a sound but can't see the player, to investigate the location.
 var _last_known_player_position: Vector2 = Vector2.ZERO
+
+## Flag indicating we heard a vulnerability sound (reload/empty click) and should pursue
+## to that position even without line of sight to the player.
+var _pursuing_vulnerability_sound: bool = false
 
 
 func _ready() -> void:
@@ -668,6 +688,7 @@ func on_sound_heard(sound_type: int, position: Vector2, source_type: int, source
 ##
 ## Parameters:
 ## - sound_type: The type of sound (from SoundPropagation.SoundType enum)
+##   0=GUNSHOT, 1=EXPLOSION, 2=FOOTSTEP, 3=RELOAD, 4=IMPACT, 5=EMPTY_CLICK
 ## - position: World position where the sound originated
 ## - source_type: Whether sound is from PLAYER, ENEMY, or NEUTRAL (from SoundPropagation.SourceType)
 ## - source_node: The node that produced the sound (can be null)
@@ -677,12 +698,66 @@ func on_sound_heard_with_intensity(sound_type: int, position: Vector2, source_ty
 	if not _is_alive:
 		return
 
-	# Only react to gunshots for now (sound_type 0 = GUNSHOT in SoundPropagation.SoundType)
-	if sound_type != 0:
-		return
-
 	# Calculate distance to sound for logging
 	var distance := global_position.distance_to(position)
+
+	# Handle reload sound (sound_type 3 = RELOAD) - player is vulnerable!
+	# This sound propagates through walls and alerts enemies even behind cover.
+	if sound_type == 3 and source_type == 0:  # RELOAD from PLAYER
+		_log_debug("Heard player RELOAD (intensity=%.2f, distance=%.0f) at %s" % [
+			intensity, distance, position
+		])
+		_log_to_file("Heard player RELOAD at %s, intensity=%.2f, distance=%.0f" % [
+			position, intensity, distance
+		])
+
+		# Set player vulnerability state - reloading
+		_goap_world_state["player_reloading"] = true
+		_last_known_player_position = position
+		# Set flag to pursue to sound position even without line of sight
+		_pursuing_vulnerability_sound = true
+
+		# React to vulnerable player sound - transition to combat/pursuing
+		# All enemies in hearing range should pursue the vulnerable player!
+		# This makes reload sounds a high-risk action when enemies are nearby.
+		if _current_state in [AIState.IDLE, AIState.IN_COVER, AIState.SUPPRESSED, AIState.RETREATING, AIState.SEEKING_COVER]:
+			# Leave cover/defensive state to attack vulnerable player
+			_log_to_file("Vulnerability sound triggered pursuit - transitioning from %s to PURSUING" % AIState.keys()[_current_state])
+			_transition_to_pursuing()
+		# For COMBAT, PURSUING, FLANKING states: the flag is set and they'll use it
+		# (COMBAT/PURSUING now check _pursuing_vulnerability_sound before retreating)
+		return
+
+	# Handle empty click sound (sound_type 5 = EMPTY_CLICK) - player is vulnerable!
+	# This sound has shorter range than reload but still propagates through walls.
+	if sound_type == 5 and source_type == 0:  # EMPTY_CLICK from PLAYER
+		_log_debug("Heard player EMPTY_CLICK (intensity=%.2f, distance=%.0f) at %s" % [
+			intensity, distance, position
+		])
+		_log_to_file("Heard player EMPTY_CLICK at %s, intensity=%.2f, distance=%.0f" % [
+			position, intensity, distance
+		])
+
+		# Set player vulnerability state - out of ammo
+		_goap_world_state["player_ammo_empty"] = true
+		_last_known_player_position = position
+		# Set flag to pursue to sound position even without line of sight
+		_pursuing_vulnerability_sound = true
+
+		# React to vulnerable player sound - transition to combat/pursuing
+		# All enemies in hearing range should pursue the vulnerable player!
+		# This makes empty click sounds a high-risk action when enemies are nearby.
+		if _current_state in [AIState.IDLE, AIState.IN_COVER, AIState.SUPPRESSED, AIState.RETREATING, AIState.SEEKING_COVER]:
+			# Leave cover/defensive state to attack vulnerable player
+			_log_to_file("Vulnerability sound triggered pursuit - transitioning from %s to PURSUING" % AIState.keys()[_current_state])
+			_transition_to_pursuing()
+		# For COMBAT, PURSUING, FLANKING states: the flag is set and they'll use it
+		# (COMBAT/PURSUING now check _pursuing_vulnerability_sound before retreating)
+		return
+
+	# Handle gunshot sounds (sound_type 0 = GUNSHOT)
+	if sound_type != 0:
+		return
 
 	# React based on current state:
 	# - IDLE: Always react to loud sounds
@@ -1104,8 +1179,13 @@ func _process_idle_state(delta: float) -> void:
 ## Phase 2 (exposed): Stand and shoot for 2-3 seconds.
 ## Phase 3: Return to cover via SEEKING_COVER state.
 func _process_combat_state(delta: float) -> void:
+	# Track time in COMBAT state (for preventing rapid state thrashing)
+	_combat_state_timer += delta
+
 	# Check for suppression - transition to retreating behavior
-	if _under_fire and enable_cover:
+	# BUT: When pursuing a vulnerability sound (player reloading/out of ammo),
+	# ignore suppression and continue the attack - this is the best time to strike!
+	if _under_fire and enable_cover and not _pursuing_vulnerability_sound:
 		_combat_exposed = false
 		_combat_approaching = false
 		_seeking_clear_shot = false
@@ -1123,13 +1203,18 @@ func _process_combat_state(delta: float) -> void:
 		return
 
 	# If can't see player, pursue them (move cover-to-cover toward player)
+	# But only after minimum time has elapsed to prevent rapid state thrashing
+	# when visibility flickers at wall/obstacle edges
 	if not _can_see_player:
-		_combat_exposed = false
-		_combat_approaching = false
-		_seeking_clear_shot = false
-		_log_debug("Lost sight of player in COMBAT, transitioning to PURSUING")
-		_transition_to_pursuing()
-		return
+		if _combat_state_timer >= COMBAT_MIN_DURATION_BEFORE_PURSUE:
+			_combat_exposed = false
+			_combat_approaching = false
+			_seeking_clear_shot = false
+			_log_debug("Lost sight of player in COMBAT (%.2fs), transitioning to PURSUING" % _combat_state_timer)
+			_transition_to_pursuing()
+			return
+		# If minimum time hasn't elapsed, stay in COMBAT and wait
+		# This prevents rapid COMBAT<->PURSUING thrashing
 
 	# Update detection delay timer
 	if not _detection_delay_elapsed:
@@ -1753,9 +1838,15 @@ func _process_retreat_multiple_hits(delta: float, direction_to_cover: Vector2) -
 ## until they can see and hit the player.
 ## When at the last cover (no better cover found), enters approach phase
 ## to move directly toward the player.
+## Special case: when pursuing a vulnerability sound, move directly toward sound position.
 func _process_pursuing_state(delta: float) -> void:
+	# Track time in PURSUING state (for preventing rapid state thrashing)
+	_pursuing_state_timer += delta
+
 	# Check for suppression - transition to retreating behavior
-	if _under_fire and enable_cover:
+	# BUT: When pursuing a vulnerability sound (player reloading/out of ammo),
+	# ignore suppression and continue the attack - this is the best time to strike!
+	if _under_fire and enable_cover and not _pursuing_vulnerability_sound:
 		_pursuit_approaching = false
 		_transition_to_retreating()
 		return
@@ -1765,17 +1856,53 @@ func _process_pursuing_state(delta: float) -> void:
 	if enemies_in_combat >= 2:
 		_log_debug("Multiple enemies detected during pursuit (%d), transitioning to ASSAULT" % enemies_in_combat)
 		_pursuit_approaching = false
+		_pursuing_vulnerability_sound = false
 		_transition_to_assault()
 		return
 
 	# If can see player and can hit them from current position, engage
+	# But only after minimum time has elapsed to prevent rapid state thrashing
+	# when visibility flickers at wall/obstacle edges
 	if _can_see_player and _player:
 		var can_hit := _can_hit_player_from_current_position()
-		if can_hit:
-			_log_debug("Can see and hit player from pursuit, transitioning to COMBAT")
+		if can_hit and _pursuing_state_timer >= PURSUING_MIN_DURATION_BEFORE_COMBAT:
+			_log_debug("Can see and hit player from pursuit (%.2fs), transitioning to COMBAT" % _pursuing_state_timer)
 			_has_pursuit_cover = false
 			_pursuit_approaching = false
+			_pursuing_vulnerability_sound = false
 			_transition_to_combat()
+			return
+
+	# VULNERABILITY SOUND PURSUIT: When we heard a reload/empty click sound,
+	# move directly toward the sound position using navigation (goes around walls).
+	# This is a direct pursuit without cover-to-cover movement.
+	if _pursuing_vulnerability_sound and _last_known_player_position != Vector2.ZERO:
+		var distance_to_sound := global_position.distance_to(_last_known_player_position)
+
+		# If we reached the sound position
+		if distance_to_sound < 50.0:
+			_log_debug("Reached vulnerability sound position (dist=%.0f)" % distance_to_sound)
+			# If we can see the player now, attack
+			if _can_see_player and _player:
+				_log_debug("Can see player at sound position, transitioning to COMBAT")
+				_pursuing_vulnerability_sound = false
+				_transition_to_combat()
+				return
+			# If player moved or we still can't see them, clear the flag and use normal pursuit
+			_log_debug("Player not visible at sound position, switching to normal pursuit")
+			_pursuing_vulnerability_sound = false
+			# Fall through to normal pursuit behavior
+
+		else:
+			# Keep moving toward the sound position using navigation
+			_move_to_target_nav(_last_known_player_position, combat_move_speed)
+			# Log progress periodically
+			var vuln_pursuit_key := "last_vuln_pursuit_log"
+			var current_frame := Engine.get_physics_frames()
+			var last_log_frame: int = _goap_world_state.get(vuln_pursuit_key, -100)
+			if current_frame - last_log_frame > 60:
+				_goap_world_state[vuln_pursuit_key] = current_frame
+				_log_to_file("Pursuing vulnerability sound at %s, distance=%.0f" % [_last_known_player_position, distance_to_sound])
 			return
 
 	# Process approach phase - moving directly toward player when no better cover exists
@@ -2080,10 +2207,14 @@ func _transition_to_combat() -> void:
 	_combat_approaching = false
 	_combat_shoot_timer = 0.0
 	_combat_approach_timer = 0.0
+	# Reset state duration timer (prevents rapid state thrashing)
+	_combat_state_timer = 0.0
 	# Reset clear shot seeking variables
 	_seeking_clear_shot = false
 	_clear_shot_timer = 0.0
 	_clear_shot_target = Vector2.ZERO
+	# Clear vulnerability sound pursuit flag
+	_pursuing_vulnerability_sound = false
 
 
 ## Transition to SEEKING_COVER state.
@@ -2124,6 +2255,8 @@ func _transition_to_flanking() -> bool:
 		return false
 
 	_current_state = AIState.FLANKING
+	# Clear vulnerability sound pursuit flag
+	_pursuing_vulnerability_sound = false
 	# Initialize flank side only once per flanking maneuver
 	# Choose the side based on which direction has fewer obstacles
 	_flank_side = _choose_best_flank_side()
@@ -2198,6 +2331,8 @@ func _transition_to_pursuing() -> void:
 	_pursuit_approaching = false
 	_pursuit_approach_timer = 0.0
 	_current_cover_obstacle = null
+	# Reset state duration timer (prevents rapid state thrashing)
+	_pursuing_state_timer = 0.0
 	# Reset detection delay for new engagement
 	_detection_timer = 0.0
 	_detection_delay_elapsed = false
@@ -3553,6 +3688,7 @@ func _reset() -> void:
 	_combat_exposed = false
 	_combat_approaching = false
 	_combat_approach_timer = 0.0
+	_combat_state_timer = 0.0
 	# Reset pursuit state variables
 	_pursuit_cover_wait_timer = 0.0
 	_pursuit_next_cover = Vector2.ZERO
@@ -3560,6 +3696,7 @@ func _reset() -> void:
 	_current_cover_obstacle = null
 	_pursuit_approaching = false
 	_pursuit_approach_timer = 0.0
+	_pursuing_state_timer = 0.0
 	# Reset assault state variables
 	_assault_wait_timer = 0.0
 	_assault_ready = false
@@ -3575,6 +3712,7 @@ func _reset() -> void:
 	_flank_cooldown_timer = 0.0
 	# Reset sound detection state
 	_last_known_player_position = Vector2.ZERO
+	_pursuing_vulnerability_sound = false
 	_initialize_health()
 	_initialize_ammo()
 	_update_health_visual()
