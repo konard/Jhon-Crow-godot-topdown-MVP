@@ -771,18 +771,28 @@ func on_sound_heard_with_intensity(sound_type: int, position: Vector2, source_ty
 		# Clear the aggressive pursuit flag - no longer pursuing vulnerable player
 		_pursuing_vulnerability_sound = false
 
-		# React to reload completion - transition to cautious/defensive mode
+		# React to reload completion - transition to cautious/defensive mode after a short delay.
+		# The 200ms delay gives enemies a brief reaction time before becoming cautious,
+		# making the transition feel more natural and giving player a small window.
 		# Enemies who were pursuing the vulnerable player should now become more cautious.
 		# This makes completing reload a way to "reset" aggressive enemy behavior.
 		if _current_state in [AIState.PURSUING, AIState.COMBAT, AIState.ASSAULT]:
-			# Return to cover/defensive state since player is no longer vulnerable
-			if _has_valid_cover:
-				_log_to_file("Reload complete sound triggered retreat - transitioning from %s to RETREATING" % AIState.keys()[_current_state])
-				_transition_to_retreating()
-			elif enable_cover:
-				_log_to_file("Reload complete sound triggered cover seek - transitioning from %s to SEEKING_COVER" % AIState.keys()[_current_state])
-				_transition_to_seeking_cover()
-			# If no cover available, stay in current state but with cleared vulnerability flags
+			var state_before_delay := _current_state
+			_log_to_file("Reload complete sound heard - waiting 200ms before cautious transition from %s" % AIState.keys()[_current_state])
+			await get_tree().create_timer(0.2).timeout
+			# After delay, check if still alive and in an aggressive state
+			if not _is_alive:
+				return
+			# Only transition if still in an aggressive state (state might have changed during delay)
+			if _current_state in [AIState.PURSUING, AIState.COMBAT, AIState.ASSAULT]:
+				# Return to cover/defensive state since player is no longer vulnerable
+				if _has_valid_cover:
+					_log_to_file("Reload complete sound triggered retreat - transitioning from %s to RETREATING (delayed from %s)" % [AIState.keys()[_current_state], AIState.keys()[state_before_delay]])
+					_transition_to_retreating()
+				elif enable_cover:
+					_log_to_file("Reload complete sound triggered cover seek - transitioning from %s to SEEKING_COVER (delayed from %s)" % [AIState.keys()[_current_state], AIState.keys()[state_before_delay]])
+					_transition_to_seeking_cover()
+				# If no cover available, stay in current state but with cleared vulnerability flags
 		return
 
 	# Handle gunshot sounds (sound_type 0 = GUNSHOT)
