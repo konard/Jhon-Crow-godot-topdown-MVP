@@ -249,8 +249,8 @@ func _shoot() -> void:
 	bullet.shooter_id = get_instance_id()
 
 	# Set shooter position for distance-based penetration calculation
-	if "shooter_position" in bullet:
-		bullet.shooter_position = global_position
+	# Direct assignment - the bullet script defines this property
+	bullet.shooter_position = global_position
 
 	# Add bullet to the scene tree (parent's parent to avoid it being a child of player)
 	get_tree().current_scene.add_child(bullet)
