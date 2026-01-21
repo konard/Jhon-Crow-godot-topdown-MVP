@@ -38,8 +38,8 @@ var _is_effect_active: bool = false
 ## Reference to the player for health monitoring.
 var _player: Node = null
 
-## Reference to the HealthComponent (for C# player).
-var _health_component: Node = null
+## Whether we've successfully connected to player signals.
+var _connected_to_player: bool = false
 
 ## Cached list of enemies with their original modulate colors.
 ## Key: enemy instance, Value: original modulate Color
@@ -118,6 +118,10 @@ func _log(message: String) -> void:
 
 ## Find and connect to the player.
 func _find_player() -> void:
+	# Skip if already connected
+	if _connected_to_player and is_instance_valid(_player):
+		return
+
 	_player = get_tree().get_first_node_in_group("player")
 	if _player == null:
 		# Try finding by class/script path
@@ -132,38 +136,28 @@ func _find_player() -> void:
 
 	var connected := false
 
-	# Try to connect to GDScript player's health_changed signal
+	# Try to connect to GDScript player's health_changed signal (int, int)
 	if _player.has_signal("health_changed"):
 		if not _player.health_changed.is_connected(_on_player_health_changed):
 			_player.health_changed.connect(_on_player_health_changed)
 			_log("Connected to player health_changed signal (GDScript)")
 			connected = true
 
-	# Always try to find HealthComponent (C# player uses this)
-	# Do this regardless of whether we found health_changed signal
-	_health_component = _player.get_node_or_null("HealthComponent")
-	if _health_component:
-		_log("Found HealthComponent node")
-		if _health_component.has_signal("HealthChanged"):
-			if not _health_component.HealthChanged.is_connected(_on_player_health_changed_float):
-				_health_component.HealthChanged.connect(_on_player_health_changed_float)
-				_log("Connected to HealthComponent.HealthChanged signal (C#)")
-				connected = true
-		else:
-			_log("WARNING: HealthComponent does not have HealthChanged signal")
-	else:
-		_log("No HealthComponent found on player")
+	# Try to connect to C# player's Damaged signal (float amount, float currentHealth)
+	# This signal is emitted by BaseCharacter when it takes damage, includes current health
+	if _player.has_signal("Damaged"):
+		if not _player.Damaged.is_connected(_on_player_damaged):
+			_player.Damaged.connect(_on_player_damaged)
+			_log("Connected to player Damaged signal (C#)")
+			connected = true
 
 	if not connected:
 		_log("WARNING: Could not connect to any health signal!")
+	else:
+		_connected_to_player = true
 
 	# Connect to died signal to end effect on death
-	# Try HealthComponent's Died signal first (for C# player)
-	if _health_component and _health_component.has_signal("Died"):
-		if not _health_component.Died.is_connected(_on_player_died):
-			_health_component.Died.connect(_on_player_died)
-			_log("Connected to HealthComponent.Died signal (C#)")
-	elif _player.has_signal("died") and not _player.died.is_connected(_on_player_died):
+	if _player.has_signal("died") and not _player.died.is_connected(_on_player_died):
 		_player.died.connect(_on_player_died)
 		_log("Connected to player died signal (GDScript)")
 	elif _player.has_signal("Died") and not _player.Died.is_connected(_on_player_died):
@@ -177,10 +171,11 @@ func _on_player_health_changed(current: int, maximum: int) -> void:
 	_check_penultimate_state(float(current))
 
 
-## Called when player health changes (C# player, float values from HealthComponent).
-func _on_player_health_changed_float(current: float, maximum: float) -> void:
-	_log("Player health changed (float): %.1f/%.1f" % [current, maximum])
-	_check_penultimate_state(current)
+## Called when player takes damage (C# player, from BaseCharacter.Damaged signal).
+## Signal signature: Damaged(float amount, float currentHealth)
+func _on_player_damaged(amount: float, current_health: float) -> void:
+	_log("Player damaged: %.1f damage, current health: %.1f" % [amount, current_health])
+	_check_penultimate_state(current_health)
 
 
 ## Check if penultimate hit effect should be triggered or ended.
@@ -317,7 +312,7 @@ func reset_effects() -> void:
 	_log("Resetting all effects (scene change detected)")
 	_end_penultimate_effect()
 	_player = null
-	_health_component = null
+	_connected_to_player = false
 
 
 ## Called when the scene tree structure changes.

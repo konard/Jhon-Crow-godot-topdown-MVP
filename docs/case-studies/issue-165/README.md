@@ -53,62 +53,102 @@ User tested again with updated code:
 - Result: Effect still not working
 - Request: Change time slowdown from 0.25 to 0.1 (10x slowdown)
 
-### Phase 4: Root Cause Analysis (2026-01-21 07:05 UTC)
+### Phase 4: Third User Test (2026-01-21 07:13 UTC)
 
-Investigation of second log file revealed critical issues:
+User tested again after fixes and provided two logs:
+- `game_log_20260121_100848.txt`
+- `game_log_20260121_101232.txt`
 
-#### Root Cause #1: Wrong Logger Reference
-
-The manager was using incorrect logger path and method:
-
-```gdscript
-// BEFORE (buggy)
-var logger: Node = get_node_or_null("/root/Logger")
-if logger and logger.has_method("info"):
-    logger.info("[PenultimateHit] " + message)
+Both logs showed:
+```
+[PenultimateHit] Found player: Player (class: CharacterBody2D)
+[PenultimateHit] No HealthComponent found on player
+[PenultimateHit] WARNING: Could not connect to any health signal!
+[PenultimateHit] Connected to player Died signal (C#)
 ```
 
-**Problem:** The autoload is named `FileLogger`, not `Logger`, and the method is `log_info()`, not `info()`.
+Result: **Logger was working, but signal connection was failing**.
 
-```gdscript
-// AFTER (fixed)
-var logger: Node = get_node_or_null("/root/FileLogger")
-if logger and logger.has_method("log_info"):
-    logger.log_info("[PenultimateHit] " + message)
+### Phase 5: Final Root Cause Analysis (2026-01-21 07:14 UTC)
+
+#### Root Cause #1 (CRITICAL): Dynamic HealthComponent Creation
+
+The **true** root cause was that the C# `BaseCharacter` class dynamically creates `HealthComponent` in its `_Ready()` method:
+
+```csharp
+// In BaseCharacter.cs
+protected virtual void InitializeHealthComponent()
+{
+    HealthComponent = GetNodeOrNull<HealthComponent>("HealthComponent");
+
+    if (HealthComponent == null)
+    {
+        // Create a new health component dynamically
+        HealthComponent = new HealthComponent();
+        AddChild(HealthComponent);  // <-- Created at runtime!
+    }
+}
 ```
 
-**Evidence:** No `[PenultimateHit]` messages appeared in `game_log_20260121_095700.txt` despite the autoload being registered.
+The `Player.tscn` scene does NOT have a pre-existing HealthComponent node. It's created at runtime by the C# script.
 
-#### Root Cause #2: Shader Parameter Clamping (Phase 2)
+**Why `get_node_or_null("HealthComponent")` fails:**
+1. When GDScript calls `_player.get_node_or_null("HealthComponent")`, it looks for a child node named "HealthComponent"
+2. But in C#, `HealthComponent` is a **protected property** that holds a reference to a node
+3. Even though the node gets added via `AddChild()`, the timing may be off
+4. Furthermore, the approach of trying to find the node was fundamentally flawed
 
-The saturation shader had a `hint_range(0.0, 1.0)` constraint:
+#### Root Cause #2: Wrong Signal Strategy
 
-```gdshader
-// BEFORE (buggy)
-uniform float saturation_boost : hint_range(0.0, 1.0) = 0.0;
+The code was trying to connect to `HealthComponent.HealthChanged` signal, but:
+1. The `HealthComponent` node wasn't reliably accessible
+2. The better approach is to use the **Player's own `Damaged` signal** which is emitted by `BaseCharacter`:
+
+```csharp
+// BaseCharacter emits this signal directly
+[Signal]
+public delegate void DamagedEventHandler(float amount, float currentHealth);
+
+protected virtual void OnHealthDamaged(float amount, float currentHealth)
+{
+    EmitSignal(SignalName.Damaged, amount, currentHealth);
+}
 ```
 
-This clamped the saturation boost to a maximum of 1.0, even though we were setting it to 2.0 for 3x saturation. The effective multiplier was only 2x instead of 3x.
+The `Damaged` signal includes the **current health** in its parameters, which is exactly what we need!
 
-#### Root Cause #3: C# Player Health Signal Connection
+#### Previous Issues (Now Fixed)
 
-The C# Player uses a `HealthComponent` child node with `HealthChanged` signal. The original code only checked for `HealthComponent` if the player didn't have a direct `health_changed` signal, but this logic was flawed - both GDScript and C# players could have different signal patterns.
-
-#### Root Cause #3: No Contrast Effect
-
-The original requirements didn't include contrast, but user feedback clarified it was needed (2x increase).
-
-#### Root Cause #4: Effect Duration
-
-The original implementation ended the effect immediately when:
-- Player health went above 1 HP
-- Player died
-
-User clarified the effect should last 3 real seconds (not game time seconds).
+1. **Logger path issue** - Fixed by using `/root/FileLogger` and `log_info()`
+2. **Shader range clamping** - Fixed by extending hint_range to 10.0
+3. **Missing contrast effect** - Added contrast_boost parameter
 
 ## Solution Implementation
 
-### Fix #1: Extended Shader Range
+### Fix #1 (CRITICAL): Use Player's Damaged Signal
+
+The key fix was connecting to the Player's `Damaged` signal instead of trying to find the `HealthComponent`:
+
+```gdscript
+// BEFORE (broken - HealthComponent not accessible)
+_health_component = _player.get_node_or_null("HealthComponent")
+if _health_component and _health_component.has_signal("HealthChanged"):
+    _health_component.HealthChanged.connect(_on_player_health_changed_float)
+
+// AFTER (working - use Player's direct signal)
+if _player.has_signal("Damaged"):
+    _player.Damaged.connect(_on_player_damaged)
+    _log("Connected to player Damaged signal (C#)")
+
+## Callback for Damaged signal (float amount, float currentHealth)
+func _on_player_damaged(amount: float, current_health: float) -> void:
+    _log("Player damaged: %.1f damage, current health: %.1f" % [amount, current_health])
+    _check_penultimate_state(current_health)
+```
+
+The `Damaged` signal is emitted directly by `BaseCharacter.cs` and includes the current health, which is exactly what we need to check for penultimate hit state.
+
+### Fix #2: Extended Shader Range
 
 Updated `saturation.gdshader`:
 
@@ -118,7 +158,7 @@ uniform float saturation_boost : hint_range(0.0, 10.0) = 0.0;
 uniform float contrast_boost : hint_range(0.0, 10.0) = 0.0;
 ```
 
-### Fix #2: Added Contrast Effect
+### Fix #3: Added Contrast Effect
 
 Added contrast calculation to the shader:
 
@@ -128,7 +168,7 @@ float contrast_factor = 1.0 + contrast_boost;
 vec3 contrasted = (saturated - 0.5) * contrast_factor + 0.5;
 ```
 
-### Fix #3: Real-Time Duration
+### Fix #4: Real-Time Duration
 
 Changed from instant end to 3-second real-time duration:
 
@@ -145,15 +185,15 @@ func _process(_delta: float) -> void:
 
 Using `Time.get_ticks_msec()` ensures the duration is not affected by `Engine.time_scale`.
 
-### Fix #4: Comprehensive Logging
+### Fix #5: Corrected Logger Path
 
-Added logging throughout the manager:
+Fixed the logger reference:
 
 ```gdscript
 func _log(message: String) -> void:
-    var logger: Node = get_node_or_null("/root/Logger")
-    if logger and logger.has_method("info"):
-        logger.info("[PenultimateHit] " + message)
+    var logger: Node = get_node_or_null("/root/FileLogger")
+    if logger and logger.has_method("log_info"):
+        logger.log_info("[PenultimateHit] " + message)
     else:
         print("[PenultimateHit] " + message)
 ```
@@ -175,12 +215,15 @@ func _log(message: String) -> void:
 
 ## Lessons Learned
 
-1. **Verify autoload names and method signatures** - The logger issue (`Logger` vs `FileLogger`, `info()` vs `log_info()`) caused silent failures with no visible error messages
-2. **Always verify shader parameter ranges** - `hint_range` in Godot shaders clamps values, even when set programmatically
-3. **Add logging from the start** - Makes debugging much easier, especially for effects that users can't verbally describe
-4. **Clarify duration behavior** - "Effect lasts 3 seconds" can mean game time or real time; always specify
-5. **Test with extreme values** - A saturation boost of 2.0 should be visually obvious; if not, something is wrong
-6. **C# and GDScript interop needs careful signal handling** - C# players may use different node structures (HealthComponent) with PascalCase signal names
+1. **Use parent class signals, not child component signals** - The most reliable way to get health updates is via `BaseCharacter.Damaged` signal (emitted by the player itself), not via `HealthComponent.HealthChanged` (which may not be accessible from GDScript)
+2. **Dynamically created nodes may not be accessible** - In Godot with C# and GDScript interop, nodes created in C# `_Ready()` may not be reliably accessible from GDScript autoloads due to timing issues
+3. **Check what signals the node actually has** - Use `_player.has_signal("Damaged")` to verify signal existence before connecting
+4. **Verify autoload names and method signatures** - The logger issue (`Logger` vs `FileLogger`, `info()` vs `log_info()`) caused silent failures with no visible error messages
+5. **Always verify shader parameter ranges** - `hint_range` in Godot shaders clamps values, even when set programmatically
+6. **Add logging from the start** - Makes debugging much easier, especially for effects that users can't verbally describe
+7. **Clarify duration behavior** - "Effect lasts 3 seconds" can mean game time or real time; always specify
+8. **Test with extreme values** - A saturation boost of 2.0 should be visually obvious; if not, something is wrong
+9. **Study existing working code** - The `HitEffectsManager` provided a working pattern for screen effects; studying it helped understand the architecture
 
 ## Related Files
 
