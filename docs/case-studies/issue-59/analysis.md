@@ -177,10 +177,115 @@ The `_shoot()` function now uses `_get_aim_target_position()` which respects cov
 
 3. **Visual and actual behavior must match** - The enemy rotation and bullet direction must use the same targeting logic.
 
+### Session 5: User Reports Three More Issues (2026-01-21 ~03:13)
+
+User reported three issues:
+1. **With FOV option disabled, enemies still can't see the player**
+2. **With FOV option disabled, enemies should be in normal (non-rotated) state**
+3. **Some enemies shoot randomly when hearing gunshots without seeing the player**
+
+New game logs provided:
+- `game_log_20260121_060759.txt` (1.8MB)
+- `game_log_20260121_061156.txt` (34KB)
+
+### Session 5 Log Analysis
+
+Analysis of `game_log_20260121_061156.txt` revealed critical problems:
+
+```
+[06:11:57] [ENEMY] [Enemy3] Enemy spawned at (700, 750), health: 2, behavior: GUARD, player_found: yes
+[06:11:59] [ENEMY] [Enemy3] State: IDLE -> COMBAT
+[06:11:59] [ENEMY] [Enemy3] Player hid behind cover at (689.4686, 810), obstacle: Table1
+[06:11:59] [ENEMY] [Enemy3] Player hid behind cover at (702.4635, 810), obstacle: Table1
+[06:11:59] [ENEMY] [Enemy3] Player hid behind cover at (715.6382, 810), obstacle: Table1
+...repeated hundreds of times...
+```
+
+**Problems identified:**
+
+1. **Log spam persists** - "Player hid behind cover" message logged every frame
+2. **Cover tracking activates without direct sighting** - Enemy can enter COMBAT from hearing sounds, then immediately starts cover tracking even though they never SAW the player
+3. **Enemies track player through obstacles after hearing sounds** - When enemies hear a gunshot, they enter COMBAT and aim at the player's position even if they've never visually confirmed player location
+
+### Root Cause #3: Cover Tracking Without Direct Visual Confirmation
+
+The original cover tracking condition was:
+```gdscript
+if was_visible or _current_state in [AIState.COMBAT, AIState.PURSUING, ...]:
+    _tracking_player_behind_cover = true
+```
+
+This allowed cover tracking to activate when:
+- Enemy was in COMBAT state (even from hearing sounds, not seeing player)
+- `was_visible` was the state from previous frame, but didn't confirm DIRECT visual contact
+
+### Root Cause #4: Log Message Logged Every Frame
+
+The "Player hid behind cover" log message was being logged every frame when an obstacle blocked the raycast, without checking if cover tracking was already active.
+
+## Solution (Session 5)
+
+### Fix 4: Require Direct Visual Confirmation
+
+Added a new variable `_has_seen_player_directly` to track whether the enemy has ACTUALLY seen the player (raycast hit player, not obstacle):
+
+```gdscript
+## Whether the enemy has directly seen the player at least once in this encounter.
+## This is required before cover tracking can activate.
+var _has_seen_player_directly: bool = false
+```
+
+Changed cover tracking condition from:
+```gdscript
+# OLD (buggy):
+if was_visible or _current_state in [AIState.COMBAT, ...]:
+    _tracking_player_behind_cover = true
+```
+
+To:
+```gdscript
+# NEW (fixed):
+if was_visible and _has_seen_player_directly:
+    # Only log when first entering cover tracking
+    var was_already_tracking := _tracking_player_behind_cover
+    _tracking_player_behind_cover = true
+    if not was_already_tracking:
+        _log_to_file("Player hid behind cover...")
+```
+
+This ensures:
+- Cover tracking ONLY activates when transitioning FROM visible TO blocked
+- Enemy must have ACTUALLY seen player (raycast hit player body)
+- Enemies who only heard sounds do NOT track cover
+- Log message only appears once when entering cover tracking state
+
+### Fix 5: Reset Direct Sighting on Idle
+
+Added reset of `_has_seen_player_directly` when enemy returns to IDLE state:
+
+```gdscript
+func _transition_to_idle() -> void:
+    _has_seen_player_directly = false
+    _tracking_player_behind_cover = false
+    # ... other resets
+```
+
+This ensures each new encounter starts fresh without carryover from previous encounters.
+
+## Files Modified (Session 5)
+
+- `scripts/objects/enemy.gd` - Added `_has_seen_player_directly` variable and logic
+
 ## Conclusion
 
-This session addressed two user-reported issues:
-1. FOV is now an experimental setting, disabled by default, accessible via pause menu
-2. Cover tracking state is now stable with hysteresis, preventing rapid state flickering
+This session addressed three critical issues:
 
-The cover tracking system now provides smooth, predictable behavior when the player hides behind obstacles.
+1. **Fixed "enemies don't see player when FOV disabled"** - Issue was that cover tracking was activating without visual confirmation. Now requires `_has_seen_player_directly = true` before cover tracking can activate.
+
+2. **Fixed "enemies rotate toward player when they shouldn't"** - Enemies only aim at cover exit points if they've actually seen the player. Enemies who only heard sounds will move toward sound location but NOT track cover.
+
+3. **Fixed "random shooting when hearing gunshots"** - Same root cause as above. Without `_has_seen_player_directly`, enemies couldn't activate cover tracking from sound alone.
+
+4. **Fixed log spam** - Added `was_already_tracking` check to prevent logging every frame.
+
+The cover tracking system now properly requires visual confirmation before activating, providing more realistic and fair enemy behavior.

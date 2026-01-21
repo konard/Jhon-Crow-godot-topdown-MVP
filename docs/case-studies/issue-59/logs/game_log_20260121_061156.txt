@@ -1,0 +1,453 @@
+[06:11:56] [INFO] ============================================================
+[06:11:56] [INFO] GAME LOG STARTED
+[06:11:56] [INFO] ============================================================
+[06:11:56] [INFO] Timestamp: 2026-01-21T06:11:56
+[06:11:56] [INFO] Log file: I:/Загрузки/godot exe/game_log_20260121_061156.txt
+[06:11:56] [INFO] Executable: I:/Загрузки/godot exe/Godot-Top-Down-Template.exe
+[06:11:56] [INFO] OS: Windows
+[06:11:56] [INFO] Debug build: false
+[06:11:56] [INFO] Engine version: 4.3-stable (official)
+[06:11:56] [INFO] Project: Godot Top-Down Template
+[06:11:56] [INFO] ------------------------------------------------------------
+[06:11:56] [INFO] [GameManager] GameManager ready
+[06:11:56] [INFO] [SoundPropagation] SoundPropagation autoload initialized
+[06:11:57] [INFO] [SoundPropagation] Registered listener: Enemy1 (total: 1)
+[06:11:57] [ENEMY] [Enemy1] Registered as sound listener
+[06:11:57] [ENEMY] [Enemy1] Enemy spawned at (300, 350), health: 4, behavior: GUARD, player_found: yes
+[06:11:57] [INFO] [SoundPropagation] Registered listener: Enemy2 (total: 2)
+[06:11:57] [ENEMY] [Enemy2] Registered as sound listener
+[06:11:57] [ENEMY] [Enemy2] Enemy spawned at (400, 550), health: 4, behavior: GUARD, player_found: yes
+[06:11:57] [INFO] [SoundPropagation] Registered listener: Enemy3 (total: 3)
+[06:11:57] [ENEMY] [Enemy3] Registered as sound listener
+[06:11:57] [ENEMY] [Enemy3] Enemy spawned at (700, 750), health: 2, behavior: GUARD, player_found: yes
+[06:11:57] [INFO] [SoundPropagation] Registered listener: Enemy4 (total: 4)
+[06:11:57] [ENEMY] [Enemy4] Registered as sound listener
+[06:11:57] [ENEMY] [Enemy4] Enemy spawned at (800, 900), health: 4, behavior: GUARD, player_found: yes
+[06:11:57] [INFO] [SoundPropagation] Registered listener: Enemy5 (total: 5)
+[06:11:57] [ENEMY] [Enemy5] Registered as sound listener
+[06:11:57] [ENEMY] [Enemy5] Enemy spawned at (1700, 350), health: 2, behavior: GUARD, player_found: yes
+[06:11:57] [INFO] [SoundPropagation] Registered listener: Enemy6 (total: 6)
+[06:11:57] [ENEMY] [Enemy6] Registered as sound listener
+[06:11:57] [ENEMY] [Enemy6] Enemy spawned at (1950, 450), health: 4, behavior: GUARD, player_found: yes
+[06:11:57] [INFO] [SoundPropagation] Registered listener: Enemy7 (total: 7)
+[06:11:57] [ENEMY] [Enemy7] Registered as sound listener
+[06:11:57] [ENEMY] [Enemy7] Enemy spawned at (1606.114, 893.8859), health: 2, behavior: PATROL, player_found: yes
+[06:11:57] [INFO] [SoundPropagation] Registered listener: Enemy8 (total: 8)
+[06:11:57] [ENEMY] [Enemy8] Registered as sound listener
+[06:11:57] [ENEMY] [Enemy8] Enemy spawned at (1900, 1450), health: 3, behavior: GUARD, player_found: yes
+[06:11:57] [INFO] [SoundPropagation] Registered listener: Enemy9 (total: 9)
+[06:11:57] [ENEMY] [Enemy9] Registered as sound listener
+[06:11:57] [ENEMY] [Enemy9] Enemy spawned at (2100, 1550), health: 2, behavior: GUARD, player_found: yes
+[06:11:57] [INFO] [SoundPropagation] Registered listener: Enemy10 (total: 10)
+[06:11:57] [ENEMY] [Enemy10] Registered as sound listener
+[06:11:57] [ENEMY] [Enemy10] Enemy spawned at (1200, 1550), health: 2, behavior: PATROL, player_found: yes
+[06:11:59] [ENEMY] [Enemy3] State: IDLE -> COMBAT
+[06:11:59] [ENEMY] [Enemy3] Player hid behind cover at (689.4686, 810), obstacle: Table1
+[06:11:59] [ENEMY] [Enemy3] Player hid behind cover at (702.4635, 810), obstacle: Table1
+[06:11:59] [ENEMY] [Enemy3] Player hid behind cover at (715.6382, 810), obstacle: Table1
+[06:11:59] [ENEMY] [Enemy3] Player hid behind cover at (730.3348, 810), obstacle: Table1
+[06:11:59] [ENEMY] [Enemy3] Player hid behind cover at (748.5715, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy3] Player emerged from cover, resuming direct tracking
+[06:12:00] [INFO] [SoundPropagation] Sound emitted: type=GUNSHOT, pos=(700, 750), source=ENEMY (Enemy3), range=1469, listeners=10
+[06:12:00] [ENEMY] [Enemy2] Heard gunshot at (700, 750), source_type=1, intensity=0.02, distance=361
+[06:12:00] [ENEMY] [Enemy4] Heard gunshot at (700, 750), source_type=1, intensity=0.08, distance=180
+[06:12:00] [INFO] [SoundPropagation] Sound result: notified=2, out_of_range=1, self=1, below_threshold=6
+[06:12:00] [ENEMY] [Enemy4] Player hid behind cover at (763.9667, 1000), obstacle: Room2_WallBottom
+[06:12:00] [ENEMY] [Enemy2] Player hid behind cover at (455.0294, 688), obstacle: Room1_WallBottom
+[06:12:00] [ENEMY] [Enemy4] Player hid behind cover at (785.8795, 1000), obstacle: Room2_WallBottom
+[06:12:00] [ENEMY] [Enemy2] Player hid behind cover at (423.6288, 688), obstacle: Room1_WallBottom
+[06:12:00] [ENEMY] [Enemy3] Player hid behind cover at (740.8145, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy4] Player hid behind cover at (808.783, 1000), obstacle: Room2_WallBottom
+[06:12:00] [ENEMY] [Enemy2] Player hid behind cover at (395.2774, 688), obstacle: Room1_WallBottom
+[06:12:00] [ENEMY] [Enemy4] Player hid behind cover at (835.559, 1000), obstacle: Room2_WallBottom
+[06:12:00] [ENEMY] [Enemy2] Player hid behind cover at (365.6887, 688), obstacle: Room1_WallBottom
+[06:12:00] [ENEMY] [Enemy4] Player hid behind cover at (870.3757, 1000), obstacle: Room2_WallBottom
+[06:12:00] [ENEMY] [Enemy2] Player hid behind cover at (329.6755, 688), obstacle: Room1_WallBottom
+[06:12:00] [ENEMY] [Enemy4] Player hid behind cover at (908.7743, 988), obstacle: Room2_CornerBR
+[06:12:00] [ENEMY] [Enemy2] Player hid behind cover at (277.3278, 688), obstacle: Room1_WallBottom
+[06:12:00] [ENEMY] [Enemy4] Player hid behind cover at (912, 942.6667), obstacle: Room2_WallRight
+[06:12:00] [ENEMY] [Enemy2] Player hid behind cover at (180.3477, 688), obstacle: Room1_WallBottom
+[06:12:00] [ENEMY] [Enemy4] Player hid behind cover at (912, 903.9523), obstacle: Room2_WallRight
+[06:12:00] [ENEMY] [Enemy4] Player hid behind cover at (912, 867.4941), obstacle: Room2_WallRight
+[06:12:00] [ENEMY] [Enemy4] Player hid behind cover at (912, 863.7499), obstacle: Room2_WallRight
+[06:12:00] [ENEMY] [Enemy4] Player hid behind cover at (912, 835.148), obstacle: Room2_WallRight
+[06:12:00] [ENEMY] [Enemy4] Player hid behind cover at (912, 804.406), obstacle: Room2_WallRight
+[06:12:00] [ENEMY] [Enemy4] Player hid behind cover at (912, 767.3484), obstacle: Room2_WallRight
+[06:12:00] [INFO] [SoundPropagation] Sound emitted: type=GUNSHOT, pos=(462.2245, 564.9366), source=ENEMY (Enemy2), range=1469, listeners=10
+[06:12:00] [ENEMY] [Enemy1] Heard gunshot at (462.2245, 564.9366), source_type=1, intensity=0.03, distance=269
+[06:12:00] [INFO] [SoundPropagation] Sound result: notified=3, out_of_range=3, self=1, below_threshold=3
+[06:12:00] [ENEMY] [Enemy4] Player hid behind cover at (912, 715.9799), obstacle: Room2_WallRight
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (318.3087, 426), obstacle: Desk2
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (303.9544, 426), obstacle: Desk2
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (290.9214, 426), obstacle: Desk2
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (276.9348, 426), obstacle: Desk2
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (258.6959, 426), obstacle: Desk2
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (228.6306, 426), obstacle: Desk2
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (64, 459.3943), obstacle: WallLeft
+[06:12:00] [ENEMY] [Enemy3] Player hid behind cover at (758.1133, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy3] State: COMBAT -> PURSUING
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (64, 397.0076), obstacle: WallLeft
+[06:12:00] [INFO] [SoundPropagation] Sound emitted: type=GUNSHOT, pos=(475.9344, 598.2595), source=ENEMY (Enemy2), range=1469, listeners=10
+[06:12:00] [INFO] [SoundPropagation] Sound result: notified=3, out_of_range=3, self=1, below_threshold=3
+[06:12:00] [ENEMY] [Enemy3] Player hid behind cover at (754.671, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (64, 336.1815), obstacle: WallLeft
+[06:12:00] [ENEMY] [Enemy3] Player hid behind cover at (751.5403, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (64, 268.8855), obstacle: WallLeft
+[06:12:00] [ENEMY] [Enemy3] Player hid behind cover at (748.6809, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (64, 179.6466), obstacle: WallLeft
+[06:12:00] [ENEMY] [Enemy3] Player hid behind cover at (746.0589, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (254.5128, 274), obstacle: Desk1
+[06:12:00] [ENEMY] [Enemy2] Player emerged from cover, resuming direct tracking
+[06:12:00] [ENEMY] [Enemy3] Player hid behind cover at (743.6459, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (296.7757, 274), obstacle: Desk1
+[06:12:00] [INFO] [SoundPropagation] Sound emitted: type=GUNSHOT, pos=(351.4559, 386.4499), source=ENEMY (Enemy1), range=1469, listeners=10
+[06:12:00] [INFO] [SoundPropagation] Sound result: notified=1, out_of_range=3, self=1, below_threshold=5
+[06:12:00] [ENEMY] [Enemy3] Player hid behind cover at (741.418, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (332.0183, 274), obstacle: Desk1
+[06:12:00] [ENEMY] [Enemy2] Player hid behind cover at (305.9441, 688), obstacle: Room1_WallBottom
+[06:12:00] [ENEMY] [Enemy3] Player hid behind cover at (739.3545, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy7] State: IDLE -> COMBAT
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (373.3937, 64), obstacle: WallTop
+[06:12:00] [INFO] [SoundPropagation] Sound emitted: type=GUNSHOT, pos=(476.0212, 602.1324), source=ENEMY (Enemy2), range=1469, listeners=10
+[06:12:00] [INFO] [SoundPropagation] Sound result: notified=3, out_of_range=3, self=1, below_threshold=3
+[06:12:00] [ENEMY] [Enemy3] Player hid behind cover at (737.5315, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (461.8466, 64), obstacle: WallTop
+[06:12:00] [ENEMY] [Enemy3] Player hid behind cover at (735.9157, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy7] Player hid behind cover at (2068.813, 1188), obstacle: Room5_WallTop
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (564.9146, 64), obstacle: WallTop
+[06:12:00] [ENEMY] [Enemy3] Player hid behind cover at (734.4801, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (500, 271.315), obstacle: Room1_WallRight
+[06:12:00] [ENEMY] [Enemy3] Player hid behind cover at (733.2027, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy4] Player emerged from cover, resuming direct tracking
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (500, 327.4968), obstacle: Room1_WallRight
+[06:12:00] [ENEMY] [Enemy3] Player hid behind cover at (732.0652, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (500, 367.2566), obstacle: Room1_WallRight
+[06:12:00] [ENEMY] [Enemy3] Player hid behind cover at (731.0524, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy4] Player hid behind cover at (760, 821.5786), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy4] State: COMBAT -> PURSUING
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (500, 399.3424), obstacle: Room1_WallRight
+[06:12:00] [ENEMY] [Enemy3] Player hid behind cover at (730.1516, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy4] Player hid behind cover at (760, 820.5831), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy7] Player hid behind cover at (1716.568, 800), obstacle: Room4_WallTop
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (500, 428.2352), obstacle: Room1_WallRight
+[06:12:00] [INFO] [SoundPropagation] Sound emitted: type=GUNSHOT, pos=(476.3583, 604.5086), source=ENEMY (Enemy2), range=1469, listeners=10
+[06:12:00] [INFO] [SoundPropagation] Sound result: notified=3, out_of_range=3, self=1, below_threshold=3
+[06:12:00] [ENEMY] [Enemy3] Player hid behind cover at (729.3521, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy4] Player hid behind cover at (760, 819.6401), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy7] Player hid behind cover at (1664.629, 800), obstacle: Room4_WallTop
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (500, 457.3367), obstacle: Room1_WallRight
+[06:12:00] [ENEMY] [Enemy3] Player hid behind cover at (728.6451, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy4] Player hid behind cover at (760, 818.7548), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy7] Player hid behind cover at (1629.338, 800), obstacle: Room4_WallTop
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (500, 490.9352), obstacle: Room1_WallRight
+[06:12:00] [ENEMY] [Enemy3] Player hid behind cover at (728.0231, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy4] Player hid behind cover at (760, 817.9324), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy7] Player hid behind cover at (1601.804, 800), obstacle: Room4_WallTop
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (500, 537.9255), obstacle: Room1_WallRight
+[06:12:00] [ENEMY] [Enemy3] Player hid behind cover at (727.4796, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy4] Player hid behind cover at (760, 817.1781), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy7] Player hid behind cover at (1576.895, 800), obstacle: Room4_WallTop
+[06:12:00] [ENEMY] [Enemy3] Player hid behind cover at (727.0093, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy4] Player hid behind cover at (760, 816.4965), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy7] Player hid behind cover at (1551.949, 800), obstacle: Room4_WallTop
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (456.2204, 688), obstacle: Room1_WallBottom
+[06:12:00] [ENEMY] [Enemy3] Player hid behind cover at (726.6079, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy4] Player hid behind cover at (760, 815.892), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy7] Player hid behind cover at (1524.042, 800), obstacle: Room4_WallTop
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (394.0573, 688), obstacle: Room1_WallBottom
+[06:12:00] [ENEMY] [Enemy3] Player hid behind cover at (726.2716, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy4] Player hid behind cover at (760, 815.3687), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy7] Player hid behind cover at (1487.824, 800), obstacle: Room4_WallTop
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (329.1212, 688), obstacle: Room1_WallBottom
+[06:12:00] [INFO] [SoundPropagation] Sound emitted: type=GUNSHOT, pos=(476.7745, 606.3105), source=ENEMY (Enemy2), range=1469, listeners=10
+[06:12:00] [INFO] [SoundPropagation] Sound result: notified=3, out_of_range=3, self=1, below_threshold=3
+[06:12:00] [ENEMY] [Enemy3] Player hid behind cover at (725.9974, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.9301), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy7] Player hid behind cover at (1428.168, 800), obstacle: Room4_WallTop
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (250.6342, 688), obstacle: Room1_WallBottom
+[06:12:00] [ENEMY] [Enemy3] Player hid behind cover at (725.783, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.5793), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy7] Player hid behind cover at (1388, 827.1999), obstacle: Room4_WallLeft
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (137.5224, 688), obstacle: Room1_WallBottom
+[06:12:00] [ENEMY] [Enemy1] State: COMBAT -> PURSUING
+[06:12:00] [ENEMY] [Enemy3] Player hid behind cover at (725.6263, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.3188), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy7] Player hid behind cover at (1388, 867.6592), obstacle: Room4_WallLeft
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (145.1979, 688), obstacle: Room1_WallBottom
+[06:12:00] [ENEMY] [Enemy2] Player emerged from cover, resuming direct tracking
+[06:12:00] [ENEMY] [Enemy3] Player hid behind cover at (725.5264, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.1504), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy7] Player hid behind cover at (1388, 906.6288), obstacle: Room4_WallLeft
+[06:12:00] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:00] [ENEMY] [Enemy2] Player hid behind cover at (163.088, 688), obstacle: Room1_WallBottom
+[06:12:00] [ENEMY] [Enemy2] State: COMBAT -> PURSUING
+[06:12:00] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:00] [ENEMY] [Enemy7] Player hid behind cover at (1388, 950.1378), obstacle: Room4_WallLeft
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1376, 1019.89), obstacle: Corridor_CornerBR
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1226.948, 1376), obstacle: MainHall_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1516.924, 910), obstacle: Table2
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1527.852, 910), obstacle: Table2
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1539.344, 910), obstacle: Table2
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1553.691, 910), obstacle: Table2
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1574.705, 910), obstacle: Table2
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (2011.315, 1188), obstacle: Room5_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1700.798, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1556.49, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy7] State: COMBAT -> PURSUING
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [ENEMY] [Enemy1] Player hid behind cover at (145.3156, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy2] Player hid behind cover at (164.7985, 688), obstacle: Room1_WallBottom
+[06:12:01] [ENEMY] [Enemy3] Player hid behind cover at (725.4821, 810), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy4] Player hid behind cover at (760, 814.0753), obstacle: Table1
+[06:12:01] [ENEMY] [Enemy7] Player hid behind cover at (1545.252, 800), obstacle: Room4_WallTop
+[06:12:01] [INFO] ------------------------------------------------------------
+[06:12:01] [INFO] GAME LOG ENDED: 2026-01-21T06:12:01
+[06:12:01] [INFO] ============================================================

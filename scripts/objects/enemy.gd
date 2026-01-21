@@ -574,6 +574,11 @@ var _player_cover_collision_point: Vector2 = Vector2.ZERO
 ## Whether the enemy is actively tracking a player who hid behind cover.
 var _tracking_player_behind_cover: bool = false
 
+## Whether the enemy has directly seen the player at least once in this encounter.
+## This is required before cover tracking can activate - prevents tracking players
+## the enemy has only heard but never actually seen.
+var _has_seen_player_directly: bool = false
+
 ## Timer for alternating aim between cover exit points.
 var _cover_aim_alternate_timer: float = 0.0
 
@@ -2303,6 +2308,13 @@ func _transition_to_idle() -> void:
 	# Reset alarm mode when returning to idle
 	_in_alarm_mode = false
 	_cover_burst_pending = false
+	# Reset direct player visibility tracking - new encounters require fresh sighting
+	_has_seen_player_directly = false
+	# Reset cover tracking state
+	_tracking_player_behind_cover = false
+	_player_cover_obstacle = null
+	_player_cover_collision_point = Vector2.ZERO
+	_cover_tracking_visible_timer = 0.0
 
 
 ## Transition to COMBAT state.
@@ -3474,19 +3486,32 @@ func _check_player_visibility() -> void:
 		# If we hit the player, we can see them
 		if collider == _player:
 			_can_see_player = true
+			# Mark that we have directly seen the player at least once
+			_has_seen_player_directly = true
 		else:
 			# Hit an obstacle before the player - track cover information
-			# Only track if we were previously tracking the player (was_visible or tracking combat)
-			if was_visible or _current_state in [AIState.COMBAT, AIState.PURSUING, AIState.FLANKING, AIState.ASSAULT]:
+			# IMPORTANT: Only start cover tracking if:
+			# 1. We previously SAW the player directly (was_visible = true), AND
+			# 2. We have actually seen the player at least once (_has_seen_player_directly)
+			# This prevents cover tracking from activating when:
+			# - Enemy only heard a sound but never saw the player
+			# - Enemy is in combat state from hearing gunshots
+			if was_visible and _has_seen_player_directly:
+				# Only log and update if we're not already tracking this cover
+				var was_already_tracking := _tracking_player_behind_cover
 				_player_cover_obstacle = collider
 				_player_cover_collision_point = _raycast.get_collision_point()
 				_player_last_visible_position = _player.global_position
 				_tracking_player_behind_cover = true
-				_log_debug("Player hid behind cover at %s" % _player_cover_collision_point)
-				_log_to_file("Player hid behind cover at %s, obstacle: %s" % [_player_cover_collision_point, collider.name if collider else "unknown"])
+				# Only log when first entering cover tracking to prevent log spam
+				if not was_already_tracking:
+					_log_debug("Player hid behind cover at %s" % _player_cover_collision_point)
+					_log_to_file("Player hid behind cover at %s, obstacle: %s" % [_player_cover_collision_point, collider.name if collider else "unknown"])
 	else:
 		# No collision between us and player - we have clear line of sight
 		_can_see_player = true
+		# Mark that we have directly seen the player at least once
+		_has_seen_player_directly = true
 
 	# Update continuous visibility timer and visibility ratio
 	if _can_see_player:
@@ -3958,6 +3983,7 @@ func _reset() -> void:
 	_player_cover_obstacle = null
 	_player_cover_collision_point = Vector2.ZERO
 	_tracking_player_behind_cover = false
+	_has_seen_player_directly = false
 	_cover_aim_alternate_timer = 0.0
 	_cover_aim_side = 1.0
 	_cover_tracking_visible_timer = 0.0
