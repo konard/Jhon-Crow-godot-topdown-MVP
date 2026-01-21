@@ -286,3 +286,79 @@ func test_caliber_data_boundary_values() -> void:
 	caliber.post_penetration_damage_multiplier = 1.0
 	damage = caliber.calculate_post_penetration_damage(1.0)
 	assert_almost_eq(damage, 1.0, 0.01, "Maximum damage multiplier should work")
+
+
+# ============================================================================
+# Distance-Based Penetration Chance Tests
+# ============================================================================
+
+
+func test_bullet_distance_penetration_constants() -> void:
+	var bullet := _create_test_bullet()
+
+	# Verify distance-based penetration constants
+	assert_almost_eq(bullet.POINT_BLANK_DISTANCE_RATIO, 0.0, 0.01, "Point blank should be 0% of viewport")
+	assert_almost_eq(bullet.RICOCHET_RULES_DISTANCE_RATIO, 0.4, 0.01, "Ricochet rules should apply at 40% of viewport")
+	assert_almost_eq(bullet.MAX_PENETRATION_CHANCE_AT_DISTANCE, 0.3, 0.01, "Max penetration chance at viewport should be 30%")
+
+
+func test_bullet_shooter_position_property() -> void:
+	var bullet := _create_test_bullet()
+
+	# Verify shooter_position property exists
+	assert_true("shooter_position" in bullet, "Bullet should have shooter_position property")
+	assert_eq(bullet.shooter_position, Vector2.ZERO, "shooter_position should default to Vector2.ZERO")
+
+
+func test_bullet_calculate_distance_penetration_chance_at_40_percent() -> void:
+	var bullet := _create_test_bullet()
+
+	# At 40% of viewport (RICOCHET_RULES_DISTANCE_RATIO), should be 100% penetration
+	var chance: float = bullet.call("_calculate_distance_penetration_chance", 0.4)
+	assert_almost_eq(chance, 1.0, 0.01, "Penetration chance at 40% should be 100%")
+
+
+func test_bullet_calculate_distance_penetration_chance_at_viewport() -> void:
+	var bullet := _create_test_bullet()
+
+	# At 100% of viewport, should be MAX_PENETRATION_CHANCE_AT_DISTANCE (30%)
+	var chance: float = bullet.call("_calculate_distance_penetration_chance", 1.0)
+	assert_almost_eq(chance, 0.3, 0.01, "Penetration chance at viewport distance should be 30%")
+
+
+func test_bullet_calculate_distance_penetration_chance_at_70_percent() -> void:
+	var bullet := _create_test_bullet()
+
+	# At 70% of viewport (halfway between 40% and 100%)
+	# Should be halfway between 100% and 30%, so approximately 65%
+	var chance: float = bullet.call("_calculate_distance_penetration_chance", 0.7)
+	# (1.0 - 0.3) / 2 + 0.3 = 0.65
+	assert_almost_eq(chance, 0.65, 0.05, "Penetration chance at 70% should be approximately 65%")
+
+
+func test_bullet_calculate_distance_penetration_chance_beyond_viewport() -> void:
+	var bullet := _create_test_bullet()
+
+	# Beyond viewport (150%), should be less than MAX_PENETRATION_CHANCE_AT_DISTANCE
+	var chance: float = bullet.call("_calculate_distance_penetration_chance", 1.5)
+	assert_lt(chance, 0.3, "Penetration chance beyond viewport should be less than 30%")
+	assert_gt(chance, 0.0, "Penetration chance should not be 0")
+
+
+# ============================================================================
+# Penetration Hole Detection Tests
+# ============================================================================
+
+
+func test_bullet_has_penetration_hole_check_method() -> void:
+	var bullet := _create_test_bullet()
+
+	assert_true(bullet.has_method("_is_inside_penetration_hole"), "Bullet should have _is_inside_penetration_hole method")
+
+
+func test_bullet_not_inside_penetration_hole_by_default() -> void:
+	var bullet := _create_test_bullet()
+
+	# Without any overlapping areas, should return false
+	var is_inside: bool = bullet.call("_is_inside_penetration_hole")
+	assert_false(is_inside, "Bullet should not be inside penetration hole by default")

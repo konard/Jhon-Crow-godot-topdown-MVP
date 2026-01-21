@@ -102,6 +102,17 @@ const DEFAULT_CAN_PENETRATE: bool = true
 const DEFAULT_MAX_PENETRATION_DISTANCE: float = 48.0
 const DEFAULT_POST_PENETRATION_DAMAGE_MULTIPLIER: float = 0.9
 
+## Distance-based penetration chance settings.
+## At point-blank (0 distance): 100% penetration, ignores ricochet
+## At 40% of viewport: normal ricochet rules apply (if not ricochet, then penetrate)
+## At viewport distance: max 30% penetration chance for 5.45
+const POINT_BLANK_DISTANCE_RATIO: float = 0.0  # 0% of viewport = point blank
+const RICOCHET_RULES_DISTANCE_RATIO: float = 0.4  # 40% of viewport = ricochet rules apply
+const MAX_PENETRATION_CHANCE_AT_DISTANCE: float = 0.3  # 30% max at viewport distance
+
+## Shooter's position at the time of firing (for distance-based penetration).
+var shooter_position: Vector2 = Vector2.ZERO
+
 
 func _ready() -> void:
 	# Connect to collision signals
@@ -224,19 +235,62 @@ func _on_body_entered(body: Node2D) -> void:
 	if _is_penetrating and _penetrating_body == body:
 		return
 
+	# Check if bullet is inside an existing penetration hole - pass through without re-triggering
+	if _is_inside_penetration_hole():
+		if _debug_penetration:
+			print("[Bullet] Inside existing penetration hole, passing through")
+		return
+
 	# Hit a static body (wall or obstacle) or alive enemy body
 	# Try to ricochet off static bodies (walls/obstacles)
 	if body is StaticBody2D or body is TileMap:
 		# Always spawn dust effect when hitting walls, regardless of ricochet
 		_spawn_wall_hit_effect(body)
 
-		# First try ricochet
-		if _try_ricochet(body):
-			return  # Bullet ricocheted, don't destroy
+		# Calculate distance from shooter to determine penetration behavior
+		var distance_to_wall := _get_distance_to_shooter()
+		var distance_ratio := distance_to_wall / _viewport_diagonal if _viewport_diagonal > 0 else 1.0
 
-		# Ricochet failed - try penetration
-		if _try_penetration(body):
-			return  # Bullet is penetrating, don't destroy
+		if _debug_penetration:
+			print("[Bullet] Distance to wall: ", distance_to_wall, " (", distance_ratio * 100, "% of viewport)")
+
+		# Point-blank shots (very close to shooter): 100% penetration, ignore ricochet
+		if distance_ratio <= POINT_BLANK_DISTANCE_RATIO + 0.05:  # ~5% tolerance for "point blank"
+			if _debug_penetration:
+				print("[Bullet] Point-blank shot - 100% penetration, ignoring ricochet")
+			if _try_penetration(body):
+				return  # Bullet is penetrating
+		# At 40% or less of viewport: normal ricochet rules apply
+		elif distance_ratio <= RICOCHET_RULES_DISTANCE_RATIO:
+			if _debug_penetration:
+				print("[Bullet] Within ricochet range - trying ricochet first")
+			# First try ricochet
+			if _try_ricochet(body):
+				return  # Bullet ricocheted, don't destroy
+			# Ricochet failed - try penetration (if not ricochet, then penetrate)
+			if _try_penetration(body):
+				return  # Bullet is penetrating, don't destroy
+		# Beyond 40% of viewport: distance-based penetration chance
+		else:
+			# First try ricochet (shallow angles still ricochet)
+			if _try_ricochet(body):
+				return  # Bullet ricocheted, don't destroy
+
+			# Calculate penetration chance based on distance
+			# At 40% distance: 100% chance (if ricochet failed)
+			# At 100% (viewport) distance: 30% chance
+			var penetration_chance := _calculate_distance_penetration_chance(distance_ratio)
+
+			if _debug_penetration:
+				print("[Bullet] Distance-based penetration chance: ", penetration_chance * 100, "%")
+
+			# Roll for penetration
+			if randf() <= penetration_chance:
+				if _try_penetration(body):
+					return  # Bullet is penetrating
+			else:
+				if _debug_penetration:
+					print("[Bullet] Penetration failed (distance roll)")
 
 	# Play wall impact sound and destroy bullet
 	var audio_manager: Node = get_node_or_null("/root/AudioManager")
@@ -557,6 +611,70 @@ func _spawn_wall_hit_effect(body: Node2D) -> void:
 
 
 # ============================================================================
+# Distance-Based Penetration Helpers
+# ============================================================================
+
+
+## Gets the distance from the current bullet position to the shooter's original position.
+func _get_distance_to_shooter() -> float:
+	if shooter_position == Vector2.ZERO:
+		# Fallback: use shooter instance position if available
+		if shooter_id != -1:
+			var shooter: Object = instance_from_id(shooter_id)
+			if shooter != null and shooter is Node2D:
+				return global_position.distance_to((shooter as Node2D).global_position)
+	return global_position.distance_to(shooter_position)
+
+
+## Calculates the penetration chance based on distance from shooter.
+## @param distance_ratio: Distance as a ratio of viewport diagonal (0.0 to 1.0+).
+## @return: Penetration chance (0.0 to 1.0).
+func _calculate_distance_penetration_chance(distance_ratio: float) -> float:
+	# At 40% (RICOCHET_RULES_DISTANCE_RATIO): 100% penetration chance
+	# At 100% (viewport diagonal): MAX_PENETRATION_CHANCE_AT_DISTANCE (30%)
+	# Beyond 100%: continues to decrease linearly
+
+	if distance_ratio <= RICOCHET_RULES_DISTANCE_RATIO:
+		return 1.0  # Full penetration chance within ricochet rules range
+
+	# Linear interpolation from 100% at 40% to 30% at 100%
+	# penetration_chance = 1.0 - (distance_ratio - 0.4) / 0.6 * 0.7
+	var range_start := RICOCHET_RULES_DISTANCE_RATIO  # 0.4
+	var range_end := 1.0  # viewport distance
+	var range_span := range_end - range_start  # 0.6
+
+	var position_in_range := (distance_ratio - range_start) / range_span
+	position_in_range = clampf(position_in_range, 0.0, 1.0)
+
+	# Interpolate from 1.0 to MAX_PENETRATION_CHANCE_AT_DISTANCE
+	var penetration_chance := lerpf(1.0, MAX_PENETRATION_CHANCE_AT_DISTANCE, position_in_range)
+
+	# Beyond viewport distance, continue decreasing (but clamp to minimum of 5%)
+	if distance_ratio > 1.0:
+		var beyond_viewport := distance_ratio - 1.0
+		penetration_chance = maxf(MAX_PENETRATION_CHANCE_AT_DISTANCE - beyond_viewport * 0.2, 0.05)
+
+	return penetration_chance
+
+
+## Checks if the bullet is currently inside an existing penetration hole area.
+## If so, the bullet should pass through without triggering new penetration.
+func _is_inside_penetration_hole() -> bool:
+	# Get overlapping areas
+	var overlapping_areas := get_overlapping_areas()
+	for area in overlapping_areas:
+		# Check if this is a penetration hole (by script or name)
+		if area.get_script() != null:
+			var script_path: String = area.get_script().resource_path
+			if script_path.contains("penetration_hole"):
+				return true
+		# Also check by node name as fallback
+		if area.name.contains("PenetrationHole"):
+			return true
+	return false
+
+
+# ============================================================================
 # Wall Penetration System
 # ============================================================================
 
@@ -658,11 +776,16 @@ func _is_still_inside_obstacle() -> bool:
 
 ## Called when the bullet exits a penetrated wall.
 func _exit_penetration() -> void:
-	if _debug_penetration:
-		print("[Bullet] Exiting penetration at ", global_position, " after traveling ", _penetration_distance_traveled, " pixels through wall")
+	var exit_point := global_position
 
-	# Spawn exit hole effect
-	_spawn_penetration_hole_effect(_penetrating_body, global_position, false)
+	if _debug_penetration:
+		print("[Bullet] Exiting penetration at ", exit_point, " after traveling ", _penetration_distance_traveled, " pixels through wall")
+
+	# Spawn exit hole effect (visual)
+	_spawn_penetration_hole_effect(_penetrating_body, exit_point, false)
+
+	# Spawn collision hole (actual gap in wall collision)
+	_spawn_collision_hole(_penetration_entry_point, exit_point)
 
 	# Apply damage reduction after penetration
 	if not _has_penetrated:
@@ -675,7 +798,7 @@ func _exit_penetration() -> void:
 	# Play penetration exit sound (use wall hit sound for now)
 	var audio_manager: Node = get_node_or_null("/root/AudioManager")
 	if audio_manager and audio_manager.has_method("play_bullet_wall_hit"):
-		audio_manager.play_bullet_wall_hit(global_position)
+		audio_manager.play_bullet_wall_hit(exit_point)
 
 	# Reset penetration state
 	_is_penetrating = false
@@ -706,6 +829,21 @@ func _spawn_penetration_hole_effect(body: Node2D, pos: Vector2, is_entry: bool) 
 		# Fallback to dust effect
 		var surface_normal := _get_surface_normal(body)
 		impact_manager.spawn_dust_effect(pos, surface_normal, caliber_data)
+
+
+## Spawns a collision hole that creates an actual gap in wall collision.
+## This allows other bullets and vision to pass through the hole.
+## @param entry_point: Where the bullet entered the wall.
+## @param exit_point: Where the bullet exited the wall.
+func _spawn_collision_hole(entry_point: Vector2, exit_point: Vector2) -> void:
+	var impact_manager: Node = get_node_or_null("/root/ImpactEffectsManager")
+	if impact_manager == null:
+		return
+
+	if impact_manager.has_method("spawn_collision_hole"):
+		impact_manager.spawn_collision_hole(entry_point, exit_point, direction, caliber_data)
+		if _debug_penetration:
+			print("[Bullet] Collision hole spawned from ", entry_point, " to ", exit_point)
 
 
 ## Returns whether the bullet has penetrated at least one wall.

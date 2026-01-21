@@ -28,14 +28,21 @@ const MAX_EFFECT_SCALE: float = 2.0
 ## Maximum number of blood decals before oldest ones are removed.
 const MAX_BLOOD_DECALS: int = 100
 
-## Maximum number of bullet holes before oldest ones are removed.
-const MAX_BULLET_HOLES: int = 200
+## Maximum number of bullet holes is unlimited (permanent holes as requested).
+## Set to 0 to disable cleanup limit.
+const MAX_BULLET_HOLES: int = 0
 
 ## Active blood decals for cleanup management.
 var _blood_decals: Array[Node2D] = []
 
-## Active bullet holes for cleanup management.
+## Active bullet holes for cleanup management (visual only).
 var _bullet_holes: Array[Node2D] = []
+
+## Active penetration collision holes for cleanup management.
+var _penetration_holes: Array[Node2D] = []
+
+## Penetration hole scene.
+var _penetration_hole_scene: PackedScene = null
 
 ## Enable/disable debug logging for effect spawning.
 var _debug_effects: bool = false
@@ -92,6 +99,16 @@ func _preload_effect_scenes() -> void:
 		# Bullet holes are optional - don't warn, just log in debug mode
 		if _debug_effects:
 			print("[ImpactEffectsManager] BulletHole scene not found (optional)")
+
+	var penetration_hole_path := "res://scenes/effects/PenetrationHole.tscn"
+	if ResourceLoader.exists(penetration_hole_path):
+		_penetration_hole_scene = load(penetration_hole_path)
+		if _debug_effects:
+			print("[ImpactEffectsManager] Loaded PenetrationHole scene")
+	else:
+		# Penetration holes are optional
+		if _debug_effects:
+			print("[ImpactEffectsManager] PenetrationHole scene not found (optional)")
 
 
 ## Spawns a dust effect at the given position when a bullet hits a wall.
@@ -344,14 +361,15 @@ func spawn_penetration_hole(position: Vector2, surface_normal: Vector2, caliber_
 	# Add to scene
 	_add_effect_to_scene(hole)
 
-	# Track hole for cleanup
+	# Track hole for cleanup (unlimited holes, no cleanup limit)
 	_bullet_holes.append(hole)
 
-	# Remove oldest holes if limit exceeded
-	while _bullet_holes.size() > MAX_BULLET_HOLES:
-		var oldest := _bullet_holes.pop_front() as Node2D
-		if oldest and is_instance_valid(oldest):
-			oldest.queue_free()
+	# Only remove oldest holes if limit is set (MAX_BULLET_HOLES > 0)
+	if MAX_BULLET_HOLES > 0:
+		while _bullet_holes.size() > MAX_BULLET_HOLES:
+			var oldest := _bullet_holes.pop_front() as Node2D
+			if oldest and is_instance_valid(oldest):
+				oldest.queue_free()
 
 	# Also spawn dust effect at the hole location
 	spawn_dust_effect(position, surface_normal, caliber_data)
@@ -371,8 +389,68 @@ func clear_bullet_holes() -> void:
 		print("[ImpactEffectsManager] All bullet holes cleared")
 
 
-## Clears all persistent effects (blood decals and bullet holes).
+## Spawns a collision hole (Area2D) that creates an actual gap in wall collision.
+## This allows bullets and vision to pass through the hole.
+## @param entry_point: Where the bullet entered the wall.
+## @param exit_point: Where the bullet exited the wall.
+## @param bullet_direction: Direction the bullet was traveling.
+## @param caliber_data: Optional caliber data for hole width.
+func spawn_collision_hole(entry_point: Vector2, exit_point: Vector2, bullet_direction: Vector2, caliber_data: Resource = null) -> void:
+	if _debug_effects:
+		print("[ImpactEffectsManager] spawn_collision_hole from ", entry_point, " to ", exit_point)
+
+	if _penetration_hole_scene == null:
+		if _debug_effects:
+			print("[ImpactEffectsManager] PenetrationHole scene not loaded, skipping collision hole")
+		return
+
+	var hole := _penetration_hole_scene.instantiate()
+	if hole == null:
+		if _debug_effects:
+			print("[ImpactEffectsManager] ERROR: Failed to instantiate penetration hole")
+		return
+
+	# Calculate hole width based on caliber (default 4 pixels for 5.45mm)
+	var hole_width := 4.0
+	if caliber_data and "diameter_mm" in caliber_data:
+		# Scale from mm to pixels (roughly 0.8 pixels per mm for visual effect)
+		hole_width = caliber_data.diameter_mm * 0.8
+
+	# Configure the hole with entry/exit points
+	if hole.has_method("set_from_entry_exit"):
+		hole.trail_width = hole_width
+		hole.set_from_entry_exit(entry_point, exit_point)
+	else:
+		# Fallback: manually position at center
+		hole.global_position = (entry_point + exit_point) / 2.0
+		if hole.has_method("configure"):
+			var path := exit_point - entry_point
+			hole.configure(bullet_direction, hole_width, path.length())
+
+	# Add to scene
+	_add_effect_to_scene(hole)
+
+	# Track hole (unlimited, no cleanup)
+	_penetration_holes.append(hole)
+
+	if _debug_effects:
+		print("[ImpactEffectsManager] Collision hole spawned, total: ", _penetration_holes.size())
+
+
+## Clears all penetration collision holes from the scene.
+## Call this on scene transitions or when cleaning up.
+func clear_penetration_holes() -> void:
+	for hole in _penetration_holes:
+		if hole and is_instance_valid(hole):
+			hole.queue_free()
+	_penetration_holes.clear()
+	if _debug_effects:
+		print("[ImpactEffectsManager] All penetration holes cleared")
+
+
+## Clears all persistent effects (blood decals, bullet holes, and penetration holes).
 ## Call this on scene transitions.
 func clear_all_persistent_effects() -> void:
 	clear_blood_decals()
 	clear_bullet_holes()
+	clear_penetration_holes()
