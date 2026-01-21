@@ -297,6 +297,140 @@ func _freeze_node_except_player(node: Node) -> void:
 
 - `scripts/autoload/last_chance_effects_manager.gd` - Added `StaticBody2D` check in `_freeze_node_except_player()`
 
+## Follow-up Issue 4: Player STILL Passing Through Walls (Container Node Inheritance)
+
+### Symptom
+
+After the previous fix to skip `StaticBody2D` nodes, the player was still passing through walls during the time freeze effect.
+
+### Log File Evidence
+
+From `logs/game_log_20260121_124527.txt`:
+```
+[12:45:41] [INFO] [LastChance] Triggering last chance effect!
+[12:45:41] [INFO] [LastChance] Set player Player and all 11 children to PROCESS_MODE_ALWAYS
+[12:45:41] [INFO] [LastChance] Skipping player node: Player
+[12:45:41] [INFO] [LastChance] Froze all nodes except player and autoloads
+```
+
+During the time freeze (12:45:41 to 12:45:47), the player was shooting from positions like:
+- `(120.7353, 402.4353)`
+- `(115.875, 388.4586)`
+- `(114.6823, 385.0285)`
+
+These positions are near the left wall boundary (x=64), and the user reported the player could pass through walls.
+
+### Root Cause Analysis (Deep Dive)
+
+The previous fix only **skipped** `StaticBody2D` nodes (didn't set them to DISABLED). However, the issue was more fundamental:
+
+**Problem with container nodes:**
+1. The scene hierarchy is: `BuildingLevel` → `Environment` (Node2D) → `Walls` (Node2D) → `WallTop` (StaticBody2D)
+2. The code set `Environment` to `PROCESS_MODE_DISABLED` **before** processing its children
+3. Then it set `Walls` to `PROCESS_MODE_DISABLED`
+4. When it reached `WallTop` (StaticBody2D), it was correctly skipped
+5. **BUT** the parent containers (`Environment`, `Walls`) were already DISABLED!
+
+**Why skipping isn't enough:**
+Even though we didn't set `StaticBody2D` to DISABLED, when parent nodes are DISABLED, their children's physics behavior can be affected because:
+- Process mode inheritance in Godot affects how nodes interact with the engine systems
+- Physics collision detection relies on the node hierarchy being in a valid processing state
+- Container nodes being DISABLED can affect how `MoveAndSlide()` queries the physics server
+
+### Research Findings
+
+From web research on Godot 4 physics and process modes:
+- [Godot Forum: Collision shape and process_mode can't work together](https://forum.godotengine.org/t/collision-shape-and-process-mode-cant-work-togheter/106657)
+- [Godot GitHub Issue: Pause breaks move_and_collide collision detection](https://forum.godotengine.org/t/bug-pausing-breaks-move-and-collide-collision-detection/6936)
+- [Godot GitHub Issue: Disabling process of PhysicsBody2D](https://github.com/godotengine/godot/issues/76219)
+
+Key insight: In Godot 4, `PROCESS_MODE_DISABLED` on a parent node affects how the physics server processes its children, even if those children have different process modes set.
+
+### Solution: Selective Node Freezing
+
+Instead of setting ALL nodes to DISABLED (except specific ones), we now use a **selective approach**:
+
+1. **Container nodes (Node2D, Node, Control)** → **DON'T DISABLE** - just recurse into children
+2. **StaticBody2D (walls)** → Set to `PROCESS_MODE_ALWAYS` to ensure collision detection
+3. **CollisionShape2D** → Set to `PROCESS_MODE_ALWAYS` to keep collision shapes active
+4. **CharacterBody2D (enemies)** → Set to `PROCESS_MODE_DISABLED` to freeze them
+5. **RigidBody2D (physics objects)** → Set to `PROCESS_MODE_DISABLED`
+6. **Area2D (triggers, bullets)** → Set to `PROCESS_MODE_DISABLED`
+
+**Key insight:** By NOT disabling container nodes, we preserve the physics tree hierarchy. The physics server can properly process collision queries because the node hierarchy remains intact.
+
+### Implementation
+
+```gdscript
+func _freeze_node_except_player(node: Node) -> void:
+    # ... existing checks for player ...
+
+    # Handle physics collision bodies - set to ALWAYS to preserve collision detection
+    if node is StaticBody2D:
+        _original_process_modes[node] = node.process_mode
+        node.process_mode = Node.PROCESS_MODE_ALWAYS
+        _log("Set StaticBody2D '%s' to PROCESS_MODE_ALWAYS for collision" % node.name)
+        for child in node.get_children():
+            _freeze_node_except_player(child)
+        return
+
+    # CollisionShape2D nodes need ALWAYS to stay active
+    if node is CollisionShape2D:
+        _original_process_modes[node] = node.process_mode
+        node.process_mode = Node.PROCESS_MODE_ALWAYS
+        return
+
+    # Freeze CharacterBody2D nodes that are NOT the player (enemies)
+    if node is CharacterBody2D:
+        _original_process_modes[node] = node.process_mode
+        node.process_mode = Node.PROCESS_MODE_DISABLED
+        for child in node.get_children():
+            _freeze_node_except_player(child)
+        return
+
+    # Freeze RigidBody2D and Area2D nodes
+    if node is RigidBody2D or node is Area2D:
+        _original_process_modes[node] = node.process_mode
+        node.process_mode = Node.PROCESS_MODE_DISABLED
+        for child in node.get_children():
+            _freeze_node_except_player(child)
+        return
+
+    # For container nodes (Node2D, Node, Control, etc.), DON'T set to DISABLED
+    # Just recurse into children to find actual freezable nodes
+    # This preserves the physics tree structure and allows collision detection to work
+    for child in node.get_children():
+        _freeze_node_except_player(child)
+```
+
+### Why This Works
+
+1. **Container nodes remain in INHERIT mode** - they don't affect their children's physics
+2. **StaticBody2D nodes are ALWAYS** - collision detection works regardless of parent state
+3. **CollisionShape2D nodes are ALWAYS** - collision shapes remain active
+4. **Enemies (CharacterBody2D) are DISABLED** - they freeze in place
+5. **Bullets (Area2D) are DISABLED** - they freeze mid-flight
+6. **The physics tree hierarchy is preserved** - `MoveAndSlide()` can properly query collisions
+
+### Files Changed
+
+- `scripts/autoload/last_chance_effects_manager.gd` - Complete rewrite of `_freeze_node_except_player()` function
+
+### Expected Logs After Fix
+
+```
+[LastChance] Player health updated (C# Damaged): 1.0
+[LastChance] Threat detected: Bullet
+[LastChance] Triggering last chance effect!
+[LastChance] Set player Player and all 11 children to PROCESS_MODE_ALWAYS
+[LastChance] Set StaticBody2D 'WallTop' to PROCESS_MODE_ALWAYS for collision
+[LastChance] Set StaticBody2D 'WallBottom' to PROCESS_MODE_ALWAYS for collision
+[LastChance] Set StaticBody2D 'WallLeft' to PROCESS_MODE_ALWAYS for collision
+[LastChance] Set StaticBody2D 'WallRight' to PROCESS_MODE_ALWAYS for collision
+[LastChance] Skipping player node: Player
+[LastChance] Froze all nodes except player and autoloads
+```
+
 ## Testing Instructions
 
 1. Start the game on **Hard** difficulty
@@ -307,11 +441,6 @@ func _freeze_node_except_player(node: Node) -> void:
 6. **Expected:** Player should NOT be able to pass through walls
 7. **Expected:** All enemies and bullets should be completely frozen
 8. **Expected logs should show:**
-   ```
-   [LastChance] Player health updated (C# Damaged): 1.0
-   [LastChance] Threat detected: Bullet
-   [LastChance] Triggering last chance effect!
-   [LastChance] Starting last chance effect:
-   [LastChance] Set player Player and all 11 children to PROCESS_MODE_ALWAYS
-   [LastChance] Froze all nodes except player and autoloads
-   ```
+   - StaticBody2D nodes set to PROCESS_MODE_ALWAYS
+   - Player and children set to PROCESS_MODE_ALWAYS
+   - No errors about collision detection

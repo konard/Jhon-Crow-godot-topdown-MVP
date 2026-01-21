@@ -415,7 +415,8 @@ func _count_descendants(node: Node) -> int:
 
 
 ## Recursively freezes a node and its children, except for the player node.
-## Also skips StaticBody2D nodes (walls, obstacles) to preserve collision detection.
+## Uses a selective approach that only disables nodes that need to be frozen,
+## preserving physics collision by NOT setting container nodes or physics bodies to DISABLED.
 func _freeze_node_except_player(node: Node) -> void:
 	if node == null or not is_instance_valid(node):
 		return
@@ -429,22 +430,63 @@ func _freeze_node_except_player(node: Node) -> void:
 	if _player != null and _is_descendant_of(_player, node):
 		return
 
-	# CRITICAL: Skip StaticBody2D nodes (walls, obstacles) to preserve collision detection!
-	# If we freeze static bodies, the player's CharacterBody2D.MoveAndSlide() won't
-	# detect collisions with them and the player will pass through walls.
+	# CRITICAL FIX: Only freeze nodes that actually need freezing.
+	# DO NOT freeze container nodes (Node2D, Node, Control) that have physics bodies as children.
+	# The issue is that setting parent containers to DISABLED affects physics collision detection
+	# even if we set the physics bodies themselves to ALWAYS.
+	#
+	# Strategy:
+	# 1. StaticBody2D (walls) - set to ALWAYS to ensure collision detection works
+	# 2. CollisionShape2D - set to ALWAYS to ensure collision shapes are active
+	# 3. CharacterBody2D (enemies) - DISABLE to freeze them
+	# 4. RigidBody2D (physics objects) - DISABLE if they have enemy-like behavior
+	# 5. Container nodes (Node2D, Node, etc.) - DON'T disable, just process children
+	#    This is key: leaving containers at INHERIT preserves the physics tree structure
+
+	# Handle physics collision bodies - set to ALWAYS to preserve collision detection
 	if node is StaticBody2D:
-		# Don't freeze the static body, but still process its children (visual elements, etc.)
+		_original_process_modes[node] = node.process_mode
+		node.process_mode = Node.PROCESS_MODE_ALWAYS
+		_log("Set StaticBody2D '%s' to PROCESS_MODE_ALWAYS for collision" % node.name)
+		# Process children - collision shapes need ALWAYS too
 		for child in node.get_children():
 			_freeze_node_except_player(child)
 		return
 
-	# Store original process mode
-	_original_process_modes[node] = node.process_mode
+	# CollisionShape2D nodes need ALWAYS to stay active for collision detection
+	if node is CollisionShape2D:
+		_original_process_modes[node] = node.process_mode
+		node.process_mode = Node.PROCESS_MODE_ALWAYS
+		return
 
-	# Disable this node's processing
-	node.process_mode = Node.PROCESS_MODE_DISABLED
+	# Freeze CharacterBody2D nodes that are NOT the player (enemies)
+	if node is CharacterBody2D:
+		_original_process_modes[node] = node.process_mode
+		node.process_mode = Node.PROCESS_MODE_DISABLED
+		# Freeze all children of enemy character bodies
+		for child in node.get_children():
+			_freeze_node_except_player(child)
+		return
 
-	# Recursively freeze children
+	# Freeze RigidBody2D nodes (physics objects like bullets)
+	if node is RigidBody2D:
+		_original_process_modes[node] = node.process_mode
+		node.process_mode = Node.PROCESS_MODE_DISABLED
+		for child in node.get_children():
+			_freeze_node_except_player(child)
+		return
+
+	# Freeze Area2D nodes (triggers, hit areas, bullets, etc.)
+	if node is Area2D:
+		_original_process_modes[node] = node.process_mode
+		node.process_mode = Node.PROCESS_MODE_DISABLED
+		for child in node.get_children():
+			_freeze_node_except_player(child)
+		return
+
+	# For container nodes (Node2D, Node, Control, etc.), DON'T set to DISABLED
+	# Just recurse into children to find actual freezable nodes
+	# This preserves the physics tree structure and allows collision detection to work
 	for child in node.get_children():
 		_freeze_node_except_player(child)
 
