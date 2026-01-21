@@ -11,7 +11,7 @@ namespace GodotTopDownTemplate.Characters;
 /// Shoots bullets towards the mouse cursor on left mouse button.
 /// Supports both automatic (hold to fire) and semi-automatic (click per shot) weapons.
 /// Uses R-F-R key sequence for instant reload (press R, then F, then R again).
-/// Uses 3-step grenade throwing: G+RMB drag → LMB+RMB → RMB drag throw.
+/// Uses simplified 2-step grenade throwing: G+RMB drag right → hold G, press RMB → drag and release RMB.
 /// </summary>
 public partial class Player : BaseCharacter
 {
@@ -96,15 +96,22 @@ public partial class Player : BaseCharacter
     private int _currentGrenades = 3;
 
     /// <summary>
+    /// Whether the player is on the tutorial level (infinite grenades).
+    /// </summary>
+    private bool _isTutorialLevel = false;
+
+    /// <summary>
     /// Grenade state machine states.
+    /// Simplified 2-step mechanic:
+    /// Step 1: G + RMB drag right → timer starts (pin pulled)
+    /// Step 2: Continue holding G, press RMB → ready to throw
+    /// Step 3: RMB drag and release → throw grenade
     /// </summary>
     private enum GrenadeState
     {
         Idle,           // No grenade action
-        TimerStarted,   // Step 1 complete - grenade timer running, waiting for LMB
-        Preparing,      // LMB held, waiting for RMB to be pressed
-        ReadyToAim,     // LMB + RMB held, waiting for LMB release
-        Aiming          // Step 2 complete - waiting for RMB drag and release to throw
+        TimerStarted,   // Step 1 complete - grenade timer running, waiting for RMB
+        Aiming          // Step 2 complete - RMB held, waiting for drag and release to throw
     }
 
     /// <summary>
@@ -219,8 +226,42 @@ public partial class Player : BaseCharacter
             }
         }
 
-        // Initialize grenade count
-        _currentGrenades = MaxGrenades;
+        // Detect if we're on the tutorial level
+        // Tutorial level is: scenes/levels/csharp/TestTier.tscn with tutorial_level.gd script
+        var currentScene = GetTree().CurrentScene;
+        if (currentScene != null)
+        {
+            var scenePath = currentScene.SceneFilePath;
+            // Tutorial level is detected by:
+            // 1. Scene path contains "csharp/TestTier" (the tutorial scene)
+            // 2. OR scene uses tutorial_level.gd script
+            _isTutorialLevel = scenePath.Contains("csharp/TestTier");
+
+            // Also check if the scene script is tutorial_level.gd
+            var script = currentScene.GetScript();
+            if (script.Obj is GodotObject scriptObj)
+            {
+                var scriptPath = scriptObj.Get("resource_path").AsString();
+                if (scriptPath.Contains("tutorial_level"))
+                {
+                    _isTutorialLevel = true;
+                }
+            }
+        }
+
+        // Initialize grenade count based on level type
+        // Tutorial: infinite grenades (max count)
+        // Other levels: 1 grenade
+        if (_isTutorialLevel)
+        {
+            _currentGrenades = MaxGrenades;
+            LogToFile($"[Player.Grenade] Tutorial level detected - infinite grenades enabled");
+        }
+        else
+        {
+            _currentGrenades = 1;
+            LogToFile($"[Player.Grenade] Normal level - starting with 1 grenade");
+        }
 
         // Auto-equip weapon if not set but a weapon child exists
         if (CurrentWeapon == null)
@@ -274,7 +315,7 @@ public partial class Player : BaseCharacter
         }
 
         // Handle shooting input - support both automatic and semi-automatic weapons
-        // Only allow shooting if not in grenade preparation state (steps 2-3 use LMB)
+        // Allow shooting when not in grenade preparation (simplified 2-step mechanic doesn't use LMB)
         bool canShoot = _grenadeState == GrenadeState.Idle || _grenadeState == GrenadeState.TimerStarted;
         if (canShoot)
         {
@@ -777,10 +818,10 @@ public partial class Player : BaseCharacter
     #region Grenade System
 
     /// <summary>
-    /// Handle grenade input with 3-step mechanic.
+    /// Handle grenade input with simplified 2-step mechanic.
     /// Step 1: G + RMB drag right → starts 4s timer (pin pulled)
-    /// Step 2: LMB held → RMB pressed while LMB held → LMB released → prepare to throw
-    /// Step 3: RMB still held → drag in direction and release RMB → throw grenade
+    /// Step 2: Continue holding G, press RMB → ready to throw
+    /// Step 3: RMB drag and release → throw grenade
     /// </summary>
     private void HandleGrenadeInput()
     {
@@ -799,12 +840,6 @@ public partial class Player : BaseCharacter
                 break;
             case GrenadeState.TimerStarted:
                 HandleGrenadeTimerStartedState();
-                break;
-            case GrenadeState.Preparing:
-                HandleGrenadePreparingState();
-                break;
-            case GrenadeState.ReadyToAim:
-                HandleGrenadeReadyToAimState();
                 break;
             case GrenadeState.Aiming:
                 HandleGrenadeAimingState();
@@ -856,7 +891,8 @@ public partial class Player : BaseCharacter
 
     /// <summary>
     /// Handle grenade input in TimerStarted state.
-    /// Waiting for LMB to be pressed (Step 2 start).
+    /// Waiting for RMB to be pressed (Step 2 - ready to throw).
+    /// Simplified: no LMB step, just hold G and press RMB to aim.
     /// </summary>
     private void HandleGrenadeTimerStartedState()
     {
@@ -868,72 +904,12 @@ public partial class Player : BaseCharacter
             return;
         }
 
-        // Check if LMB is pressed to start step 2
-        if (Input.IsActionJustPressed("shoot"))
-        {
-            _grenadeState = GrenadeState.Preparing;
-            LogToFile("[Player.Grenade] Step 2 started: LMB pressed, waiting for RMB");
-        }
-    }
-
-    /// <summary>
-    /// Handle grenade input in Preparing state.
-    /// LMB is held, waiting for RMB to be pressed.
-    /// </summary>
-    private void HandleGrenadePreparingState()
-    {
-        // If G is released, drop grenade at feet
-        if (!Input.IsActionPressed("grenade_prepare"))
-        {
-            LogToFile("[Player.Grenade] G released - dropping grenade at feet");
-            DropGrenadeAtFeet();
-            return;
-        }
-
-        // If LMB is released before RMB is pressed, go back to TimerStarted
-        if (!Input.IsActionPressed("shoot"))
-        {
-            _grenadeState = GrenadeState.TimerStarted;
-            LogToFile("[Player.Grenade] LMB released before RMB - back to timer started state");
-            return;
-        }
-
-        // Check if RMB is pressed while LMB is held
+        // Check if RMB is pressed to enter aiming state
         if (Input.IsActionJustPressed("grenade_throw"))
-        {
-            _grenadeState = GrenadeState.ReadyToAim;
-            LogToFile("[Player.Grenade] Step 2 progressing: LMB+RMB held, release LMB to aim");
-        }
-    }
-
-    /// <summary>
-    /// Handle grenade input in ReadyToAim state.
-    /// LMB + RMB are held, waiting for LMB release.
-    /// </summary>
-    private void HandleGrenadeReadyToAimState()
-    {
-        // If G is released, drop grenade at feet
-        if (!Input.IsActionPressed("grenade_prepare"))
-        {
-            LogToFile("[Player.Grenade] G released - dropping grenade at feet");
-            DropGrenadeAtFeet();
-            return;
-        }
-
-        // If RMB is released before LMB, go back to Preparing
-        if (!Input.IsActionPressed("grenade_throw"))
-        {
-            _grenadeState = GrenadeState.Preparing;
-            LogToFile("[Player.Grenade] RMB released before LMB - back to preparing state");
-            return;
-        }
-
-        // If LMB is released while RMB is held, enter aiming state
-        if (Input.IsActionJustReleased("shoot"))
         {
             _grenadeState = GrenadeState.Aiming;
             _grenadeDragStart = GetGlobalMousePosition();
-            LogToFile("[Player.Grenade] Step 2 complete! Now aiming - drag RMB and release to throw");
+            LogToFile("[Player.Grenade] Step 2: RMB pressed while G held - now aiming, drag and release RMB to throw");
         }
     }
 
@@ -997,8 +973,11 @@ public partial class Player : BaseCharacter
 
         _grenadeState = GrenadeState.TimerStarted;
 
-        // Decrement grenade count now (pin is pulled)
-        _currentGrenades--;
+        // Decrement grenade count now (pin is pulled) - but not on tutorial level (infinite)
+        if (!_isTutorialLevel)
+        {
+            _currentGrenades--;
+        }
         EmitSignal(SignalName.GrenadeChanged, _currentGrenades, MaxGrenades);
 
         // Play grenade prepare sound

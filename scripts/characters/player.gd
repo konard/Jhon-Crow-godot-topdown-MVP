@@ -148,6 +148,9 @@ signal grenade_thrown
 ## Current number of grenades.
 var _current_grenades: int = 3
 
+## Whether the player is on the tutorial level (infinite grenades).
+var _is_tutorial_level: bool = false
+
 ## Whether the player is preparing to throw a grenade (G held down).
 var _is_preparing_grenade: bool = false
 
@@ -187,9 +190,35 @@ func _ready() -> void:
 
 	_current_ammo = max_ammo
 	_current_health = max_health
-	_current_grenades = max_grenades
 	_is_alive = true
 	_update_health_visual()
+
+	# Detect if we're on the tutorial level
+	# Tutorial level is: scenes/levels/csharp/TestTier.tscn with tutorial_level.gd script
+	var current_scene := get_tree().current_scene
+	if current_scene != null:
+		var scene_path := current_scene.scene_file_path
+		# Tutorial level is detected by:
+		# 1. Scene path contains "csharp/TestTier" (the tutorial scene)
+		# 2. OR scene uses tutorial_level.gd script
+		_is_tutorial_level = scene_path.contains("csharp/TestTier")
+
+		# Also check if the scene script is tutorial_level.gd
+		var script = current_scene.get_script()
+		if script != null:
+			var script_path: String = script.resource_path
+			if script_path.contains("tutorial_level"):
+				_is_tutorial_level = true
+
+	# Initialize grenade count based on level type
+	# Tutorial: infinite grenades (max count)
+	# Other levels: 1 grenade
+	if _is_tutorial_level:
+		_current_grenades = max_grenades
+		FileLogger.info("[Player.Grenade] Tutorial level detected - infinite grenades enabled")
+	else:
+		_current_grenades = 1
+		FileLogger.info("[Player.Grenade] Normal level - starting with 1 grenade")
 
 	FileLogger.info("[Player] Ready! Ammo: %d/%d, Grenades: %d/%d, Health: %d/%d" % [
 		_current_ammo, max_ammo,
@@ -632,16 +661,14 @@ func _on_difficulty_changed(_new_difficulty: int) -> void:
 # Grenade System
 # ============================================================================
 
-## Grenade throw state machine.
+## Grenade throw state machine (simplified 2-step mechanic).
 ## Step 1: G + RMB drag right = start timer (pin pulled)
-## Step 2: Hold LMB -> Hold RMB while holding LMB -> Release LMB = prepare to throw
-## Step 3: RMB still held -> drag in direction and release = throw
+## Step 2: Continue holding G, press RMB = ready to throw
+## Step 3: RMB drag and release = throw
 enum GrenadeState {
 	IDLE,           # No grenade action
-	TIMER_STARTED,  # Step 1 complete: timer running, waiting for throw preparation
-	PREPARING,      # Step 2 in progress: LMB held, waiting for RMB
-	READY_TO_AIM,   # Step 2 complete: LMB+RMB held, waiting for LMB release
-	AIMING          # Step 3: RMB held, drag to aim and release to throw
+	TIMER_STARTED,  # Step 1 complete: timer running, waiting for RMB
+	AIMING          # Step 2 complete: RMB held, drag to aim and release to throw
 }
 
 ## Current grenade state.
@@ -657,10 +684,10 @@ var _aim_drag_start: Vector2 = Vector2.ZERO
 var _grenade_timer_start_time: float = 0.0
 
 
-## Handle grenade input with 3-step mechanic.
+## Handle grenade input with simplified 2-step mechanic.
 ## Step 1: G + RMB drag right = start timer (pull pin)
-## Step 2: Hold LMB -> while holding LMB press and hold RMB -> release LMB = prepare to throw
-## Step 3: RMB still held -> drag in direction and release = throw
+## Step 2: Continue holding G, press RMB = ready to throw
+## Step 3: RMB drag and release = throw
 func _handle_grenade_input() -> void:
 	# Check for active grenade explosion (explodes in hand after 4 seconds)
 	if _active_grenade != null and not is_instance_valid(_active_grenade):
@@ -673,10 +700,6 @@ func _handle_grenade_input() -> void:
 			_handle_grenade_idle_state()
 		GrenadeState.TIMER_STARTED:
 			_handle_grenade_timer_started_state()
-		GrenadeState.PREPARING:
-			_handle_grenade_preparing_state()
-		GrenadeState.READY_TO_AIM:
-			_handle_grenade_ready_to_aim_state()
 		GrenadeState.AIMING:
 			_handle_grenade_aiming_state()
 
@@ -708,7 +731,8 @@ func _handle_grenade_idle_state() -> void:
 		_grenade_drag_active = false
 
 
-## Handle TIMER_STARTED state: waiting for LMB to start preparation.
+## Handle TIMER_STARTED state: waiting for RMB to enter aiming state.
+## Simplified: no LMB step, just hold G and press RMB to aim.
 func _handle_grenade_timer_started_state() -> void:
 	# G must still be held to continue
 	if not Input.is_action_pressed("grenade_prepare"):
@@ -717,55 +741,12 @@ func _handle_grenade_timer_started_state() -> void:
 		_drop_grenade_at_feet()
 		return
 
-	# Check for LMB press to start step 2
-	if Input.is_action_just_pressed("shoot"):
-		_grenade_state = GrenadeState.PREPARING
-		_is_preparing_grenade = true
-		FileLogger.info("[Player.Grenade] Step 2 started: LMB pressed, waiting for RMB")
-
-
-## Handle PREPARING state: LMB held, waiting for RMB.
-func _handle_grenade_preparing_state() -> void:
-	# G must still be held
-	if not Input.is_action_pressed("grenade_prepare"):
-		FileLogger.info("[Player.Grenade] Cancelled: G released during preparation")
-		_drop_grenade_at_feet()
-		return
-
-	# LMB must still be held
-	if not Input.is_action_pressed("shoot"):
-		# LMB released too early - cancel
-		_grenade_state = GrenadeState.TIMER_STARTED
-		_is_preparing_grenade = false
-		FileLogger.info("[Player.Grenade] Step 2 cancelled: LMB released before RMB pressed")
-		return
-
-	# Check for RMB press while LMB held
+	# Check for RMB press to enter aiming state
 	if Input.is_action_just_pressed("grenade_throw"):
-		_grenade_state = GrenadeState.READY_TO_AIM
-		FileLogger.info("[Player.Grenade] Step 2 progress: LMB+RMB held, release LMB to aim")
-
-
-## Handle READY_TO_AIM state: LMB+RMB held, waiting for LMB release.
-func _handle_grenade_ready_to_aim_state() -> void:
-	# G must still be held
-	if not Input.is_action_pressed("grenade_prepare"):
-		FileLogger.info("[Player.Grenade] Cancelled: G released during ready-to-aim")
-		_drop_grenade_at_feet()
-		return
-
-	# RMB must still be held
-	if not Input.is_action_pressed("grenade_throw"):
-		# RMB released - cancel back to preparing
-		_grenade_state = GrenadeState.PREPARING
-		FileLogger.info("[Player.Grenade] Step 2 cancelled: RMB released before LMB")
-		return
-
-	# Check for LMB release (complete step 2)
-	if Input.is_action_just_released("shoot"):
 		_grenade_state = GrenadeState.AIMING
+		_is_preparing_grenade = true
 		_aim_drag_start = get_global_mouse_position()
-		FileLogger.info("[Player.Grenade] Step 2 complete: Now aiming! Drag and release RMB to throw")
+		FileLogger.info("[Player.Grenade] Step 2: RMB pressed while G held - now aiming, drag and release RMB to throw")
 
 
 ## Handle AIMING state: RMB held, drag to aim and release to throw.
@@ -813,8 +794,9 @@ func _start_grenade_timer() -> void:
 	_grenade_state = GrenadeState.TIMER_STARTED
 	_grenade_timer_start_time = Time.get_ticks_msec() / 1000.0
 
-	# Decrement grenade count now (pin is pulled)
-	_current_grenades -= 1
+	# Decrement grenade count now (pin is pulled) - but not on tutorial level (infinite)
+	if not _is_tutorial_level:
+		_current_grenades -= 1
 	grenade_changed.emit(_current_grenades, max_grenades)
 
 	# Play pin pull sound
