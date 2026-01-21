@@ -113,16 +113,77 @@ When working with C#/GDScript interoperability in Godot:
 
 - `scripts/autoload/last_chance_effects_manager.gd`
 
+## Follow-up Issue: Player Cannot Move During Time Freeze
+
+### Symptom
+
+After the initial fix for health detection, the time-freeze effect triggered correctly, but the player was unable to move or aim during the 6-second freeze period.
+
+### Root Cause
+
+The initial implementation used `Engine.time_scale = 0` to freeze time, with `PROCESS_MODE_ALWAYS` set on the player to allow processing. However, this approach has a critical flaw:
+
+**When `Engine.time_scale = 0`, the physics delta becomes 0.** This affects:
+1. `_PhysicsProcess(delta)` receives `delta = 0`
+2. `ApplyMovement()` multiplies velocity by delta, resulting in no movement
+3. `MoveAndSlide()` doesn't move the character when physics delta is 0
+
+Even though the player node had `PROCESS_MODE_ALWAYS`, the physics system effectively stopped working.
+
+### Evidence from Logs
+
+From `logs-batch4/game_log_20260121_112817.txt`:
+```
+[11:28:39] [INFO] [LastChance] Triggering last chance effect!
+[11:28:39] [INFO] [LastChance] Starting last chance effect:
+[11:28:39] [INFO] [LastChance]   - Time will be frozen (except player)
+[11:28:39] [INFO] [LastChance]   - Duration: 6.0 real seconds
+[11:28:39] [INFO] [LastChance] Player and all children process_mode set to ALWAYS
+...
+[11:28:45] [INFO] [LastChance] Effect duration expired after 6.00 real seconds
+```
+
+The effect lasted exactly 6 seconds as intended, but the player reported they couldn't move during this time.
+
+### Solution
+
+Instead of using `Engine.time_scale = 0`, we now:
+
+1. **Keep `Engine.time_scale` at 1.0** - Physics delta remains normal
+2. **Disable processing on all scene nodes** except the player
+3. **Skip autoloads** (AudioManager, FileLogger, etc.)
+4. **Skip the player and all its children** - They process normally
+
+```gdscript
+func _freeze_time() -> void:
+    # CRITICAL: Do NOT set Engine.time_scale to 0!
+    # Physics delta becomes 0 which makes MoveAndSlide() not work.
+
+    # Freeze all top-level nodes except player and autoloads
+    var root := get_tree().root
+    for child in root.get_children():
+        if child.name in ["FileLogger", "AudioManager", ...]:
+            continue  # Skip autoloads
+        _freeze_node_except_player(child)
+```
+
+### Files Changed
+
+- `scripts/autoload/last_chance_effects_manager.gd` - Replaced `Engine.time_scale = 0` with node-based freezing
+
 ## Testing Instructions
 
 1. Start the game on **Hard** difficulty
 2. Take damage until you have **1 HP**
 3. Wait for an enemy bullet to fly toward you
 4. **Expected:** Blue sepia time-freeze effect should trigger
-5. **Expected logs should show:**
+5. **Expected:** Player should be able to MOVE and AIM during the freeze
+6. **Expected:** All enemies and bullets should be completely frozen
+7. **Expected logs should show:**
    ```
    [LastChance] Player health updated (C# Damaged): 1.0
    [LastChance] Threat detected: Bullet
    [LastChance] Triggering last chance effect!
    [LastChance] Starting last chance effect:
+   [LastChance] Froze all nodes except player and autoloads
    ```
