@@ -133,11 +133,41 @@ signal reload_completed
 ## This signal notifies enemies that the player has begun reloading.
 signal reload_started
 
+## Signal emitted when grenade count changes.
+signal grenade_changed(current: int, maximum: int)
+
+## Signal emitted when a grenade is thrown.
+signal grenade_thrown
+
+## Grenade scene to instantiate when throwing.
+@export var grenade_scene: PackedScene
+
+## Maximum number of grenades the player can carry.
+@export var max_grenades: int = 3
+
+## Current number of grenades.
+var _current_grenades: int = 3
+
+## Whether the player is preparing to throw a grenade (G held down).
+var _is_preparing_grenade: bool = false
+
+## Position where the grenade throw drag started.
+var _grenade_drag_start: Vector2 = Vector2.ZERO
+
+## Whether the grenade throw drag has started.
+var _grenade_drag_active: bool = false
+
 
 func _ready() -> void:
 	# Preload bullet scene if not set in inspector
 	if bullet_scene == null:
 		bullet_scene = preload("res://scenes/projectiles/Bullet.tscn")
+
+	# Preload grenade scene if not set in inspector
+	if grenade_scene == null:
+		var grenade_path := "res://scenes/projectiles/FlashbangGrenade.tscn"
+		if ResourceLoader.exists(grenade_path):
+			grenade_scene = load(grenade_path)
 
 	# Get max ammo from DifficultyManager based on current difficulty
 	var difficulty_manager: Node = get_node_or_null("/root/DifficultyManager")
@@ -188,6 +218,9 @@ func _physics_process(delta: float) -> void:
 		_handle_simple_reload_input()
 	else:  # Sequence mode
 		_handle_sequence_reload_input()
+
+	# Handle grenade input
+	_handle_grenade_input()
 
 
 func _get_input_direction() -> Vector2:
@@ -572,3 +605,132 @@ func _on_difficulty_changed(_new_difficulty: int) -> void:
 			else:
 				_current_ammo = max_ammo
 			ammo_changed.emit(_current_ammo, max_ammo)
+
+
+# ============================================================================
+# Grenade System
+# ============================================================================
+
+
+## Handle grenade input.
+## Usage pattern:
+## 1. Hold G to prepare grenade (starts timer)
+## 2. Press and hold RMB to start drag
+## 3. Release RMB to throw in drag direction with drag distance determining speed
+func _handle_grenade_input() -> void:
+	# Check if G key is pressed/held to prepare grenade
+	if Input.is_action_pressed("grenade_prepare"):
+		if not _is_preparing_grenade and _current_grenades > 0:
+			_start_grenade_prepare()
+	else:
+		# G released without throwing - cancel preparation
+		if _is_preparing_grenade and not _grenade_drag_active:
+			_cancel_grenade_prepare()
+
+	# If preparing, handle the drag throw mechanic
+	if _is_preparing_grenade:
+		# Start drag on RMB press
+		if Input.is_action_just_pressed("grenade_throw"):
+			_grenade_drag_start = get_global_mouse_position()
+			_grenade_drag_active = true
+
+		# Throw on RMB release (if drag was active)
+		if Input.is_action_just_released("grenade_throw") and _grenade_drag_active:
+			var drag_end := get_global_mouse_position()
+			_throw_grenade(drag_end)
+
+
+## Start preparing a grenade (G pressed).
+func _start_grenade_prepare() -> void:
+	if _current_grenades <= 0:
+		return
+
+	_is_preparing_grenade = true
+
+	# Play preparation sound (pin pull)
+	var audio_manager: Node = get_node_or_null("/root/AudioManager")
+	if audio_manager and audio_manager.has_method("play_grenade_prepare"):
+		audio_manager.play_grenade_prepare(global_position)
+
+
+## Cancel grenade preparation.
+func _cancel_grenade_prepare() -> void:
+	_is_preparing_grenade = false
+	_grenade_drag_active = false
+	_grenade_drag_start = Vector2.ZERO
+
+
+## Throw the grenade based on drag direction and distance.
+## @param drag_end: The position where the mouse drag ended.
+func _throw_grenade(drag_end: Vector2) -> void:
+	if grenade_scene == null or _current_grenades <= 0:
+		_cancel_grenade_prepare()
+		return
+
+	# Calculate throw direction and distance
+	var drag_vector := drag_end - _grenade_drag_start
+	var drag_distance := drag_vector.length()
+
+	# If drag is too short (dropped at feet), use minimum throw
+	var min_drag_distance := 10.0
+	if drag_distance < min_drag_distance:
+		drag_distance = min_drag_distance
+		drag_vector = Vector2(1, 0)  # Default direction if no drag
+
+	# Clamp max drag distance to viewport length
+	var viewport := get_viewport()
+	var max_drag_distance := 1280.0  # Default viewport width
+	if viewport:
+		max_drag_distance = viewport.get_visible_rect().size.x
+	drag_distance = minf(drag_distance, max_drag_distance)
+
+	var throw_direction := drag_vector.normalized()
+
+	# Create grenade instance
+	var grenade: RigidBody2D = grenade_scene.instantiate()
+	grenade.global_position = global_position
+
+	# Activate the grenade timer (starts 4s countdown)
+	if grenade.has_method("activate_timer"):
+		grenade.activate_timer()
+
+	# Set the throw velocity
+	if grenade.has_method("throw_grenade"):
+		grenade.throw_grenade(throw_direction, drag_distance)
+
+	# Add grenade to scene
+	get_tree().current_scene.add_child(grenade)
+
+	# Update grenade count
+	_current_grenades -= 1
+	grenade_changed.emit(_current_grenades, max_grenades)
+	grenade_thrown.emit()
+
+	# Play throw sound
+	var audio_manager: Node = get_node_or_null("/root/AudioManager")
+	if audio_manager and audio_manager.has_method("play_grenade_throw"):
+		audio_manager.play_grenade_throw(global_position)
+
+	# Reset preparation state
+	_cancel_grenade_prepare()
+
+
+## Get current grenade count.
+func get_current_grenades() -> int:
+	return _current_grenades
+
+
+## Get maximum grenade count.
+func get_max_grenades() -> int:
+	return max_grenades
+
+
+## Add grenades to inventory (e.g., from pickup).
+func add_grenades(count: int) -> void:
+	_current_grenades = mini(_current_grenades + count, max_grenades)
+	grenade_changed.emit(_current_grenades, max_grenades)
+
+
+## Check if player is preparing to throw a grenade.
+func is_preparing_grenade() -> bool:
+	return _is_preparing_grenade
