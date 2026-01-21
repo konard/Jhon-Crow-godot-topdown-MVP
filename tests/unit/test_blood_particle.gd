@@ -105,9 +105,9 @@ func test_initialize_applies_spread_angle() -> void:
 		angles.append(p.velocity.angle())
 
 	# With spread, angles should vary
-	var min_angle := angles.min()
-	var max_angle := angles.max()
-	var angle_range := max_angle - min_angle
+	var min_angle: float = angles.min()
+	var max_angle: float = angles.max()
+	var angle_range: float = max_angle - min_angle
 
 	# There should be some variation in angles (not all exactly 0)
 	assert_gt(angle_range, 0.01, "Particles should spread in different directions")
