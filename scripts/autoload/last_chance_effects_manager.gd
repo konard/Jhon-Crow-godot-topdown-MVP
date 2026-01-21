@@ -349,38 +349,72 @@ func _start_last_chance_effect() -> void:
 
 
 ## Freezes time for everything except the player.
+## IMPORTANT: We don't use Engine.time_scale = 0 because it also freezes physics delta,
+## which prevents CharacterBody2D.MoveAndSlide() from working even with PROCESS_MODE_ALWAYS.
+## Instead, we disable processing on all nodes except the player and this manager.
 func _freeze_time() -> void:
 	# Clear previous stored modes
 	_original_process_modes.clear()
 
-	# Set engine time scale to 0 (freeze everything)
-	Engine.time_scale = 0.0
+	# CRITICAL: Do NOT set Engine.time_scale to 0!
+	# Physics delta becomes 0 which makes MoveAndSlide() not work.
+	# Instead, we disable all nodes except player.
 
-	# But allow the player and ALL its children to still process
-	# This includes: weapon, input handler, health component, animations, etc.
-	if _player != null:
-		_set_node_and_children_process_mode(_player, Node.PROCESS_MODE_ALWAYS)
-		_log("Player and all children process_mode set to ALWAYS")
+	# Freeze all top-level nodes in the scene tree except player and autoloads
+	var root := get_tree().root
+	for child in root.get_children():
+		# Skip autoloads (they should keep running for UI, audio, etc.)
+		if child.name in ["FileLogger", "AudioManager", "DifficultyManager", "LastChanceEffectsManager", "PenultimateHitEffectsManager"]:
+			continue
 
-	# Allow this manager to process (for timer and ripple animation)
+		# This is likely the current scene - freeze everything inside except player
+		_freeze_node_except_player(child)
+
+	_log("Froze all nodes except player and autoloads")
+
+	# This manager uses PROCESS_MODE_ALWAYS to keep running the timer
 	process_mode = Node.PROCESS_MODE_ALWAYS
 
 
-## Recursively sets process mode for a node and all its children.
-## Stores the original process mode for later restoration.
-func _set_node_and_children_process_mode(node: Node, mode: Node.ProcessMode) -> void:
-	if node == null:
+## Recursively freezes a node and its children, except for the player node.
+func _freeze_node_except_player(node: Node) -> void:
+	if node == null or not is_instance_valid(node):
+		return
+
+	# Skip the player and all its children - they should keep processing normally
+	if node == _player:
+		_log("Skipping player node: %s" % node.name)
+		return
+
+	# Also skip if this node is a child of player (already handled)
+	if _player != null and _is_descendant_of(_player, node):
 		return
 
 	# Store original process mode
 	_original_process_modes[node] = node.process_mode
 
-	# Set new process mode
-	node.process_mode = mode
+	# Disable this node's processing
+	node.process_mode = Node.PROCESS_MODE_DISABLED
 
-	# Recursively process all children
+	# Recursively freeze children
 	for child in node.get_children():
-		_set_node_and_children_process_mode(child, mode)
+		_freeze_node_except_player(child)
+
+
+## Checks if 'node' is a descendant of 'ancestor'.
+func _is_descendant_of(ancestor: Node, node: Node) -> bool:
+	if ancestor == null or node == null:
+		return false
+
+	var parent := node.get_parent()
+	while parent != null:
+		if parent == ancestor:
+			return true
+		parent = parent.get_parent()
+
+	return false
+
+
 
 
 ## Applies the visual effects (blue sepia + ripple).
@@ -412,9 +446,6 @@ func _end_last_chance_effect() -> void:
 
 ## Unfreezes time and restores normal processing.
 func _unfreeze_time() -> void:
-	# Restore engine time scale
-	Engine.time_scale = 1.0
-
 	# Restore all nodes' original process modes
 	_restore_all_process_modes()
 
