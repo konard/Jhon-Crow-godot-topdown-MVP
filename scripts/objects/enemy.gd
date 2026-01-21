@@ -3451,6 +3451,7 @@ func _check_player_visibility() -> void:
 				_player_last_visible_position = _player.global_position
 				_tracking_player_behind_cover = true
 				_log_debug("Player hid behind cover at %s" % _player_cover_collision_point)
+				_log_to_file("Player hid behind cover at %s, obstacle: %s" % [_player_cover_collision_point, collider.name if collider else "unknown"])
 	else:
 		# No collision between us and player - we have clear line of sight
 		_can_see_player = true
@@ -3468,6 +3469,7 @@ func _check_player_visibility() -> void:
 			_player_cover_obstacle = null
 			_player_cover_collision_point = Vector2.ZERO
 			_log_debug("Player emerged from cover, resuming direct tracking")
+			_log_to_file("Player emerged from cover, resuming direct tracking")
 	else:
 		# Lost line of sight - reset the timer and visibility ratio
 		_continuous_visibility_timer = 0.0
@@ -3540,7 +3542,8 @@ func _get_cover_exit_aim_target() -> Vector2:
 	return exit_point
 
 
-## Shoot a bullet towards the player.
+## Shoot a bullet towards the player or cover exit point.
+## When player is behind cover, shoots at cover exit points instead of player's actual position.
 func _shoot() -> void:
 	if bullet_scene == null or _player == null:
 		return
@@ -3549,10 +3552,12 @@ func _shoot() -> void:
 	if not _can_shoot():
 		return
 
-	var target_position := _player.global_position
+	# Use cover exit position when tracking player behind cover
+	# Otherwise use player's actual position (with optional lead prediction)
+	var target_position := _get_aim_target_position()
 
-	# Apply lead prediction if enabled
-	if enable_lead_prediction:
+	# Only apply lead prediction when shooting at visible player (not behind cover)
+	if enable_lead_prediction and not _tracking_player_behind_cover:
 		target_position = _calculate_lead_prediction()
 
 	# Check if the shot should be taken (friendly fire and cover checks)

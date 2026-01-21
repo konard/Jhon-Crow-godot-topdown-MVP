@@ -1,150 +1,140 @@
-# Issue #59 Analysis: Enemy Aiming at Player Behind Cover
+# Case Study: Issue #59 - Enemy Cover Aiming Behavior
 
-## Issue Summary (Russian -> English Translation)
+## Issue Summary
 
-**Original Title:** "fix when the player is behind cover, the enemy should not keep them 'in sight'"
+**Issue:** When the player hides behind cover, enemies should aim at the potential exit points of the cover rather than tracking the player's actual position behind it.
 
-**Issue Description:**
-When the player is presumably behind cover (the enemy can't hit them), the enemy still rotates towards the player's movement direction.
+**Expected behavior:**
+- When player hides behind cover, enemy aims at where player might emerge
+- Enemy alternates aim between two exit points (above and below cover)
+- When player becomes visible again, normal aiming resumes
 
-**Expected Behavior:**
-1. When the player hides behind cover and the enemy sees this, that cover is considered "player's cover"
-2. Enemies should aim slightly above or below this cover (where the player might appear)
-3. The cover status should reset when the enemy sees the player again
+**Actual behavior (bug):**
+- Enemy continues to track player's actual position even behind cover
+- Enemy rotation appears correct but bullets still shoot toward hidden player
+
+## Timeline of Investigation
+
+### Session 1: Initial Implementation (2026-01-21 ~02:30)
+
+1. Implemented cover tracking variables:
+   - `_player_cover_obstacle` - Reference to obstacle blocking view
+   - `_player_cover_collision_point` - Where raycast hit the obstacle
+   - `_tracking_player_behind_cover` - Flag for cover tracking state
+   - `_cover_aim_alternate_timer` / `_cover_aim_side` - For alternating aim
+
+2. Added cover detection in `_check_player_visibility()`:
+   - When raycast hits obstacle before player, stores collision point
+   - Sets `_tracking_player_behind_cover = true`
+
+3. Created `_get_aim_target_position()` and `_get_cover_exit_aim_target()`:
+   - Returns cover exit point when tracking player behind cover
+   - Calculates perpendicular direction for exit points
+   - Alternates between sides every 1.5 seconds
+
+4. Modified `_aim_at_player()` to use `_get_aim_target_position()`
+
+5. Added debug visualization in `_draw()` for cover tracking
+
+### Session 2: User Reports Problem Persists (2026-01-21 ~02:38)
+
+User provided game log (`game_log_20260121_053401.txt`) showing the issue still occurs.
 
 ## Root Cause Analysis
 
-### Original Code Behavior (scripts/objects/enemy.gd)
+### Log Analysis
 
-The `_aim_at_player()` function always aimed directly at `_player.global_position`:
+Searched game log for cover-related messages:
+- Found many `IN_COVER` state transitions (enemy taking cover from player)
+- **No "Player hid behind cover" messages appeared**
+- This indicates `_log_debug()` messages were not being logged
 
+### Code Review
+
+Examined `_log_debug()` function:
 ```gdscript
-func _aim_at_player() -> void:
-    if _player == null:
-        return
-    var direction := (_player.global_position - global_position).normalized()
-    var target_angle := direction.angle()
-    # ... rotation logic
+func _log_debug(message: String) -> void:
+    if debug_logging:
+        print("[Enemy %s] %s" % [name, message])
 ```
 
-This meant:
-- Even when `_can_see_player` was `false` (player behind cover), the enemy still rotated toward the player's actual position
-- In COMBAT state, `rotation = direction_to_player.angle()` directly set rotation to face player
-- In PURSUING state and other states, `_aim_at_player()` was called even when visibility was blocked
+The `debug_logging` variable is `false` by default, so cover tracking debug messages never appeared in the log.
 
-### Missing Features (Before Fix)
+### Critical Bug Found
 
-1. **No cover position tracking**: When the player hid behind cover, the system didn't remember WHERE they hid
-2. **No "aim at cover exits" behavior**: Enemies didn't aim at likely emergence points
-3. **No cover obstacle tracking**: The system didn't track which obstacle the player hid behind
-
-## Implemented Solution
-
-### 1. Cover Position Tracking
-
-New variables added to track cover information:
-
+**In `_shoot()` function (line 3507):**
 ```gdscript
-## Position where the player was last seen before going behind cover.
-var _player_last_visible_position: Vector2 = Vector2.ZERO
+func _shoot() -> void:
+    ...
+    var target_position := _player.global_position  # <-- BUG: Always uses player's actual position!
 
-## The obstacle/collider that the player hid behind.
-var _player_cover_obstacle: Object = null
-
-## Position of the cover obstacle's collision point (where raycast hit).
-var _player_cover_collision_point: Vector2 = Vector2.ZERO
-
-## Whether the enemy is actively tracking a player who hid behind cover.
-var _tracking_player_behind_cover: bool = false
-
-## Timer for alternating aim between cover exit points.
-var _cover_aim_alternate_timer: float = 0.0
-
-## Current side to aim at (1.0 = one side, -1.0 = other side of cover).
-var _cover_aim_side: float = 1.0
+    # Apply lead prediction if enabled
+    if enable_lead_prediction:
+        target_position = _calculate_lead_prediction()
+    ...
 ```
 
-### 2. Modified `_check_player_visibility()`
+The `_shoot()` function completely ignores the cover tracking system and always shoots at `_player.global_position`.
 
-When the raycast hits an obstacle instead of the player:
-- Stores the obstacle reference (`_player_cover_obstacle`)
-- Stores the collision point (`_player_cover_collision_point`)
-- Stores the player's last visible position (`_player_last_visible_position`)
-- Sets `_tracking_player_behind_cover = true`
+**Result:** The enemy visually rotates toward cover exit points (via `_aim_at_player()` using `_get_aim_target_position()`), but the bullets are still fired at the player's actual hidden position.
 
-When the player becomes visible again:
-- Resets all tracking variables
-- Logs the state change for debugging
+### Additional Issues Found
 
-### 3. New Aiming System
+1. **No logging to file** - Cover tracking uses `_log_debug()` which only prints to console when `debug_logging=true`, not to the file logger. Important events should use `_log_to_file()`.
 
-Created two new functions:
+2. **Shooting behavior inconsistency** - Even if the enemy can't see the player, bullets may still be fired in their direction if enemy is in certain states.
 
-**`_get_aim_target_position()`** - Returns the correct position to aim at:
-- If player is behind cover: returns cover exit point
-- Otherwise: returns player's actual position
+## Solution
 
-**`_get_cover_exit_aim_target()`** - Calculates cover exit points:
-- Computes perpendicular direction to the cover collision point
-- Alternates between two exit points (above/below cover) every 1.5 seconds
-- Uses 80 pixel offset from cover center
+### Fix 1: Make `_shoot()` Use Cover Exit Position
 
-### 4. Updated `_aim_at_player()`
-
-Modified to use `_get_aim_target_position()` instead of directly accessing `_player.global_position`:
+The `_shoot()` function should use `_get_aim_target_position()` when determining where to shoot:
 
 ```gdscript
-func _aim_at_player() -> void:
-    if _player == null:
-        return
-    var target_position := _get_aim_target_position()
-    var direction := (target_position - global_position).normalized()
-    var target_angle := direction.angle()
-    # ... rotation logic
+func _shoot() -> void:
+    ...
+    # When player is behind cover, shoot at cover exit points, not player position
+    var base_target := _get_aim_target_position()
+    var target_position := base_target
+
+    # Only apply lead prediction when shooting at visible player
+    if enable_lead_prediction and not _tracking_player_behind_cover:
+        target_position = _calculate_lead_prediction()
+    ...
 ```
 
-### 5. Updated Direct Rotation Assignments
+### Fix 2: Add File Logging for Cover Tracking
 
-Replaced direct `rotation = direction_to_player.angle()` calls with `_aim_at_player()` in:
-- COMBAT state sidestepping (line 1329)
-- COMBAT state seeking clear shot (line 1381)
-- COMBAT state approach phase (line 1434)
+Add `_log_to_file()` calls for important cover tracking events:
+- When player hides behind cover
+- When player emerges from cover
+- When switching aim sides
 
-### 6. Debug Visualization (F7)
+### Fix 3: Prevent Shooting When Player Not Visible
 
-Added visual feedback when `debug_label_enabled` is true:
-- Purple line and X marker at cover collision point
-- Lime green line to current aim target (exit point)
-- Small lime green squares at both potential exit positions
+Consider whether enemies should shoot at all when tracking a player behind cover, or only aim there as a deterrent. Current implementation allows shooting at cover exits which seems intentional for suppressive fire.
 
 ## Files Modified
 
-1. `scripts/objects/enemy.gd` - All changes in this file:
-   - Added new tracking variables (lines 551-576)
-   - Modified `_check_player_visibility()` (lines 3367-3430)
-   - Modified `_aim_at_player()` (lines 3433-3463)
-   - Added `_get_aim_target_position()` (lines 3466-3478)
-   - Added `_get_cover_exit_aim_target()` (lines 3481-3503)
-   - Updated COMBAT state rotation handling
-   - Modified `_reset()` to include new variables
-   - Added debug visualization in `_draw()` (lines 4180-4215)
+- `scripts/objects/enemy.gd` - Main implementation
 
-## Testing Strategy
+## Test Plan
 
-1. **Visual Test (F7 Debug)**:
-   - Enter game, press F7 to enable debug mode
-   - Hide behind cover while enemy is tracking you
-   - Verify purple X appears at cover collision point
-   - Verify lime green line shows current aim direction
-   - Verify aim alternates between exit points every 1.5 seconds
+1. Enable debug mode (F7) in game
+2. Find enemy and engage in combat
+3. Hide behind cover/obstacle
+4. Verify:
+   - Purple X appears at cover collision point
+   - Lime green line shows aim target at cover exit
+   - Enemy bullets are actually fired at cover exit points (not at player)
+   - Enemy alternates aim between both exit points
+5. Emerge from cover and verify normal tracking resumes
 
-2. **Gameplay Test**:
-   - Aggro an enemy, then hide behind cover
-   - Observe that enemy doesn't track your exact position
-   - Observe that enemy aims at cover edges
-   - Emerge from cover and verify enemy resumes direct tracking
+## Related Issues and PRs
 
-3. **State Transition Test**:
-   - Verify cover tracking activates in COMBAT, PURSUING, FLANKING, ASSAULT states
-   - Verify cover tracking resets on player visibility
-   - Verify cover tracking resets on enemy reset/respawn
+- PR #156: Adds FOV (field of view) to enemies - merged into this fix
+- Issue #66: Original FOV request
+
+## Conclusion
+
+The bug was a classic case of "visual feedback not matching actual behavior" - the enemy appeared to aim correctly (rotation) but bullets went to the wrong target. The fix ensures both visual aim AND bullet trajectory respect the cover exit position system.
