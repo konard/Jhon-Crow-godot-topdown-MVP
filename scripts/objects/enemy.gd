@@ -3668,8 +3668,11 @@ func _update_weapon_sprite_rotation() -> void:
 		var direction := (target_position - global_position).normalized()
 		aim_angle = direction.angle()
 
-	# Set the weapon sprite rotation to match the aim direction
-	_weapon_sprite.rotation = aim_angle
+	# Set the weapon sprite LOCAL rotation relative to parent.
+	# The weapon sprite is a child of the enemy body, so we need to subtract the parent's
+	# rotation to get the correct world-space orientation.
+	# Without this, the rotation would be doubled (parent rotation + own rotation).
+	_weapon_sprite.rotation = aim_angle - rotation
 
 	# Flip the sprite vertically when aiming left (to avoid upside-down rifle)
 	# This happens when the angle is greater than 90 degrees or less than -90 degrees

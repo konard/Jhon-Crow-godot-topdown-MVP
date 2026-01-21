@@ -413,3 +413,57 @@ func _update_weapon_sprite_rotation() -> void:
 - `scripts/objects/enemy.gd` - **Fixed weapon sprite rotation to match shooting direction**
 - `Scripts/Weapons/AssaultRifle.cs` - **Added debug logging for sprite status**
 - `docs/case-studies/issue-97/logs/game_log_20260121_154722.txt` - **Added user-provided log**
+
+### Phase 8: Fifth User Testing & Feedback (2026-01-21 16:01)
+1. User reported: "у врагов пули вылетают точно из задней стороны винтовки" (enemy bullets come out exactly from the BACK side of the rifle)
+2. Game log provided: `game_log_20260121_155910.txt`
+
+### Root Cause Analysis (Fifth Iteration)
+
+#### Problem 8: Enemy Weapon Sprite Points Backward (Double Rotation)
+
+**Technical Details:**
+- The weapon sprite is a CHILD of the Enemy CharacterBody2D node
+- The enemy body has its own `rotation` property that rotates to face the player
+- The `_update_weapon_sprite_rotation()` was setting `_weapon_sprite.rotation = aim_angle` in WORLD coordinates
+- Since the sprite is a child, its effective rotation = parent rotation + own rotation
+- If enemy body is at 45° and we set weapon sprite to 45°, the weapon appears at 90°!
+
+**Visual Explanation:**
+```
+Parent (Enemy body): rotation = 45° (facing player)
+Child (Weapon sprite): rotation = 45° (our code set this)
+Effective world rotation = 45° + 45° = 90° ← WRONG!
+
+The rifle appears to point 45° beyond the actual shooting direction.
+When combined with horizontal offset, bullets appear to come from the back.
+```
+
+**Code Before (Issue):**
+```gdscript
+func _update_weapon_sprite_rotation() -> void:
+    # ... calculate aim_angle in world coordinates ...
+    _weapon_sprite.rotation = aim_angle  # Sets world angle, but sprite is a child!
+```
+
+**Solution:** Calculate LOCAL rotation relative to parent:
+```gdscript
+func _update_weapon_sprite_rotation() -> void:
+    # ... calculate aim_angle in world coordinates ...
+    # Subtract parent rotation to get local rotation
+    _weapon_sprite.rotation = aim_angle - rotation
+```
+
+**Mathematical Proof:**
+```
+Target: Weapon should point at aim_angle in world space
+Parent rotation: rotation (enemy body facing player)
+Required child rotation: aim_angle - rotation (LOCAL)
+
+Effective world rotation = rotation + (aim_angle - rotation) = aim_angle ✓
+```
+
+### Modified Files (Fifth Iteration)
+- `scripts/objects/enemy.gd` - **Fixed weapon sprite rotation to use LOCAL coordinates (aim_angle - rotation)**
+- `docs/case-studies/issue-97/logs/game_log_20260121_155910.txt` - **Added user-provided log**
+- `docs/case-studies/issue-97/README.md` - **Updated with fifth iteration analysis**
