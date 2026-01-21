@@ -175,3 +175,63 @@ func test_clear_blood_decals_runs_without_error() -> void:
 	# Should not crash when clearing decals (even when empty)
 	impact_manager.clear_blood_decals()
 	pass_test("clear_blood_decals runs without error")
+
+
+# ============================================================================
+# Blood Particle System Tests
+# ============================================================================
+
+
+func test_manager_has_spawn_blood_decal_at_method() -> void:
+	assert_true(impact_manager.has_method("spawn_blood_decal_at"),
+		"Manager should have spawn_blood_decal_at method")
+
+
+func test_spawn_blood_decal_at_accepts_position_and_size() -> void:
+	# Should not crash when called with valid parameters
+	impact_manager.spawn_blood_decal_at(Vector2(100, 100), 1.0)
+	pass_test("spawn_blood_decal_at accepts position and size without error")
+
+
+func test_spawn_blood_decal_at_handles_small_multiplier() -> void:
+	# Should not crash with small multiplier
+	impact_manager.spawn_blood_decal_at(Vector2(100, 100), 0.1)
+	pass_test("spawn_blood_decal_at handles small multiplier without error")
+
+
+func test_spawn_blood_decal_at_handles_large_multiplier() -> void:
+	# Should not crash with large multiplier
+	impact_manager.spawn_blood_decal_at(Vector2(100, 100), 3.0)
+	pass_test("spawn_blood_decal_at handles large multiplier without error")
+
+
+# ============================================================================
+# Constants Tests
+# ============================================================================
+
+
+func test_base_blood_particle_count_constant() -> void:
+	# Verify the constant is accessible and reasonable
+	var count: int = impact_manager.BASE_BLOOD_PARTICLE_COUNT
+	assert_gt(count, 0, "Base blood particle count should be positive")
+	assert_lt(count, 100, "Base blood particle count should be reasonable")
+
+
+func test_max_blood_particle_count_constant() -> void:
+	# Verify the constant is accessible and reasonable
+	var max_count: int = impact_manager.MAX_BLOOD_PARTICLE_COUNT
+	assert_gt(max_count, impact_manager.BASE_BLOOD_PARTICLE_COUNT,
+		"Max particle count should be greater than base count")
+
+
+func test_blood_pressure_multiplier_constant() -> void:
+	# Verify the constant is accessible and reasonable
+	var multiplier: float = impact_manager.BLOOD_PRESSURE_MULTIPLIER
+	assert_gt(multiplier, 0.0, "Blood pressure multiplier should be positive")
+
+
+func test_blood_spread_angle_constant() -> void:
+	# Verify the constant is accessible and reasonable
+	var angle: float = impact_manager.BLOOD_SPREAD_ANGLE
+	assert_gt(angle, 0.0, "Blood spread angle should be positive")
+	assert_lt(angle, PI, "Blood spread angle should be less than PI")
