@@ -9,8 +9,8 @@ extends Area2D
 ## The hole is permanent and does not fade over time.
 ## Similar to Red Faction Guerrilla or Teardown destruction (without physics).
 ##
-## The visual is a semi-transparent dark trail from entry to exit point,
-## representing the bullet path through the wall material.
+## Visual feedback is provided by dust effects at entry and exit points,
+## spawned by the bullet script (not by this collision hole).
 
 ## Collision layers this hole affects (default: obstacles layer 3)
 const OBSTACLE_LAYER: int = 4  # Layer 3 in Godot is value 4 (2^2)
@@ -18,28 +18,19 @@ const OBSTACLE_LAYER: int = 4  # Layer 3 in Godot is value 4 (2^2)
 ## The collision shape of this hole.
 var _collision_shape: CollisionShape2D = null
 
-## The visual Line2D trail.
-var _visual_line: Line2D = null
-
-## Visual material for the hole effect.
-## Note: True texture erasing would require CanvasGroup masking or
-## rendering walls to a SubViewport with a mask layer.
-## For simplicity, we use a dark semi-transparent line to represent the hole.
-var _visual_material: CanvasItemMaterial = null
-
-## Direction the bullet was traveling (for trail orientation).
+## Direction the bullet was traveling (for collision orientation).
 var bullet_direction: Vector2 = Vector2.RIGHT
 
-## Width of the bullet trail (based on caliber).
+## Width of the hole (based on caliber).
 var trail_width: float = 4.0
 
-## Length of the trail (based on penetration distance traveled).
+## Length of the hole (based on penetration distance traveled).
 var trail_length: float = 8.0
 
-## Entry point in global coordinates (stored for visual rendering).
+## Entry point in global coordinates.
 var _entry_point: Vector2 = Vector2.ZERO
 
-## Exit point in global coordinates (stored for visual rendering).
+## Exit point in global coordinates.
 var _exit_point: Vector2 = Vector2.ZERO
 
 ## Whether the hole has been fully configured.
@@ -55,9 +46,6 @@ func _ready() -> void:
 	# Monitoring must be true for bullets to detect this area
 	monitoring = true
 	monitorable = true
-
-	# Don't create visuals yet - wait for set_from_entry_exit to be called
-	# with the actual entry/exit points
 
 
 ## Creates or updates the collision shape for the hole.
@@ -75,41 +63,6 @@ func _create_or_update_collision_shape() -> void:
 		rect.size = Vector2(trail_length, trail_width)
 
 
-## Creates or updates the visual representation of the hole.
-## The visual is drawn in GLOBAL coordinates as a line from entry to exit.
-## Uses CanvasItemMaterial with BlendMode.SUB for a true "eraser" effect.
-## This subtracts the line color from what's behind it, creating a dark hole appearance.
-## Note: BlendMode.SUB creates the closest visual to an "eraser" without complex masking.
-func _create_or_update_visual() -> void:
-	if _visual_line == null:
-		_visual_line = Line2D.new()
-		# Use CanvasItemMaterial with subtractive blending for eraser effect
-		# This subtracts the color from what's behind, creating a dark "cut" through walls
-		var mat := CanvasItemMaterial.new()
-		mat.blend_mode = CanvasItemMaterial.BLEND_MODE_SUB
-		_visual_line.material = mat
-		# Use a bright color that will subtract significantly from wall textures
-		# Higher values = more visible "cut" through the wall
-		_visual_line.default_color = Color(0.6, 0.6, 0.6, 1.0)
-		_visual_line.begin_cap_mode = Line2D.LINE_CAP_ROUND
-		_visual_line.end_cap_mode = Line2D.LINE_CAP_ROUND
-		# Use global coordinates so the line is positioned correctly
-		_visual_line.top_level = true
-		# Ensure position is at origin so points are at their true global positions
-		_visual_line.position = Vector2.ZERO
-		# Put hole visuals on a high z-index so they appear on top of wall textures
-		_visual_line.z_index = 10
-		add_child(_visual_line)
-
-	# Update line properties
-	_visual_line.width = trail_width
-	_visual_line.clear_points()
-
-	# Draw line from entry to exit in global coordinates
-	_visual_line.add_point(_entry_point)
-	_visual_line.add_point(_exit_point)
-
-
 ## Configures the hole with bullet information.
 ## @param direction: Direction the bullet was traveling.
 ## @param width: Width of the hole (based on caliber).
@@ -125,17 +78,13 @@ func configure(direction: Vector2, width: float, length: float) -> void:
 	# Set rotation for collision shape (centered at hole position)
 	rotation = bullet_direction.angle()
 
-	# Update visual if we have entry/exit points
-	if _is_configured:
-		_create_or_update_visual()
-
 
 ## Sets the hole from entry and exit points.
 ## This is the primary method for configuring the hole.
 ## @param entry_point: Where the bullet entered the wall (global coords).
 ## @param exit_point: Where the bullet exited the wall (global coords).
 func set_from_entry_exit(entry_point: Vector2, exit_point: Vector2) -> void:
-	# Store entry/exit points for visual rendering
+	# Store entry/exit points
 	_entry_point = entry_point
 	_exit_point = exit_point
 
@@ -150,5 +99,5 @@ func set_from_entry_exit(entry_point: Vector2, exit_point: Vector2) -> void:
 	# Mark as configured
 	_is_configured = true
 
-	# Now create/update collision shape and visual
+	# Now create/update collision shape
 	configure(bullet_direction, trail_width, trail_length)

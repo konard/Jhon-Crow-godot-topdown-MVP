@@ -239,13 +239,48 @@ Subtractive blending subtracts the line's color from the underlying wall texture
 
 ---
 
+## Fourth Round Issues (2026-01-21T05:55:12Z)
+
+### Issue 7: Visual Trails Removed, Use Dust Effects Only
+
+**User Request:**
+User requested to remove visual trails entirely ("убери трейлы вообще") and rely on dust effects at entry/exit points for visual feedback.
+
+**Changes Made:**
+1. Removed all Line2D visual trail code from `scripts/effects/penetration_hole.gd`:
+   - Removed `_visual_line` variable
+   - Removed `_visual_material` variable
+   - Removed `_create_or_update_visual()` function
+   - Kept only the collision shape (RectangleShape2D) for bullet passthrough functionality
+
+2. Dust effects remain at entry and exit points (already implemented in both bullet scripts):
+   - `bullet.gd`: `_spawn_penetration_hole_effect()` spawns dust via ImpactEffectsManager
+   - `Bullet.cs`: `SpawnDustEffect()` spawns dust via ImpactEffectsManager
+
+**Result:**
+- No visual line/trail through walls
+- Dust particles scatter at entry point (opposite to bullet direction)
+- Dust particles scatter at exit point (in bullet direction)
+- Collision hole still allows subsequent bullets to pass through
+
+---
+
+## Files Modified (Fourth Round)
+
+1. `scripts/effects/penetration_hole.gd`:
+   - Removed `_visual_line`, `_visual_material` variables
+   - Removed `_create_or_update_visual()` function
+   - Simplified to collision-only functionality
+
+---
+
 ## Testing Recommendations
 
-1. Test **player** shooting at thin walls (24px) at close range - should see penetration trail
-2. Test **player** shooting at thick walls - bullet should stop inside and leave partial trail
-3. Test enemy shooting at player through walls - should see trail and 48px limit
-4. Verify bullet trails follow the bullet path correctly (not floating in air)
+1. Test **player** shooting at thin walls (24px) at close range - should see dust at entry/exit
+2. Test **player** shooting at thick walls - bullet should stop inside with dust at entry only
+3. Test enemy shooting at player through walls - should see dust at entry/exit
+4. Verify no visual line/trail is drawn (only dust particles)
 5. Verify dust effects appear at entry and exit points
 6. Check debug logs for penetration messages from BOTH player and enemy bullets
-7. **NEW**: Test point-blank shooting - bullet should spawn and penetrate
-8. **NEW**: Verify visual trails use subtractive blending (appear as dark cuts, not black overlays)
+7. Test point-blank shooting - bullet should spawn and penetrate
+8. Verify collision holes allow subsequent bullets to pass through
