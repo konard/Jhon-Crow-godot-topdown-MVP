@@ -77,15 +77,20 @@ func _create_or_update_collision_shape() -> void:
 
 ## Creates or updates the visual representation of the hole.
 ## The visual is drawn in GLOBAL coordinates as a line from entry to exit.
-## Uses a transparent look to simulate a "hole" through the wall (eraser effect).
-## NOTE: True texture erasing requires CanvasGroup masking in Godot 4.
-## For now, we use a semi-transparent dark color to simulate the hole appearance.
+## Uses CanvasItemMaterial with BlendMode.SUB for a true "eraser" effect.
+## This subtracts the line color from what's behind it, creating a dark hole appearance.
+## Note: BlendMode.SUB creates the closest visual to an "eraser" without complex masking.
 func _create_or_update_visual() -> void:
 	if _visual_line == null:
 		_visual_line = Line2D.new()
-		# Use a semi-transparent very dark color to simulate a hole/shadow
-		# The lower alpha makes it look like you can partially see through
-		_visual_line.default_color = Color(0.05, 0.05, 0.05, 0.8)
+		# Use CanvasItemMaterial with subtractive blending for eraser effect
+		# This subtracts the color from what's behind, creating a dark "cut" through walls
+		var mat := CanvasItemMaterial.new()
+		mat.blend_mode = CanvasItemMaterial.BLEND_MODE_SUB
+		_visual_line.material = mat
+		# Use a bright color that will subtract significantly from wall textures
+		# Higher values = more visible "cut" through the wall
+		_visual_line.default_color = Color(0.6, 0.6, 0.6, 1.0)
 		_visual_line.begin_cap_mode = Line2D.LINE_CAP_ROUND
 		_visual_line.end_cap_mode = Line2D.LINE_CAP_ROUND
 		# Use global coordinates so the line is positioned correctly

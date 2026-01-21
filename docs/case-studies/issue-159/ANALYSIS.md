@@ -142,6 +142,102 @@ Logs stored in `docs/case-studies/issue-159/logs/`:
 - `game_log_20260121_080441.txt` (Second round)
 - `game_log_20260121_080549.txt` (Second round)
 - `game_log_20260121_080741.txt` (Second round)
+- `game_log_20260121_082440.txt` (Third round)
+- `game_log_20260121_082524.txt` (Third round)
+- `game_log_20260121_083712.txt` (Third round)
+- `game_log_20260121_083834.txt` (Third round)
+
+---
+
+## Third Round Issues (2026-01-21T05:40:21Z)
+
+### Issue 5: Point-Blank Penetration Blocked by Issue #70 Fix
+
+**Reported Behavior:**
+User reported that when shooting at point-blank range (player standing flush against wall), penetration doesn't work. This was linked to the fix for issue #70 (burst mode shooting through walls).
+
+**Root Cause Discovery:**
+The fix for issue #70 added `IsBulletSpawnClear()` in `BaseWeapon.cs` which checks if there's a wall between the weapon and the bullet spawn position. If blocked, the bullet was NOT spawned at all - this prevented both the bug (shooting through walls via the spawn offset) AND legitimate penetration.
+
+**Technical Details:**
+```csharp
+// Old behavior (issue #70 fix)
+protected virtual bool IsBulletSpawnClear(Vector2 direction)
+{
+    // If wall detected, return false
+    // SpawnBullet() would not spawn bullet at all
+    if (!IsBulletSpawnClear(direction))
+        return; // Bullet never created!
+}
+```
+
+The problem: The issue #70 fix correctly identified that bullets spawning BEHIND the wall (at offset position) would bypass the wall entirely. However, it incorrectly blocked ALL shooting when at point-blank, including legitimate wall penetration.
+
+**Fix:**
+Modified `BaseWeapon.cs` to spawn bullets at the weapon position (not offset) when wall is detected at point-blank. This allows the bullet to:
+1. Still be created
+2. Immediately hit the wall (triggering `OnBodyEntered`)
+3. Start penetration logic (point-blank = 100% penetration chance)
+
+```csharp
+// New behavior
+var (isBlocked, hitPosition, hitNormal) = CheckBulletSpawnPath(direction);
+if (isBlocked)
+{
+    // Spawn at weapon position for penetration
+    spawnPosition = GlobalPosition + direction * 2.0f;
+}
+else
+{
+    // Normal case: spawn at offset
+    spawnPosition = GlobalPosition + direction * BulletSpawnOffset;
+}
+```
+
+### Issue 6: Visual Trails Are Black Instead of Transparent
+
+**Reported Behavior:**
+User requested that penetration trails should "erase" the wall texture like an eraser in Paint, not draw a black line on top.
+
+**Original Implementation:**
+```gdscript
+# penetration_hole.gd
+_visual_line.default_color = Color(0.05, 0.05, 0.05, 0.8)
+```
+This created a semi-transparent dark line overlay, not a true "eraser" effect.
+
+**Technical Constraints:**
+True texture erasing in Godot 4 requires one of:
+1. CanvasGroup with clip_children masking
+2. SubViewport rendering with alpha masking
+3. Custom shader with DST_ALPHA operations
+4. CanvasItemMaterial with BlendMode.SUB (subtractive blending)
+
+**Fix:**
+Used `CanvasItemMaterial` with `BLEND_MODE_SUB` for a close approximation to an eraser effect:
+```gdscript
+var mat := CanvasItemMaterial.new()
+mat.blend_mode = CanvasItemMaterial.BLEND_MODE_SUB
+_visual_line.material = mat
+_visual_line.default_color = Color(0.6, 0.6, 0.6, 1.0)
+```
+
+Subtractive blending subtracts the line's color from the underlying wall texture, creating a darker "cut" appearance that simulates a hole through the wall material.
+
+---
+
+## Files Modified (Third Round)
+
+1. `Scripts/AbstractClasses/BaseWeapon.cs`:
+   - Added `CheckBulletSpawnPath()` method that returns blocking info
+   - Modified `SpawnBullet()` to spawn at weapon position when blocked (for penetration)
+   - Kept `IsBulletSpawnClear()` for backward compatibility
+
+2. `scripts/effects/penetration_hole.gd`:
+   - Changed from solid Color to CanvasItemMaterial with BlendMode.SUB
+   - Updated color to bright gray for better subtraction effect
+
+---
 
 ## Testing Recommendations
 
@@ -151,3 +247,5 @@ Logs stored in `docs/case-studies/issue-159/logs/`:
 4. Verify bullet trails follow the bullet path correctly (not floating in air)
 5. Verify dust effects appear at entry and exit points
 6. Check debug logs for penetration messages from BOTH player and enemy bullets
+7. **NEW**: Test point-blank shooting - bullet should spawn and penetrate
+8. **NEW**: Verify visual trails use subtractive blending (appear as dark cuts, not black overlays)
