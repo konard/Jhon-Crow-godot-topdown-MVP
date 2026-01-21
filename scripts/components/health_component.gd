@@ -110,14 +110,14 @@ func take_damage_with_info(amount: int, hit_direction: Vector2, caliber_data: Re
 
 	if _current_health <= 0:
 		_current_health = 0
-		# Spawn blood splatter effect for lethal hit
+		# Spawn blood splatter effect for lethal hit (with decal)
 		if impact_manager and impact_manager.has_method("spawn_blood_effect") and parent:
-			impact_manager.spawn_blood_effect(parent.global_position, hit_direction, caliber_data)
+			impact_manager.spawn_blood_effect(parent.global_position, hit_direction, caliber_data, true)
 		_on_death()
 	else:
-		# Spawn sparks effect for non-lethal hit
-		if impact_manager and impact_manager.has_method("spawn_sparks_effect") and parent:
-			impact_manager.spawn_sparks_effect(parent.global_position, hit_direction, caliber_data)
+		# Spawn blood for non-lethal hit (smaller, no decal)
+		if impact_manager and impact_manager.has_method("spawn_blood_effect") and parent:
+			impact_manager.spawn_blood_effect(parent.global_position, hit_direction, caliber_data, false)
 		_update_health_visual()
 
 

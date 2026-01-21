@@ -478,17 +478,17 @@ func on_hit_with_info(hit_direction: Vector2, caliber_data: Resource) -> void:
 		# Play lethal hit sound
 		if audio_manager and audio_manager.has_method("play_hit_lethal"):
 			audio_manager.play_hit_lethal(global_position)
-		# Spawn blood splatter effect for lethal hit
+		# Spawn blood splatter effect for lethal hit (with decal)
 		if impact_manager and impact_manager.has_method("spawn_blood_effect"):
-			impact_manager.spawn_blood_effect(global_position, hit_direction, caliber_data)
+			impact_manager.spawn_blood_effect(global_position, hit_direction, caliber_data, true)
 		_on_death()
 	else:
 		# Play non-lethal hit sound
 		if audio_manager and audio_manager.has_method("play_hit_non_lethal"):
 			audio_manager.play_hit_non_lethal(global_position)
-		# Spawn sparks effect for non-lethal (armor) hit
-		if impact_manager and impact_manager.has_method("spawn_sparks_effect"):
-			impact_manager.spawn_sparks_effect(global_position, hit_direction, caliber_data)
+		# Spawn blood effect for non-lethal hit (smaller, no decal)
+		if impact_manager and impact_manager.has_method("spawn_blood_effect"):
+			impact_manager.spawn_blood_effect(global_position, hit_direction, caliber_data, false)
 		_update_health_visual()
 
 

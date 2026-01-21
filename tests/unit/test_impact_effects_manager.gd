@@ -157,3 +157,21 @@ func test_spawn_effects_handle_negative_positions() -> void:
 	impact_manager.spawn_blood_effect(Vector2(-100, -200), Vector2(1, 0), null)
 	impact_manager.spawn_sparks_effect(Vector2(-100, -200), Vector2(1, 0), null)
 	pass_test("Spawn methods handle negative positions without error")
+
+
+func test_spawn_blood_effect_accepts_is_lethal_parameter() -> void:
+	# Should not crash when called with is_lethal parameter
+	impact_manager.spawn_blood_effect(Vector2(100, 100), Vector2(1, 0), null, true)
+	impact_manager.spawn_blood_effect(Vector2(100, 100), Vector2(1, 0), null, false)
+	pass_test("spawn_blood_effect accepts is_lethal parameter without error")
+
+
+func test_clear_blood_decals_method_exists() -> void:
+	assert_true(impact_manager.has_method("clear_blood_decals"),
+		"Manager should have clear_blood_decals method")
+
+
+func test_clear_blood_decals_runs_without_error() -> void:
+	# Should not crash when clearing decals (even when empty)
+	impact_manager.clear_blood_decals()
+	pass_test("clear_blood_decals runs without error")
