@@ -843,9 +843,13 @@ func _start_grenade_timer() -> void:
 ## Drop the grenade at player's feet (when G is released before throwing).
 func _drop_grenade_at_feet() -> void:
 	if _active_grenade != null and is_instance_valid(_active_grenade):
+		# Set position to current player position before unfreezing
+		_active_grenade.global_position = global_position
+		# Unfreeze the grenade so physics works and it can explode
+		_active_grenade.freeze = false
 		# Grenade stays where it is (at player's last position)
 		# It will explode when timer runs out
-		FileLogger.info("[Player.Grenade] Grenade dropped at feet at %s" % str(_active_grenade.global_position))
+		FileLogger.info("[Player.Grenade] Grenade dropped at feet at %s (unfrozen)" % str(_active_grenade.global_position))
 	_reset_grenade_state()
 
 
