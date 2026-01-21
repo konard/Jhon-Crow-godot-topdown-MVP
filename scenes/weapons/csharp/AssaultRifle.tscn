@@ -19,7 +19,7 @@ LaserSightColor = Color(1, 0, 0, 0.5)
 LaserSightWidth = 2.0
 
 [node name="RifleSprite" type="Sprite2D" parent="."]
-z_index = -1
+z_index = 1
 texture = ExtResource("4_rifle_sprite")
 offset = Vector2(20, 0)
 

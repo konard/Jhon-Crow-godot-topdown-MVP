@@ -173,6 +173,17 @@ public partial class AssaultRifle : BaseWeapon
         // Get the rifle sprite for visual representation
         _rifleSprite = GetNodeOrNull<Sprite2D>("RifleSprite");
 
+        // Debug: Log whether the rifle sprite was found and its texture status
+        if (_rifleSprite != null)
+        {
+            var texture = _rifleSprite.Texture;
+            GD.Print($"[AssaultRifle] RifleSprite found: visible={_rifleSprite.Visible}, z_index={_rifleSprite.ZIndex}, texture={(texture != null ? "loaded" : "NULL")}");
+        }
+        else
+        {
+            GD.PrintErr("[AssaultRifle] WARNING: RifleSprite node not found!");
+        }
+
         // Get or create the laser sight Line2D
         _laserSight = GetNodeOrNull<Line2D>("LaserSight");
 

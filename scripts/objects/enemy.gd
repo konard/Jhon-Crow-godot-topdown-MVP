@@ -587,6 +587,13 @@ func _ready() -> void:
 	# Log that this enemy is ready (use call_deferred to ensure FileLogger is loaded)
 	call_deferred("_log_spawn_info")
 
+	# Debug: Log weapon sprite status
+	if _weapon_sprite:
+		var texture_status := "loaded" if _weapon_sprite.texture else "NULL"
+		print("[Enemy] WeaponSprite found: visible=%s, z_index=%d, texture=%s" % [_weapon_sprite.visible, _weapon_sprite.z_index, texture_status])
+	else:
+		push_error("[Enemy] WARNING: WeaponSprite node not found!")
+
 	# Preload bullet scene if not set in inspector
 	if bullet_scene == null:
 		bullet_scene = preload("res://scenes/projectiles/Bullet.tscn")
@@ -3641,19 +3648,32 @@ func _get_health_percent() -> float:
 	return float(_current_health) / float(_max_health)
 
 
-## Updates the weapon sprite rotation to match the enemy's aim direction.
+## Updates the weapon sprite rotation to match the direction the enemy will shoot.
+## This ensures the rifle visually points where bullets will travel.
 ## Also handles vertical flipping when aiming left to avoid upside-down appearance.
 func _update_weapon_sprite_rotation() -> void:
 	if not _weapon_sprite:
 		return
 
-	# The weapon sprite should point in the same direction as the enemy is facing
-	# The enemy's rotation property already represents the aim direction
-	_weapon_sprite.rotation = rotation
+	# Calculate the direction the weapon should point (same as shooting direction)
+	# This matches the logic in _shoot() to ensure visual consistency
+	var aim_angle: float = rotation  # Default to body rotation
+
+	if _player and is_instance_valid(_player):
+		# Calculate direction to player (or predicted position if lead prediction is enabled)
+		var target_position := _player.global_position
+		if enable_lead_prediction and _can_see_player:
+			target_position = _calculate_lead_prediction()
+
+		var direction := (target_position - global_position).normalized()
+		aim_angle = direction.angle()
+
+	# Set the weapon sprite rotation to match the aim direction
+	_weapon_sprite.rotation = aim_angle
 
 	# Flip the sprite vertically when aiming left (to avoid upside-down rifle)
 	# This happens when the angle is greater than 90 degrees or less than -90 degrees
-	var aiming_left := absf(rotation) > PI / 2.0
+	var aiming_left := absf(aim_angle) > PI / 2.0
 	_weapon_sprite.flip_v = aiming_left
 
 

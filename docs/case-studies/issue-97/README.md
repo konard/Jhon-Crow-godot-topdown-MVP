@@ -359,3 +359,57 @@ func _update_weapon_sprite_rotation() -> void:
 - `scenes/weapons/csharp/AssaultRifle.tscn` - **Changed texture to top-down sprite**
 - `scenes/objects/Enemy.tscn` - **Changed texture to top-down sprite**
 - `Scripts/Weapons/AssaultRifle.cs` - **Added UpdateAimDirection() for independent sprite rotation**
+
+### Phase 7: Fourth User Testing & Feedback (2026-01-21 15:49)
+1. User reported: "у игрока не появилась винтовка (возможно из-за C#)" (player's rifle didn't appear, possibly due to C#)
+2. User reported: "пули врагов вылетают не из винтовки" (enemy bullets don't come from the rifle)
+3. Game log provided: `game_log_20260121_154722.txt`
+
+### Root Cause Analysis (Fourth Iteration)
+
+#### Problem 6: Player Rifle Not Visible (z_index)
+
+**Technical Details:**
+- In `AssaultRifle.tscn`, `RifleSprite` had `z_index = -1`
+- This places the sprite BEHIND the parent node hierarchy
+- Player's sprite has default z_index (0)
+- Combined with potential texture loading issues, the rifle is invisible
+
+**Solution:** Changed `z_index` from `-1` to `1` to place the rifle in front:
+```diff
+-z_index = -1
++z_index = 1
+```
+
+#### Problem 7: Enemy Weapon Sprite Not Aligned with Shooting Direction
+
+**Technical Details:**
+- `_update_weapon_sprite_rotation()` used enemy's `rotation` property (body rotation)
+- But `_shoot()` calculates direction to player/target: `(target_position - global_position).normalized()`
+- These can be different values, causing visual mismatch
+
+**Code Before (Issue):**
+```gdscript
+func _update_weapon_sprite_rotation() -> void:
+    # Uses body rotation - NOT shooting direction!
+    _weapon_sprite.rotation = rotation
+```
+
+**Solution:** Calculate direction to player (same as shooting logic):
+```gdscript
+func _update_weapon_sprite_rotation() -> void:
+    var aim_angle: float = rotation  # Default
+    if _player and is_instance_valid(_player):
+        var target_position := _player.global_position
+        if enable_lead_prediction and _can_see_player:
+            target_position = _calculate_lead_prediction()
+        var direction := (target_position - global_position).normalized()
+        aim_angle = direction.angle()
+    _weapon_sprite.rotation = aim_angle
+```
+
+### Modified Files (Fourth Iteration)
+- `scenes/weapons/csharp/AssaultRifle.tscn` - **Changed z_index from -1 to 1**
+- `scripts/objects/enemy.gd` - **Fixed weapon sprite rotation to match shooting direction**
+- `Scripts/Weapons/AssaultRifle.cs` - **Added debug logging for sprite status**
+- `docs/case-studies/issue-97/logs/game_log_20260121_154722.txt` - **Added user-provided log**
