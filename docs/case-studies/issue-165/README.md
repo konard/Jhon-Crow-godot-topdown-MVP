@@ -24,6 +24,10 @@ User feedback on 2026-01-21T06:47:25Z added:
 - "увеличь ещё и контрастность в 2 раза" (also increase contrast by 2x)
 - "эффект должен длиться 3 секунды реального времени" (effect should last 3 real seconds)
 
+User feedback on 2026-01-21T07:01:33Z added:
+- "сделай замедление времени до 0.1" (make time slowdown to 0.1)
+- "как будто всё ещё не работает" (it's like it's still not working)
+
 ## Timeline of Events
 
 ### Phase 1: Initial Implementation (2026-01-21 ~06:00 UTC)
@@ -42,11 +46,40 @@ User tested the game and reported:
 - **Missing contrast** - Requested 2x contrast increase
 - **Duration too short** - Effect should last 3 real seconds
 
-### Phase 3: Root Cause Analysis (2026-01-21 07:00 UTC)
+### Phase 3: Second User Test (2026-01-21 07:01 UTC)
 
-Investigation revealed multiple issues:
+User tested again with updated code:
+- Log file: `logs/game_log_20260121_095700.txt`
+- Result: Effect still not working
+- Request: Change time slowdown from 0.25 to 0.1 (10x slowdown)
 
-#### Root Cause #1: Shader Parameter Clamping
+### Phase 4: Root Cause Analysis (2026-01-21 07:05 UTC)
+
+Investigation of second log file revealed critical issues:
+
+#### Root Cause #1: Wrong Logger Reference
+
+The manager was using incorrect logger path and method:
+
+```gdscript
+// BEFORE (buggy)
+var logger: Node = get_node_or_null("/root/Logger")
+if logger and logger.has_method("info"):
+    logger.info("[PenultimateHit] " + message)
+```
+
+**Problem:** The autoload is named `FileLogger`, not `Logger`, and the method is `log_info()`, not `info()`.
+
+```gdscript
+// AFTER (fixed)
+var logger: Node = get_node_or_null("/root/FileLogger")
+if logger and logger.has_method("log_info"):
+    logger.log_info("[PenultimateHit] " + message)
+```
+
+**Evidence:** No `[PenultimateHit]` messages appeared in `game_log_20260121_095700.txt` despite the autoload being registered.
+
+#### Root Cause #2: Shader Parameter Clamping (Phase 2)
 
 The saturation shader had a `hint_range(0.0, 1.0)` constraint:
 
@@ -57,13 +90,9 @@ uniform float saturation_boost : hint_range(0.0, 1.0) = 0.0;
 
 This clamped the saturation boost to a maximum of 1.0, even though we were setting it to 2.0 for 3x saturation. The effective multiplier was only 2x instead of 3x.
 
-#### Root Cause #2: No Logging
+#### Root Cause #3: C# Player Health Signal Connection
 
-The manager had no logging, making it impossible to verify from game logs whether:
-- The player was found
-- The signal connection was successful
-- The effect was being triggered
-- The shader parameters were being applied
+The C# Player uses a `HealthComponent` child node with `HealthChanged` signal. The original code only checked for `HealthComponent` if the player didn't have a direct `health_changed` signal, but this logic was flawed - both GDScript and C# players could have different signal patterns.
 
 #### Root Cause #3: No Contrast Effect
 
@@ -133,7 +162,7 @@ func _log(message: String) -> void:
 
 | Parameter | Value | Meaning |
 |-----------|-------|---------|
-| Time Scale | 0.25 | 25% speed (4x slower) |
+| Time Scale | 0.1 | 10% speed (10x slower) |
 | Saturation Boost | 2.0 | 3x saturation (1 + 2) |
 | Contrast Boost | 1.0 | 2x contrast (1 + 1) |
 | Enemy Saturation | 4.0 | 4x saturation multiplier |
@@ -146,12 +175,15 @@ func _log(message: String) -> void:
 
 ## Lessons Learned
 
-1. **Always verify shader parameter ranges** - `hint_range` in Godot shaders clamps values, even when set programmatically
-2. **Add logging from the start** - Makes debugging much easier, especially for effects that users can't verbally describe
-3. **Clarify duration behavior** - "Effect lasts 3 seconds" can mean game time or real time; always specify
-4. **Test with extreme values** - A saturation boost of 2.0 should be visually obvious; if not, something is wrong
+1. **Verify autoload names and method signatures** - The logger issue (`Logger` vs `FileLogger`, `info()` vs `log_info()`) caused silent failures with no visible error messages
+2. **Always verify shader parameter ranges** - `hint_range` in Godot shaders clamps values, even when set programmatically
+3. **Add logging from the start** - Makes debugging much easier, especially for effects that users can't verbally describe
+4. **Clarify duration behavior** - "Effect lasts 3 seconds" can mean game time or real time; always specify
+5. **Test with extreme values** - A saturation boost of 2.0 should be visually obvious; if not, something is wrong
+6. **C# and GDScript interop needs careful signal handling** - C# players may use different node structures (HealthComponent) with PascalCase signal names
 
 ## Related Files
 
-- [Game log from user testing](logs/game_log_20260121_093946.txt)
+- [First game log from user testing](logs/game_log_20260121_093946.txt)
+- [Second game log - effect still not working](game_log_20260121_095700.txt)
 - [Initial solution draft log](logs/solution-draft-log-pr-166.txt)

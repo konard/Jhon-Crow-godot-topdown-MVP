@@ -2,7 +2,7 @@ extends Node
 ## Autoload singleton for managing the "penultimate hit" effect.
 ##
 ## When the player is hit and has 1 HP or less remaining:
-## - Game speed slows to 0.25 (dramatic slowdown)
+## - Game speed slows to 0.1 (10x slowdown - very dramatic!)
 ## - Screen saturation increases 3x (3 times more vivid colors)
 ## - Screen contrast increases 2x (2 times more contrast)
 ## - Enemy saturation increases 4x (4 times more vivid colors)
@@ -12,7 +12,7 @@ extends Node
 ## is one hit away from death.
 
 ## The slowed down time scale during penultimate hit effect.
-const PENULTIMATE_TIME_SCALE: float = 0.25
+const PENULTIMATE_TIME_SCALE: float = 0.1
 
 ## Screen saturation multiplier (3x = boost of 2.0, since multiplier = 1.0 + boost).
 const SCREEN_SATURATION_BOOST: float = 2.0
@@ -84,7 +84,11 @@ func _ready() -> void:
 	_saturation_rect.visible = false
 	_effects_layer.add_child(_saturation_rect)
 
-	_log("PenultimateHitEffectsManager ready")
+	_log("PenultimateHitEffectsManager ready - Configuration:")
+	_log("  Time scale: %.2f (%.0fx slowdown)" % [PENULTIMATE_TIME_SCALE, 1.0 / PENULTIMATE_TIME_SCALE])
+	_log("  Saturation boost: %.1f (%.1fx)" % [SCREEN_SATURATION_BOOST, 1.0 + SCREEN_SATURATION_BOOST])
+	_log("  Contrast boost: %.1f (%.1fx)" % [SCREEN_CONTRAST_BOOST, 1.0 + SCREEN_CONTRAST_BOOST])
+	_log("  Effect duration: %.1f real seconds" % EFFECT_DURATION_REAL_SECONDS)
 
 
 func _process(_delta: float) -> void:
@@ -105,9 +109,9 @@ func _process(_delta: float) -> void:
 
 ## Log a message with the PenultimateHit prefix.
 func _log(message: String) -> void:
-	var logger: Node = get_node_or_null("/root/Logger")
-	if logger and logger.has_method("info"):
-		logger.info("[PenultimateHit] " + message)
+	var logger: Node = get_node_or_null("/root/FileLogger")
+	if logger and logger.has_method("log_info"):
+		logger.log_info("[PenultimateHit] " + message)
 	else:
 		print("[PenultimateHit] " + message)
 
@@ -124,25 +128,44 @@ func _find_player() -> void:
 	if not _player:
 		return
 
-	_log("Found player: %s" % _player.name)
+	_log("Found player: %s (class: %s)" % [_player.name, _player.get_class()])
+
+	var connected := false
 
 	# Try to connect to GDScript player's health_changed signal
 	if _player.has_signal("health_changed"):
 		if not _player.health_changed.is_connected(_on_player_health_changed):
 			_player.health_changed.connect(_on_player_health_changed)
 			_log("Connected to player health_changed signal (GDScript)")
-	else:
-		# Try to find HealthComponent (C# player uses this)
-		_health_component = _player.get_node_or_null("HealthComponent")
-		if _health_component and _health_component.has_signal("HealthChanged"):
+			connected = true
+
+	# Always try to find HealthComponent (C# player uses this)
+	# Do this regardless of whether we found health_changed signal
+	_health_component = _player.get_node_or_null("HealthComponent")
+	if _health_component:
+		_log("Found HealthComponent node")
+		if _health_component.has_signal("HealthChanged"):
 			if not _health_component.HealthChanged.is_connected(_on_player_health_changed_float):
 				_health_component.HealthChanged.connect(_on_player_health_changed_float)
-				_log("Connected to player HealthComponent.HealthChanged signal (C#)")
+				_log("Connected to HealthComponent.HealthChanged signal (C#)")
+				connected = true
+		else:
+			_log("WARNING: HealthComponent does not have HealthChanged signal")
+	else:
+		_log("No HealthComponent found on player")
+
+	if not connected:
+		_log("WARNING: Could not connect to any health signal!")
 
 	# Connect to died signal to end effect on death
-	if _player.has_signal("died") and not _player.died.is_connected(_on_player_died):
+	# Try HealthComponent's Died signal first (for C# player)
+	if _health_component and _health_component.has_signal("Died"):
+		if not _health_component.Died.is_connected(_on_player_died):
+			_health_component.Died.connect(_on_player_died)
+			_log("Connected to HealthComponent.Died signal (C#)")
+	elif _player.has_signal("died") and not _player.died.is_connected(_on_player_died):
 		_player.died.connect(_on_player_died)
-		_log("Connected to player died signal")
+		_log("Connected to player died signal (GDScript)")
 	elif _player.has_signal("Died") and not _player.Died.is_connected(_on_player_died):
 		_player.Died.connect(_on_player_died)
 		_log("Connected to player Died signal (C#)")
