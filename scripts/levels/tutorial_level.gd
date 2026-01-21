@@ -6,7 +6,7 @@ extends Node2D
 ## 2. Player shoots at targets (LMB)
 ## 3. Player switches fire mode (B key) - only if player has assault rifle
 ## 4. Player reloads using R -> F -> R sequence
-## 5. Player throws a grenade (G + RMB drag right, then hold G + press RMB, then RMB drag and release)
+## 5. Player throws a grenade (G + RMB drag right, then G+RMB held → release G, then RMB drag and release)
 ## 6. Shows completion message with Q restart hint
 ##
 ## On this tutorial level, grenades are infinite so player can practice.
@@ -394,11 +394,11 @@ func _update_prompt_text() -> void:
 		TutorialStep.RELOAD:
 			_prompt_label.text = "[R] [F] [R] Перезарядись"
 		TutorialStep.THROW_GRENADE:
-			# Simplified 2-step grenade throwing:
+			# 2-step grenade throwing:
 			# Step 1: G + RMB drag right = start timer (pin pulled)
-			# Step 2: Hold G, press RMB = ready to throw
+			# Step 2: G+RMB held → release G = ready to throw (only RMB held)
 			# Step 3: RMB drag and release = throw
-			_prompt_label.text = "[G+ПКМ вправо] [G+ПКМ] [ПКМ бросок]"
+			_prompt_label.text = "[G+ПКМ вправо] [G+ПКМ→отпусти G] [ПКМ бросок]"
 		TutorialStep.COMPLETED:
 			_prompt_label.text = ""
 

@@ -661,14 +661,15 @@ func _on_difficulty_changed(_new_difficulty: int) -> void:
 # Grenade System
 # ============================================================================
 
-## Grenade throw state machine (simplified 2-step mechanic).
+## Grenade throw state machine (2-step mechanic).
 ## Step 1: G + RMB drag right = start timer (pin pulled)
-## Step 2: Continue holding G, press RMB = ready to throw
+## Step 2: Hold G → press+hold RMB → release G = ready to throw (only RMB held)
 ## Step 3: RMB drag and release = throw
 enum GrenadeState {
-	IDLE,           # No grenade action
-	TIMER_STARTED,  # Step 1 complete: timer running, waiting for RMB
-	AIMING          # Step 2 complete: RMB held, drag to aim and release to throw
+	IDLE,                 # No grenade action
+	TIMER_STARTED,        # Step 1 complete: timer running, G held, waiting for RMB
+	WAITING_FOR_G_RELEASE,# Step 2 in progress: G+RMB held, waiting for G release
+	AIMING                # Step 2 complete: only RMB held, drag to aim and release to throw
 }
 
 ## Current grenade state.
@@ -683,12 +684,30 @@ var _aim_drag_start: Vector2 = Vector2.ZERO
 ## Time when the grenade timer was started (for tracking in case grenade explodes in hand).
 var _grenade_timer_start_time: float = 0.0
 
+## Player's rotation before throw (to restore after throw animation).
+var _player_rotation_before_throw: float = 0.0
 
-## Handle grenade input with simplified 2-step mechanic.
+## Whether player is in throw rotation animation.
+var _is_throw_rotating: bool = false
+
+## Target rotation for throw animation.
+var _throw_target_rotation: float = 0.0
+
+## Time remaining for throw rotation to restore.
+var _throw_rotation_restore_timer: float = 0.0
+
+## Duration of throw rotation animation in seconds.
+const THROW_ROTATION_DURATION: float = 0.15
+
+
+## Handle grenade input with 2-step mechanic.
 ## Step 1: G + RMB drag right = start timer (pull pin)
-## Step 2: Continue holding G, press RMB = ready to throw
+## Step 2: Hold G → press+hold RMB → release G = ready to throw
 ## Step 3: RMB drag and release = throw
 func _handle_grenade_input() -> void:
+	# Handle throw rotation animation
+	_handle_throw_rotation_animation(get_physics_process_delta_time())
+
 	# Check for active grenade explosion (explodes in hand after 4 seconds)
 	if _active_grenade != null and not is_instance_valid(_active_grenade):
 		# Grenade was destroyed (exploded)
@@ -700,6 +719,8 @@ func _handle_grenade_input() -> void:
 			_handle_grenade_idle_state()
 		GrenadeState.TIMER_STARTED:
 			_handle_grenade_timer_started_state()
+		GrenadeState.WAITING_FOR_G_RELEASE:
+			_handle_grenade_waiting_for_g_release_state()
 		GrenadeState.AIMING:
 			_handle_grenade_aiming_state()
 
@@ -731,8 +752,7 @@ func _handle_grenade_idle_state() -> void:
 		_grenade_drag_active = false
 
 
-## Handle TIMER_STARTED state: waiting for RMB to enter aiming state.
-## Simplified: no LMB step, just hold G and press RMB to aim.
+## Handle TIMER_STARTED state: waiting for RMB press while G is held (Step 2 part 1).
 func _handle_grenade_timer_started_state() -> void:
 	# G must still be held to continue
 	if not Input.is_action_pressed("grenade_prepare"):
@@ -741,21 +761,33 @@ func _handle_grenade_timer_started_state() -> void:
 		_drop_grenade_at_feet()
 		return
 
-	# Check for RMB press to enter aiming state
+	# Check for RMB press to enter WaitingForGRelease state
 	if Input.is_action_just_pressed("grenade_throw"):
-		_grenade_state = GrenadeState.AIMING
+		_grenade_state = GrenadeState.WAITING_FOR_G_RELEASE
 		_is_preparing_grenade = true
-		_aim_drag_start = get_global_mouse_position()
-		FileLogger.info("[Player.Grenade] Step 2: RMB pressed while G held - now aiming, drag and release RMB to throw")
+		FileLogger.info("[Player.Grenade] Step 2 part 1: G+RMB held - now release G to ready the throw")
 
 
-## Handle AIMING state: RMB held, drag to aim and release to throw.
-func _handle_grenade_aiming_state() -> void:
-	# G must still be held
-	if not Input.is_action_pressed("grenade_prepare"):
-		FileLogger.info("[Player.Grenade] Cancelled: G released during aiming")
-		_drop_grenade_at_feet()
+## Handle WAITING_FOR_G_RELEASE state: G+RMB both held, waiting for G release (Step 2 part 2).
+func _handle_grenade_waiting_for_g_release_state() -> void:
+	# If RMB is released before G, go back to TimerStarted
+	if not Input.is_action_pressed("grenade_throw"):
+		_grenade_state = GrenadeState.TIMER_STARTED
+		_is_preparing_grenade = false
+		FileLogger.info("[Player.Grenade] RMB released before G - back to waiting for RMB")
 		return
+
+	# If G is released while RMB is still held, enter Aiming state
+	if not Input.is_action_pressed("grenade_prepare"):
+		_grenade_state = GrenadeState.AIMING
+		_aim_drag_start = get_global_mouse_position()
+		FileLogger.info("[Player.Grenade] Step 2 complete: G released, RMB held - now aiming, drag and release RMB to throw")
+
+
+## Handle AIMING state: only RMB held (G released), drag to aim and release to throw.
+func _handle_grenade_aiming_state() -> void:
+	# In this state, G is already released (that's how we got here)
+	# We only care about RMB
 
 	# Check for RMB release (complete step 3 - throw!)
 	if Input.is_action_just_released("grenade_throw"):
@@ -828,6 +860,7 @@ func _reset_grenade_state() -> void:
 
 
 ## Throw the grenade based on aiming drag direction and distance.
+## Includes player rotation animation to prevent grenade hitting player.
 ## @param drag_end: The position where the mouse drag ended.
 func _throw_grenade(drag_end: Vector2) -> void:
 	if _active_grenade == null or not is_instance_valid(_active_grenade):
@@ -845,21 +878,32 @@ func _throw_grenade(drag_end: Vector2) -> void:
 		drag_distance = min_drag_distance
 		drag_vector = Vector2(1, 0)  # Default direction if no drag
 
-	# Clamp max drag distance to viewport length
-	var viewport := get_viewport()
-	var max_drag_distance := 1280.0  # Default viewport width
-	if viewport:
-		max_drag_distance = viewport.get_visible_rect().size.x
-	drag_distance = minf(drag_distance, max_drag_distance)
-
 	var throw_direction := drag_vector.normalized()
 
-	# Set grenade position to player's current position (in case player moved)
-	_active_grenade.global_position = global_position
+	# Increase throw sensitivity - multiply drag distance
+	var sensitivity_multiplier := 3.0
+	var adjusted_drag_distance := drag_distance * sensitivity_multiplier
 
-	# Set the throw velocity
+	# Clamp max drag distance to viewport length
+	var viewport := get_viewport()
+	var max_drag_distance := 1280.0 * sensitivity_multiplier  # Default viewport width with sensitivity
+	if viewport:
+		max_drag_distance = viewport.get_visible_rect().size.x * sensitivity_multiplier
+	adjusted_drag_distance = minf(adjusted_drag_distance, max_drag_distance)
+
+	FileLogger.info("[Player.Grenade] Throwing! Direction: %s, Drag: %.1f (adjusted: %.1f)" % [str(throw_direction), drag_distance, adjusted_drag_distance])
+
+	# Rotate player to face throw direction (prevents grenade hitting player when throwing upward)
+	_rotate_player_for_throw(throw_direction)
+
+	# Offset grenade spawn position in throw direction to avoid collision
+	var spawn_offset := 30.0  # Pixels in front of player
+	var spawn_position := global_position + throw_direction * spawn_offset
+	_active_grenade.global_position = spawn_position
+
+	# Set the throw velocity with adjusted distance
 	if _active_grenade.has_method("throw_grenade"):
-		_active_grenade.throw_grenade(throw_direction, drag_distance)
+		_active_grenade.throw_grenade(throw_direction, adjusted_drag_distance)
 
 	# Emit signal
 	grenade_thrown.emit()
@@ -869,10 +913,44 @@ func _throw_grenade(drag_end: Vector2) -> void:
 	if audio_manager and audio_manager.has_method("play_grenade_throw"):
 		audio_manager.play_grenade_throw(global_position)
 
-	FileLogger.info("[Player.Grenade] Thrown! Direction: %s, Distance: %.1f" % [str(throw_direction), drag_distance])
+	FileLogger.info("[Player.Grenade] Thrown! Direction: %s, Distance: %.1f" % [str(throw_direction), adjusted_drag_distance])
 
 	# Reset state (grenade is now independent)
 	_reset_grenade_state()
+
+
+## Rotate player to face throw direction (with swing animation).
+## Prevents grenade from hitting player when throwing upward.
+## @param throw_direction: The direction of the throw.
+func _rotate_player_for_throw(throw_direction: Vector2) -> void:
+	# Store current rotation to restore later
+	_player_rotation_before_throw = rotation
+
+	# Calculate target rotation (face throw direction)
+	_throw_target_rotation = throw_direction.angle()
+
+	# Apply rotation immediately
+	rotation = _throw_target_rotation
+
+	# Start restore timer
+	_is_throw_rotating = true
+	_throw_rotation_restore_timer = THROW_ROTATION_DURATION
+
+	FileLogger.info("[Player.Grenade] Player rotated for throw: %.2f -> %.2f" % [_player_rotation_before_throw, _throw_target_rotation])
+
+
+## Handle throw rotation animation - restore player rotation after throw.
+## @param delta: Time since last frame.
+func _handle_throw_rotation_animation(delta: float) -> void:
+	if not _is_throw_rotating:
+		return
+
+	_throw_rotation_restore_timer -= delta
+	if _throw_rotation_restore_timer <= 0:
+		# Restore original rotation
+		rotation = _player_rotation_before_throw
+		_is_throw_rotating = false
+		FileLogger.info("[Player.Grenade] Player rotation restored to %.2f" % _player_rotation_before_throw)
 
 
 ## Get current grenade count.

@@ -11,7 +11,7 @@ namespace GodotTopDownTemplate.Characters;
 /// Shoots bullets towards the mouse cursor on left mouse button.
 /// Supports both automatic (hold to fire) and semi-automatic (click per shot) weapons.
 /// Uses R-F-R key sequence for instant reload (press R, then F, then R again).
-/// Uses simplified 2-step grenade throwing: G+RMB drag right → hold G, press RMB → drag and release RMB.
+/// Grenade throwing: G+RMB drag right → hold G+RMB → release G → drag and release RMB to throw.
 /// </summary>
 public partial class Player : BaseCharacter
 {
@@ -102,16 +102,17 @@ public partial class Player : BaseCharacter
 
     /// <summary>
     /// Grenade state machine states.
-    /// Simplified 2-step mechanic:
+    /// 2-step mechanic:
     /// Step 1: G + RMB drag right → timer starts (pin pulled)
-    /// Step 2: Continue holding G, press RMB → ready to throw
-    /// Step 3: RMB drag and release → throw grenade
+    /// Step 2: Hold G → press+hold RMB → release G → ready to throw (only RMB held)
+    /// Step 3: Drag and release RMB → throw grenade
     /// </summary>
     private enum GrenadeState
     {
         Idle,           // No grenade action
-        TimerStarted,   // Step 1 complete - grenade timer running, waiting for RMB
-        Aiming          // Step 2 complete - RMB held, waiting for drag and release to throw
+        TimerStarted,   // Step 1 complete - grenade timer running, G held, waiting for RMB
+        WaitingForGRelease, // Step 2 in progress - G+RMB held, waiting for G release
+        Aiming          // Step 2 complete - only RMB held, waiting for drag and release to throw
     }
 
     /// <summary>
@@ -138,6 +139,31 @@ public partial class Player : BaseCharacter
     /// Minimum drag distance to confirm step 1 (in pixels).
     /// </summary>
     private const float MinDragDistanceForStep1 = 30.0f;
+
+    /// <summary>
+    /// Player's rotation before throw (to restore after throw animation).
+    /// </summary>
+    private float _playerRotationBeforeThrow = 0.0f;
+
+    /// <summary>
+    /// Whether player is in throw rotation animation.
+    /// </summary>
+    private bool _isThrowRotating = false;
+
+    /// <summary>
+    /// Target rotation for throw animation.
+    /// </summary>
+    private float _throwTargetRotation = 0.0f;
+
+    /// <summary>
+    /// Time remaining for throw rotation to restore.
+    /// </summary>
+    private float _throwRotationRestoreTimer = 0.0f;
+
+    /// <summary>
+    /// Duration of throw rotation animation.
+    /// </summary>
+    private const float ThrowRotationDuration = 0.15f;
 
     /// <summary>
     /// Signal emitted when reload sequence progresses.
@@ -305,6 +331,9 @@ public partial class Player : BaseCharacter
         Vector2 inputDirection = GetInputDirection();
         ApplyMovement(inputDirection, (float)delta);
 
+        // Handle throw rotation animation (restore player rotation after throw)
+        HandleThrowRotationAnimation((float)delta);
+
         // Handle grenade input first (so it can consume shoot input)
         HandleGrenadeInput();
 
@@ -315,7 +344,7 @@ public partial class Player : BaseCharacter
         }
 
         // Handle shooting input - support both automatic and semi-automatic weapons
-        // Allow shooting when not in grenade preparation (simplified 2-step mechanic doesn't use LMB)
+        // Allow shooting when not in grenade preparation
         bool canShoot = _grenadeState == GrenadeState.Idle || _grenadeState == GrenadeState.TimerStarted;
         if (canShoot)
         {
@@ -818,10 +847,10 @@ public partial class Player : BaseCharacter
     #region Grenade System
 
     /// <summary>
-    /// Handle grenade input with simplified 2-step mechanic.
+    /// Handle grenade input with 2-step mechanic.
     /// Step 1: G + RMB drag right → starts 4s timer (pin pulled)
-    /// Step 2: Continue holding G, press RMB → ready to throw
-    /// Step 3: RMB drag and release → throw grenade
+    /// Step 2: Hold G → press+hold RMB → release G → ready to throw (only RMB held)
+    /// Step 3: Drag and release RMB → throw grenade
     /// </summary>
     private void HandleGrenadeInput()
     {
@@ -840,6 +869,9 @@ public partial class Player : BaseCharacter
                 break;
             case GrenadeState.TimerStarted:
                 HandleGrenadeTimerStartedState();
+                break;
+            case GrenadeState.WaitingForGRelease:
+                HandleGrenadeWaitingForGReleaseState();
                 break;
             case GrenadeState.Aiming:
                 HandleGrenadeAimingState();
@@ -891,8 +923,7 @@ public partial class Player : BaseCharacter
 
     /// <summary>
     /// Handle grenade input in TimerStarted state.
-    /// Waiting for RMB to be pressed (Step 2 - ready to throw).
-    /// Simplified: no LMB step, just hold G and press RMB to aim.
+    /// Waiting for RMB to be pressed while G is held (Step 2 part 1).
     /// </summary>
     private void HandleGrenadeTimerStartedState()
     {
@@ -904,28 +935,45 @@ public partial class Player : BaseCharacter
             return;
         }
 
-        // Check if RMB is pressed to enter aiming state
+        // Check if RMB is pressed to enter WaitingForGRelease state
         if (Input.IsActionJustPressed("grenade_throw"))
+        {
+            _grenadeState = GrenadeState.WaitingForGRelease;
+            LogToFile("[Player.Grenade] Step 2 part 1: G+RMB held - now release G to ready the throw");
+        }
+    }
+
+    /// <summary>
+    /// Handle grenade input in WaitingForGRelease state.
+    /// G+RMB are both held, waiting for G to be released (Step 2 part 2).
+    /// </summary>
+    private void HandleGrenadeWaitingForGReleaseState()
+    {
+        // If RMB is released before G, go back to TimerStarted
+        if (!Input.IsActionPressed("grenade_throw"))
+        {
+            _grenadeState = GrenadeState.TimerStarted;
+            LogToFile("[Player.Grenade] RMB released before G - back to waiting for RMB");
+            return;
+        }
+
+        // If G is released while RMB is still held, enter Aiming state
+        if (!Input.IsActionPressed("grenade_prepare"))
         {
             _grenadeState = GrenadeState.Aiming;
             _grenadeDragStart = GetGlobalMousePosition();
-            LogToFile("[Player.Grenade] Step 2: RMB pressed while G held - now aiming, drag and release RMB to throw");
+            LogToFile("[Player.Grenade] Step 2 complete: G released, RMB held - now aiming, drag and release RMB to throw");
         }
     }
 
     /// <summary>
     /// Handle grenade input in Aiming state.
-    /// RMB is held, waiting for drag and release to throw.
+    /// Only RMB is held (G was released), waiting for drag and release to throw.
     /// </summary>
     private void HandleGrenadeAimingState()
     {
-        // If G is released, drop grenade at feet
-        if (!Input.IsActionPressed("grenade_prepare"))
-        {
-            LogToFile("[Player.Grenade] G released - dropping grenade at feet");
-            DropGrenadeAtFeet();
-            return;
-        }
+        // In this state, G is already released (that's how we got here)
+        // We only care about RMB
 
         // If RMB is released, throw the grenade
         if (Input.IsActionJustReleased("grenade_throw"))
@@ -1017,6 +1065,7 @@ public partial class Player : BaseCharacter
 
     /// <summary>
     /// Throw the grenade based on aiming drag direction and distance.
+    /// Includes player rotation animation to prevent grenade hitting player.
     /// </summary>
     /// <param name="dragEnd">The end position of the drag.</param>
     private void ThrowGrenade(Vector2 dragEnd)
@@ -1043,15 +1092,24 @@ public partial class Player : BaseCharacter
             dragDistance = 50.0f; // Minimum throw distance
         }
 
-        LogToFile($"[Player.Grenade] Throwing! Direction: {throwDirection}, Drag distance: {dragDistance}");
+        // Increase throw sensitivity - multiply drag distance
+        float sensitivityMultiplier = 3.0f;
+        float adjustedDragDistance = dragDistance * sensitivityMultiplier;
 
-        // Set grenade position to player's current position (in case player moved)
-        _activeGrenade.GlobalPosition = GlobalPosition;
+        LogToFile($"[Player.Grenade] Throwing! Direction: {throwDirection}, Drag distance: {dragDistance} (adjusted: {adjustedDragDistance})");
 
-        // Call the throw method on the grenade
+        // Rotate player to face throw direction (prevents grenade hitting player when throwing upward)
+        RotatePlayerForThrow(throwDirection);
+
+        // Offset grenade spawn position in throw direction to avoid collision
+        float spawnOffset = 30.0f; // Pixels in front of player
+        Vector2 spawnPosition = GlobalPosition + throwDirection * spawnOffset;
+        _activeGrenade.GlobalPosition = spawnPosition;
+
+        // Call the throw method on the grenade with adjusted distance
         if (_activeGrenade.HasMethod("throw_grenade"))
         {
-            _activeGrenade.Call("throw_grenade", throwDirection, dragDistance);
+            _activeGrenade.Call("throw_grenade", throwDirection, adjustedDragDistance);
         }
 
         // Emit signal
@@ -1064,10 +1122,54 @@ public partial class Player : BaseCharacter
             audioManager.Call("play_grenade_throw", GlobalPosition);
         }
 
-        LogToFile($"[Player.Grenade] Thrown! Direction: {throwDirection}, Distance: {dragDistance}");
+        LogToFile($"[Player.Grenade] Thrown! Direction: {throwDirection}, Distance: {adjustedDragDistance}");
 
         // Reset state (grenade is now independent)
         ResetGrenadeState();
+    }
+
+    /// <summary>
+    /// Rotate player to face throw direction (with swing animation).
+    /// Prevents grenade from hitting player when throwing upward.
+    /// </summary>
+    /// <param name="throwDirection">The direction of the throw.</param>
+    private void RotatePlayerForThrow(Vector2 throwDirection)
+    {
+        // Store current rotation to restore later
+        _playerRotationBeforeThrow = Rotation;
+
+        // Calculate target rotation (face throw direction)
+        _throwTargetRotation = throwDirection.Angle();
+
+        // Apply rotation immediately
+        Rotation = _throwTargetRotation;
+
+        // Start restore timer
+        _isThrowRotating = true;
+        _throwRotationRestoreTimer = ThrowRotationDuration;
+
+        LogToFile($"[Player.Grenade] Player rotated for throw: {_playerRotationBeforeThrow} -> {_throwTargetRotation}");
+    }
+
+    /// <summary>
+    /// Handle throw rotation animation - restore player rotation after throw.
+    /// </summary>
+    /// <param name="delta">Time since last frame.</param>
+    private void HandleThrowRotationAnimation(float delta)
+    {
+        if (!_isThrowRotating)
+        {
+            return;
+        }
+
+        _throwRotationRestoreTimer -= delta;
+        if (_throwRotationRestoreTimer <= 0)
+        {
+            // Restore original rotation
+            Rotation = _playerRotationBeforeThrow;
+            _isThrowRotating = false;
+            LogToFile($"[Player.Grenade] Player rotation restored to {_playerRotationBeforeThrow}");
+        }
     }
 
     /// <summary>
