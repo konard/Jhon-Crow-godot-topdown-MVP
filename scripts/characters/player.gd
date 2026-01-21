@@ -248,6 +248,10 @@ func _shoot() -> void:
 	# This prevents the player from being hit by their own bullets
 	bullet.shooter_id = get_instance_id()
 
+	# Set shooter position for distance-based penetration calculation
+	# Direct assignment - the bullet script defines this property
+	bullet.shooter_position = global_position
+
 	# Add bullet to the scene tree (parent's parent to avoid it being a child of player)
 	get_tree().current_scene.add_child(bullet)
 

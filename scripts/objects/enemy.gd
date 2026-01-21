@@ -2152,6 +2152,9 @@ func _shoot_with_inaccuracy() -> void:
 	bullet.global_position = global_position + direction * bullet_spawn_offset
 	bullet.direction = direction
 	bullet.shooter_id = get_instance_id()
+	# Set shooter position for distance-based penetration calculation
+	# Direct assignment - the bullet script defines this property
+	bullet.shooter_position = global_position
 	get_tree().current_scene.add_child(bullet)
 
 	# Play sounds
@@ -2203,6 +2206,9 @@ func _shoot_burst_shot() -> void:
 	bullet.global_position = global_position + direction * bullet_spawn_offset
 	bullet.direction = direction
 	bullet.shooter_id = get_instance_id()
+	# Set shooter position for distance-based penetration calculation
+	# Direct assignment - the bullet script defines this property
+	bullet.shooter_position = global_position
 	get_tree().current_scene.add_child(bullet)
 
 	# Play sounds
@@ -3443,6 +3449,9 @@ func _shoot() -> void:
 	# Set shooter ID to identify this enemy as the source
 	# This prevents enemies from detecting their own bullets in the threat sphere
 	bullet.shooter_id = get_instance_id()
+	# Set shooter position for distance-based penetration calculation
+	# Direct assignment - the bullet script defines this property
+	bullet.shooter_position = global_position
 
 	# Add bullet to the scene tree
 	get_tree().current_scene.add_child(bullet)
