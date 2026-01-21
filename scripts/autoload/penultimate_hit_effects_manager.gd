@@ -4,7 +4,9 @@ extends Node
 ## When the player is hit and has 1 HP or less remaining:
 ## - Game speed slows to 0.25 (dramatic slowdown)
 ## - Screen saturation increases 3x (3 times more vivid colors)
+## - Screen contrast increases 2x (2 times more contrast)
 ## - Enemy saturation increases 4x (4 times more vivid colors)
+## - Effect lasts for 3 real seconds (independent of time_scale)
 ##
 ## This effect creates a dramatic "last chance" moment when the player
 ## is one hit away from death.
@@ -15,8 +17,14 @@ const PENULTIMATE_TIME_SCALE: float = 0.25
 ## Screen saturation multiplier (3x = boost of 2.0, since multiplier = 1.0 + boost).
 const SCREEN_SATURATION_BOOST: float = 2.0
 
+## Screen contrast multiplier (2x = boost of 1.0, since multiplier = 1.0 + boost).
+const SCREEN_CONTRAST_BOOST: float = 1.0
+
 ## Enemy saturation multiplier (4x).
 const ENEMY_SATURATION_MULTIPLIER: float = 4.0
+
+## Duration of the effect in real seconds (independent of time_scale).
+const EFFECT_DURATION_REAL_SECONDS: float = 3.0
 
 ## The CanvasLayer for screen effects.
 var _effects_layer: CanvasLayer = null
@@ -30,9 +38,18 @@ var _is_effect_active: bool = false
 ## Reference to the player for health monitoring.
 var _player: Node = null
 
+## Reference to the HealthComponent (for C# player).
+var _health_component: Node = null
+
 ## Cached list of enemies with their original modulate colors.
 ## Key: enemy instance, Value: original modulate Color
 var _enemy_original_colors: Dictionary = {}
+
+## Timer for tracking effect duration (uses real time, not game time).
+var _effect_start_time: float = 0.0
+
+## Tracks the previous scene root to detect scene changes.
+var _previous_scene_root: Node = null
 
 
 func _ready() -> void:
@@ -57,12 +74,17 @@ func _ready() -> void:
 		var material := ShaderMaterial.new()
 		material.shader = shader
 		material.set_shader_parameter("saturation_boost", 0.0)
+		material.set_shader_parameter("contrast_boost", 0.0)
 		_saturation_rect.material = material
+		_log("Saturation shader loaded successfully")
 	else:
 		push_warning("PenultimateHitEffectsManager: Could not load saturation shader")
+		_log("WARNING: Could not load saturation shader!")
 
 	_saturation_rect.visible = false
 	_effects_layer.add_child(_saturation_rect)
+
+	_log("PenultimateHitEffectsManager ready")
 
 
 func _process(_delta: float) -> void:
@@ -70,9 +92,24 @@ func _process(_delta: float) -> void:
 	if _player == null:
 		_find_player()
 
+	# Check if effect should end based on real time duration
+	if _is_effect_active:
+		# Use OS.get_ticks_msec() for real time (not affected by time_scale)
+		var current_time := Time.get_ticks_msec() / 1000.0
+		var elapsed_real_time := current_time - _effect_start_time
 
-## Reference to the HealthComponent (for C# player).
-var _health_component: Node = null
+		if elapsed_real_time >= EFFECT_DURATION_REAL_SECONDS:
+			_log("Effect duration expired after %.2f real seconds" % elapsed_real_time)
+			_end_penultimate_effect()
+
+
+## Log a message with the PenultimateHit prefix.
+func _log(message: String) -> void:
+	var logger: Node = get_node_or_null("/root/Logger")
+	if logger and logger.has_method("info"):
+		logger.info("[PenultimateHit] " + message)
+	else:
+		print("[PenultimateHit] " + message)
 
 
 ## Find and connect to the player.
@@ -87,31 +124,39 @@ func _find_player() -> void:
 	if not _player:
 		return
 
+	_log("Found player: %s" % _player.name)
+
 	# Try to connect to GDScript player's health_changed signal
 	if _player.has_signal("health_changed"):
 		if not _player.health_changed.is_connected(_on_player_health_changed):
 			_player.health_changed.connect(_on_player_health_changed)
+			_log("Connected to player health_changed signal (GDScript)")
 	else:
 		# Try to find HealthComponent (C# player uses this)
 		_health_component = _player.get_node_or_null("HealthComponent")
 		if _health_component and _health_component.has_signal("HealthChanged"):
 			if not _health_component.HealthChanged.is_connected(_on_player_health_changed_float):
 				_health_component.HealthChanged.connect(_on_player_health_changed_float)
+				_log("Connected to player HealthComponent.HealthChanged signal (C#)")
 
 	# Connect to died signal to end effect on death
 	if _player.has_signal("died") and not _player.died.is_connected(_on_player_died):
 		_player.died.connect(_on_player_died)
+		_log("Connected to player died signal")
 	elif _player.has_signal("Died") and not _player.Died.is_connected(_on_player_died):
 		_player.Died.connect(_on_player_died)
+		_log("Connected to player Died signal (C#)")
 
 
 ## Called when player health changes (GDScript player, int values).
-func _on_player_health_changed(current: int, _maximum: int) -> void:
+func _on_player_health_changed(current: int, maximum: int) -> void:
+	_log("Player health changed: %d/%d" % [current, maximum])
 	_check_penultimate_state(float(current))
 
 
 ## Called when player health changes (C# player, float values from HealthComponent).
-func _on_player_health_changed_float(current: float, _maximum: float) -> void:
+func _on_player_health_changed_float(current: float, maximum: float) -> void:
+	_log("Player health changed (float): %.1f/%.1f" % [current, maximum])
 	_check_penultimate_state(current)
 
 
@@ -119,15 +164,20 @@ func _on_player_health_changed_float(current: float, _maximum: float) -> void:
 func _check_penultimate_state(current_health: float) -> void:
 	if current_health <= 1.0 and current_health > 0.0:
 		# Player has 1 HP or less but is still alive - trigger penultimate hit effect
-		_start_penultimate_effect()
-	else:
-		# Player healed above 1 HP or died - end effect
-		if _is_effect_active:
-			_end_penultimate_effect()
+		if not _is_effect_active:
+			_log("Triggering penultimate hit effect (HP: %.1f)" % current_health)
+			_start_penultimate_effect()
+		else:
+			# Effect already active, just reset the timer to extend duration
+			_effect_start_time = Time.get_ticks_msec() / 1000.0
+			_log("Extending penultimate hit effect duration (HP: %.1f)" % current_health)
+	# Note: We don't end the effect when health goes above 1 HP anymore
+	# The effect will end after the duration expires or on player death
 
 
 ## Called when player dies.
 func _on_player_died() -> void:
+	_log("Player died - ending penultimate effect")
 	# End effect when player dies
 	if _is_effect_active:
 		_end_penultimate_effect()
@@ -139,15 +189,26 @@ func _start_penultimate_effect() -> void:
 		return
 
 	_is_effect_active = true
+	_effect_start_time = Time.get_ticks_msec() / 1000.0
+
+	_log("Starting penultimate hit effect:")
+	_log("  - Time scale: %.2f" % PENULTIMATE_TIME_SCALE)
+	_log("  - Saturation boost: %.2f (%.1fx)" % [SCREEN_SATURATION_BOOST, 1.0 + SCREEN_SATURATION_BOOST])
+	_log("  - Contrast boost: %.2f (%.1fx)" % [SCREEN_CONTRAST_BOOST, 1.0 + SCREEN_CONTRAST_BOOST])
+	_log("  - Duration: %.1f real seconds" % EFFECT_DURATION_REAL_SECONDS)
 
 	# Slow down time to 0.25
 	Engine.time_scale = PENULTIMATE_TIME_SCALE
 
-	# Apply screen saturation (3x)
+	# Apply screen saturation (3x) and contrast (2x)
 	_saturation_rect.visible = true
 	var material := _saturation_rect.material as ShaderMaterial
 	if material:
 		material.set_shader_parameter("saturation_boost", SCREEN_SATURATION_BOOST)
+		material.set_shader_parameter("contrast_boost", SCREEN_CONTRAST_BOOST)
+		_log("Applied shader parameters: saturation=%.2f, contrast=%.2f" % [SCREEN_SATURATION_BOOST, SCREEN_CONTRAST_BOOST])
+	else:
+		_log("WARNING: No shader material found!")
 
 	# Apply enemy saturation (4x)
 	_apply_enemy_saturation()
@@ -159,15 +220,17 @@ func _end_penultimate_effect() -> void:
 		return
 
 	_is_effect_active = false
+	_log("Ending penultimate hit effect")
 
 	# Restore normal time
 	Engine.time_scale = 1.0
 
-	# Remove screen saturation
+	# Remove screen saturation and contrast
 	_saturation_rect.visible = false
 	var material := _saturation_rect.material as ShaderMaterial
 	if material:
 		material.set_shader_parameter("saturation_boost", 0.0)
+		material.set_shader_parameter("contrast_boost", 0.0)
 
 	# Restore enemy colors
 	_restore_enemy_colors()
@@ -178,6 +241,8 @@ func _apply_enemy_saturation() -> void:
 	_enemy_original_colors.clear()
 
 	var enemies := get_tree().get_nodes_in_group("enemies")
+	_log("Applying saturation to %d enemies" % enemies.size())
+
 	for enemy in enemies:
 		if not is_instance_valid(enemy):
 			continue
@@ -226,13 +291,10 @@ func _saturate_color(color: Color, multiplier: float) -> Color:
 
 ## Resets all effects (useful when restarting the scene).
 func reset_effects() -> void:
+	_log("Resetting all effects (scene change detected)")
 	_end_penultimate_effect()
 	_player = null
 	_health_component = null
-
-
-## Tracks the previous scene root to detect scene changes.
-var _previous_scene_root: Node = null
 
 
 ## Called when the scene tree structure changes.
