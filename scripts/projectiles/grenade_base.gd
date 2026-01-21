@@ -65,10 +65,16 @@ func _ready() -> void:
 	gravity_scale = 0.0  # Top-down, no gravity
 	linear_damp = 2.0  # Natural slowdown
 
+	# IMPORTANT: Start frozen to prevent physics interference while grenade follows player
+	# This fixes the bug where grenade was thrown from activation position instead of current position
+	# The physics engine can overwrite manual position updates on active RigidBody2D nodes
+	freeze = true
+	freeze_mode = RigidBody2D.FREEZE_MODE_KINEMATIC
+
 	# Connect to body entered for bounce effects
 	body_entered.connect(_on_body_entered)
 
-	FileLogger.info("[GrenadeBase] Grenade created at %s" % str(global_position))
+	FileLogger.info("[GrenadeBase] Grenade created at %s (frozen)" % str(global_position))
 
 
 func _physics_process(delta: float) -> void:
@@ -106,6 +112,10 @@ func activate_timer() -> void:
 ## @param direction: Normalized direction to throw.
 ## @param drag_distance: Distance of the drag in pixels.
 func throw_grenade(direction: Vector2, drag_distance: float) -> void:
+	# Unfreeze the grenade so physics can take over
+	# This must happen before setting velocity, otherwise the velocity won't be applied
+	freeze = false
+
 	# Calculate throw speed based on drag distance
 	var throw_speed := clampf(
 		drag_distance * drag_to_speed_multiplier,
@@ -119,7 +129,7 @@ func throw_grenade(direction: Vector2, drag_distance: float) -> void:
 	# Rotate to face direction
 	rotation = direction.angle()
 
-	FileLogger.info("[GrenadeBase] Thrown! Direction: %s, Speed: %.1f" % [str(direction), throw_speed])
+	FileLogger.info("[GrenadeBase] Thrown! Direction: %s, Speed: %.1f (unfrozen)" % [str(direction), throw_speed])
 
 
 ## Get the explosion effect radius. Override in subclasses.

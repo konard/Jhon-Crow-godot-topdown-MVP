@@ -1047,8 +1047,12 @@ public partial class Player : BaseCharacter
     {
         if (_activeGrenade != null && IsInstanceValid(_activeGrenade))
         {
+            // Set position to current player position before unfreezing
+            _activeGrenade.GlobalPosition = GlobalPosition;
+            // Unfreeze the grenade so physics works and it can explode
+            _activeGrenade.Freeze = false;
             // The grenade stays where it is (at player's feet)
-            LogToFile($"[Player.Grenade] Grenade dropped at feet at {_activeGrenade.GlobalPosition}");
+            LogToFile($"[Player.Grenade] Grenade dropped at feet at {_activeGrenade.GlobalPosition} (unfrozen)");
         }
         ResetGrenadeState();
     }
