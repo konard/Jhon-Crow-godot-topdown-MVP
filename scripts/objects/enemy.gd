@@ -548,6 +548,33 @@ var _last_known_player_position: Vector2 = Vector2.ZERO
 ## to that position even without line of sight to the player.
 var _pursuing_vulnerability_sound: bool = false
 
+## --- Player Cover Tracking ---
+## When player hides behind cover, the enemy tracks where they hid and aims at likely exit points.
+
+## Position where the player was last seen before going behind cover.
+var _player_last_visible_position: Vector2 = Vector2.ZERO
+
+## The obstacle/collider that the player hid behind.
+var _player_cover_obstacle: Object = null
+
+## Position of the cover obstacle's collision point (where raycast hit).
+var _player_cover_collision_point: Vector2 = Vector2.ZERO
+
+## Whether the enemy is actively tracking a player who hid behind cover.
+var _tracking_player_behind_cover: bool = false
+
+## Timer for alternating aim between cover exit points.
+var _cover_aim_alternate_timer: float = 0.0
+
+## Interval for alternating between exit points (seconds).
+const COVER_AIM_ALTERNATE_INTERVAL: float = 1.5
+
+## Current side to aim at (1.0 = one side, -1.0 = other side of cover).
+var _cover_aim_side: float = 1.0
+
+## Offset from cover center for aiming at exits (pixels).
+const COVER_EXIT_AIM_OFFSET: float = 80.0
+
 
 func _ready() -> void:
 	_initial_position = global_position
@@ -1299,7 +1326,7 @@ func _process_combat_state(delta: float) -> void:
 			var sidestep_dir := _find_sidestep_direction_for_clear_shot(direction_to_player)
 			if sidestep_dir != Vector2.ZERO:
 				velocity = sidestep_dir * combat_move_speed * 0.7
-				rotation = direction_to_player.angle()  # Keep facing player while sidestepping
+				_aim_at_player()  # Keep facing player/cover exit while sidestepping
 				_log_debug("COMBAT exposed: sidestepping to maintain clear shot")
 			else:
 				# No sidestep works - stay still, the shot might clear up
@@ -1351,7 +1378,7 @@ func _process_combat_state(delta: float) -> void:
 			move_direction = _apply_wall_avoidance(move_direction)
 
 			velocity = move_direction * combat_move_speed
-			rotation = direction_to_player.angle()  # Keep facing player
+			_aim_at_player()  # Keep facing player/cover exit
 
 			# Check if the new position now has a clear shot
 			if _is_bullet_spawn_clear(direction_to_player):
@@ -1404,11 +1431,10 @@ func _process_combat_state(delta: float) -> void:
 		move_direction = _apply_wall_avoidance(move_direction)
 
 		velocity = move_direction * combat_move_speed
-		rotation = direction_to_player.angle()  # Always face player
+		_aim_at_player()  # Face player or cover exit if player behind cover
 
 		# Can shoot while approaching (only after detection delay and if have clear shot)
 		if has_clear_shot and _detection_delay_elapsed and _shoot_timer >= shoot_cooldown:
-			_aim_at_player()
 			_shoot()
 			_shoot_timer = 0.0
 
@@ -3341,6 +3367,7 @@ func _get_wall_avoidance_weight(direction: Vector2) -> float:
 ## If detection_range is 0 or negative, uses unlimited detection range (line-of-sight only).
 ## This allows the enemy to see the player even outside the viewport if there's no obstacle.
 ## Also updates the continuous visibility timer and visibility ratio for lead prediction control.
+## Additionally tracks when player hides behind cover for intelligent aim behavior.
 func _check_player_visibility() -> void:
 	var was_visible := _can_see_player
 	_can_see_player = false
@@ -3370,7 +3397,15 @@ func _check_player_visibility() -> void:
 		# If we hit the player, we can see them
 		if collider == _player:
 			_can_see_player = true
-		# If we hit a wall/obstacle before the player, we can't see them
+		else:
+			# Hit an obstacle before the player - track cover information
+			# Only track if we were previously tracking the player (was_visible or tracking combat)
+			if was_visible or _current_state in [AIState.COMBAT, AIState.PURSUING, AIState.FLANKING, AIState.ASSAULT]:
+				_player_cover_obstacle = collider
+				_player_cover_collision_point = _raycast.get_collision_point()
+				_player_last_visible_position = _player.global_position
+				_tracking_player_behind_cover = true
+				_log_debug("Player hid behind cover at %s" % _player_cover_collision_point)
 	else:
 		# No collision between us and player - we have clear line of sight
 		_can_see_player = true
@@ -3381,6 +3416,13 @@ func _check_player_visibility() -> void:
 		# Calculate what fraction of the player's body is visible
 		# This is used to determine if lead prediction should be enabled
 		_player_visibility_ratio = _calculate_player_visibility_ratio()
+
+		# Player is visible again - reset cover tracking
+		if _tracking_player_behind_cover:
+			_tracking_player_behind_cover = false
+			_player_cover_obstacle = null
+			_player_cover_collision_point = Vector2.ZERO
+			_log_debug("Player emerged from cover, resuming direct tracking")
 	else:
 		# Lost line of sight - reset the timer and visibility ratio
 		_continuous_visibility_timer = 0.0
@@ -3388,10 +3430,13 @@ func _check_player_visibility() -> void:
 
 
 ## Aim the enemy sprite/direction at the player using gradual rotation.
+## When player is behind cover, aims at cover exit points instead of directly at player.
 func _aim_at_player() -> void:
 	if _player == null:
 		return
-	var direction := (_player.global_position - global_position).normalized()
+
+	var target_position := _get_aim_target_position()
+	var direction := (target_position - global_position).normalized()
 	var target_angle := direction.angle()
 
 	# Calculate the shortest rotation direction
@@ -3408,6 +3453,46 @@ func _aim_at_player() -> void:
 		rotation += rotation_speed * delta
 	else:
 		rotation -= rotation_speed * delta
+
+
+## Get the target position to aim at, accounting for whether player is behind cover.
+## Returns cover exit point if player is behind cover, otherwise player's actual position.
+## This should be used anywhere the enemy needs to determine where to aim/face.
+func _get_aim_target_position() -> Vector2:
+	if _player == null:
+		return global_position
+
+	# If player is behind cover, aim at cover exit points
+	if _tracking_player_behind_cover and _player_cover_collision_point != Vector2.ZERO:
+		return _get_cover_exit_aim_target()
+
+	# Otherwise aim at player's actual position
+	return _player.global_position
+
+
+## Get the target position to aim at when player is behind cover.
+## Calculates exit points on either side of the cover and alternates between them.
+func _get_cover_exit_aim_target() -> Vector2:
+	# Calculate direction from enemy to cover collision point
+	var to_cover := (_player_cover_collision_point - global_position).normalized()
+
+	# Calculate perpendicular direction for exit points
+	var perpendicular := Vector2(-to_cover.y, to_cover.x)
+
+	# Update alternation timer
+	var delta := get_physics_process_delta_time()
+	_cover_aim_alternate_timer += delta
+
+	# Switch sides periodically
+	if _cover_aim_alternate_timer >= COVER_AIM_ALTERNATE_INTERVAL:
+		_cover_aim_alternate_timer = 0.0
+		_cover_aim_side *= -1.0
+
+	# Calculate exit point position
+	var exit_offset := perpendicular * COVER_EXIT_AIM_OFFSET * _cover_aim_side
+	var exit_point := _player_cover_collision_point + exit_offset
+
+	return exit_point
 
 
 ## Shoot a bullet towards the player.
@@ -3779,6 +3864,13 @@ func _reset() -> void:
 	# Reset sound detection state
 	_last_known_player_position = Vector2.ZERO
 	_pursuing_vulnerability_sound = false
+	# Reset player cover tracking state
+	_player_last_visible_position = Vector2.ZERO
+	_player_cover_obstacle = null
+	_player_cover_collision_point = Vector2.ZERO
+	_tracking_player_behind_cover = false
+	_cover_aim_alternate_timer = 0.0
+	_cover_aim_side = 1.0
 	_initialize_health()
 	_initialize_ammo()
 	_update_health_visual()
@@ -4084,6 +4176,43 @@ func _draw() -> void:
 			draw_line(flank_pos + Vector2(8, 0), flank_pos + Vector2(0, 8), color_flank, 2.0)
 			draw_line(flank_pos + Vector2(0, 8), flank_pos + Vector2(-8, 0), color_flank, 2.0)
 			draw_line(flank_pos + Vector2(-8, 0), flank_pos + Vector2(0, -8), color_flank, 2.0)
+
+	# Draw player cover tracking visualization
+	if _tracking_player_behind_cover and _player_cover_collision_point != Vector2.ZERO:
+		var color_cover_point := Color.PURPLE  # Cover collision point
+		var color_exit_point := Color.LIME_GREEN  # Where enemy is aiming (exit point)
+
+		# Draw line to cover collision point
+		var to_cover_point := _player_cover_collision_point - global_position
+		draw_line(Vector2.ZERO, to_cover_point, color_cover_point, 1.5)
+		# Draw X at cover collision point
+		draw_line(to_cover_point + Vector2(-6, -6), to_cover_point + Vector2(6, 6), color_cover_point, 2.0)
+		draw_line(to_cover_point + Vector2(-6, 6), to_cover_point + Vector2(6, -6), color_cover_point, 2.0)
+
+		# Draw current aim target (exit point)
+		var aim_target := _get_cover_exit_aim_target()
+		var to_aim := aim_target - global_position
+		draw_line(Vector2.ZERO, to_aim, color_exit_point, 2.0)
+		# Draw circle at aim point
+		draw_circle(to_aim, 6.0, color_exit_point)
+
+		# Draw both potential exit points as small squares
+		var to_cover := (_player_cover_collision_point - global_position).normalized()
+		var perpendicular := Vector2(-to_cover.y, to_cover.x)
+		var exit1 := to_cover_point + perpendicular * COVER_EXIT_AIM_OFFSET
+		var exit2 := to_cover_point - perpendicular * COVER_EXIT_AIM_OFFSET
+		# Draw small squares at both exit positions
+		_draw_small_square(exit1, 4.0, Color(color_exit_point, 0.5))
+		_draw_small_square(exit2, 4.0, Color(color_exit_point, 0.5))
+
+
+## Draw a small square centered at the given position.
+func _draw_small_square(pos: Vector2, size: float, color: Color) -> void:
+	var half := size / 2.0
+	draw_line(pos + Vector2(-half, -half), pos + Vector2(half, -half), color, 1.5)
+	draw_line(pos + Vector2(half, -half), pos + Vector2(half, half), color, 1.5)
+	draw_line(pos + Vector2(half, half), pos + Vector2(-half, half), color, 1.5)
+	draw_line(pos + Vector2(-half, half), pos + Vector2(-half, -half), color, 1.5)
 
 
 ## Check if the player is "distracted" (not aiming at the enemy).
