@@ -64,6 +64,18 @@ const BULLET_RICOCHET: String = "res://assets/audio/пуля пролетела 
 const SHELL_RIFLE: String = "res://assets/audio/падает гильза автомата.wav"
 const SHELL_PISTOL: String = "res://assets/audio/падает гильза пистолета.wav"
 
+## Grenade sounds.
+## Activation sound (pin pull) - played when grenade timer starts.
+const GRENADE_ACTIVATION: String = "res://assets/audio/выдернут чека (активирована).wav"
+## Wall collision sound - played when grenade hits a wall.
+const GRENADE_WALL_HIT: String = "res://assets/audio/граната столкнулась со стеной.wav"
+## Landing sound - played when grenade comes to rest on the ground.
+const GRENADE_LANDING: String = "res://assets/audio/приземление гранаты.wav"
+## Flashbang explosion sound when player is in the affected zone.
+const FLASHBANG_EXPLOSION_IN_ZONE: String = "res://assets/audio/взрыв светошумовой гранаты игрок в зоне поражения.wav"
+## Flashbang explosion sound when player is outside the affected zone.
+const FLASHBANG_EXPLOSION_OUT_ZONE: String = "res://assets/audio/взрыв светошумовой гранаты игрок вне зоны поражения.wav"
+
 ## Volume settings (in dB).
 const VOLUME_SHOT: float = -5.0
 const VOLUME_RELOAD: float = -3.0
@@ -72,6 +84,8 @@ const VOLUME_HIT: float = -3.0
 const VOLUME_SHELL: float = -10.0
 const VOLUME_EMPTY_CLICK: float = -3.0
 const VOLUME_RICOCHET: float = -6.0
+const VOLUME_GRENADE: float = -3.0
+const VOLUME_GRENADE_EXPLOSION: float = 0.0
 
 ## Preloaded audio streams cache.
 var _audio_cache: Dictionary = {}
@@ -125,6 +139,12 @@ func _preload_all_sounds() -> void:
 	all_sounds.append_array(BULLET_RICOCHET_SOUNDS)
 	all_sounds.append(SHELL_RIFLE)
 	all_sounds.append(SHELL_PISTOL)
+	# Grenade sounds
+	all_sounds.append(GRENADE_ACTIVATION)
+	all_sounds.append(GRENADE_WALL_HIT)
+	all_sounds.append(GRENADE_LANDING)
+	all_sounds.append(FLASHBANG_EXPLOSION_IN_ZONE)
+	all_sounds.append(FLASHBANG_EXPLOSION_OUT_ZONE)
 
 	for path in all_sounds:
 		if not _audio_cache.has(path):
@@ -285,3 +305,30 @@ func play_shell_pistol(position: Vector2) -> void:
 ## Uses random selection from BULLET_RICOCHET_SOUNDS for variety.
 func play_bullet_ricochet(position: Vector2) -> void:
 	play_random_sound_2d(BULLET_RICOCHET_SOUNDS, position, VOLUME_RICOCHET)
+
+
+# ============================================================================
+# Grenade sounds
+# ============================================================================
+
+## Plays grenade activation sound (pin pull) at the given position.
+func play_grenade_activation(position: Vector2) -> void:
+	play_sound_2d(GRENADE_ACTIVATION, position, VOLUME_GRENADE)
+
+
+## Plays grenade wall collision sound at the given position.
+func play_grenade_wall_hit(position: Vector2) -> void:
+	play_sound_2d(GRENADE_WALL_HIT, position, VOLUME_GRENADE)
+
+
+## Plays grenade landing sound at the given position.
+func play_grenade_landing(position: Vector2) -> void:
+	play_sound_2d(GRENADE_LANDING, position, VOLUME_GRENADE)
+
+
+## Plays flashbang explosion sound based on whether player is in the affected zone.
+## @param position: Position of the explosion.
+## @param player_in_zone: True if player is within the flashbang effect radius.
+func play_flashbang_explosion(position: Vector2, player_in_zone: bool) -> void:
+	var sound_path: String = FLASHBANG_EXPLOSION_IN_ZONE if player_in_zone else FLASHBANG_EXPLOSION_OUT_ZONE
+	play_sound_2d(sound_path, position, VOLUME_GRENADE_EXPLOSION)

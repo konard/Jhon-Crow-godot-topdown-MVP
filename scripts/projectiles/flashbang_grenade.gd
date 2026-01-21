@@ -37,6 +37,53 @@ func _on_explode() -> void:
 	_spawn_flash_effect()
 
 
+## Override explosion sound to play zone-specific flashbang sounds.
+## Plays different sounds based on whether player is in the affected zone.
+func _play_explosion_sound() -> void:
+	# Check if player is in the effect radius
+	var player_in_zone := _is_player_in_zone()
+
+	# Play flashbang explosion sound via AudioManager
+	var audio_manager: Node = get_node_or_null("/root/AudioManager")
+	if audio_manager and audio_manager.has_method("play_flashbang_explosion"):
+		audio_manager.play_flashbang_explosion(global_position, player_in_zone)
+
+	# Also emit sound for AI awareness via SoundPropagation
+	var sound_propagation: Node = get_node_or_null("/root/SoundPropagation")
+	if sound_propagation and sound_propagation.has_method("emit_sound"):
+		var viewport := get_viewport()
+		var viewport_diagonal := 1469.0  # Default 1280x720 diagonal
+		if viewport:
+			var size := viewport.get_visible_rect().size
+			viewport_diagonal = sqrt(size.x * size.x + size.y * size.y)
+		var sound_range := viewport_diagonal * sound_range_multiplier
+		# 1 = EXPLOSION type, 2 = NEUTRAL source
+		sound_propagation.emit_sound(1, global_position, 2, self, sound_range)
+
+
+## Check if the player is within the flashbang effect radius.
+func _is_player_in_zone() -> bool:
+	# Try to find the player in common ways
+	var player: Node2D = null
+
+	# Check for player in "player" group
+	var players := get_tree().get_nodes_in_group("player")
+	if players.size() > 0 and players[0] is Node2D:
+		player = players[0] as Node2D
+
+	# Fallback: check for node named "Player" in current scene
+	if player == null:
+		var scene := get_tree().current_scene
+		if scene:
+			player = scene.get_node_or_null("Player") as Node2D
+
+	if player == null:
+		# No player found, assume outside zone (plays distant explosion sound)
+		return false
+
+	return is_in_effect_radius(player.global_position)
+
+
 ## Get the effect radius for this grenade type.
 func _get_effect_radius() -> float:
 	return effect_radius

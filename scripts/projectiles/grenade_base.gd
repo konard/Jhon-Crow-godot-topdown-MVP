@@ -28,11 +28,17 @@ class_name GrenadeBase
 ## At ~100px drag (short swing), produces gentle throw.
 @export var drag_to_speed_multiplier: float = 2.0
 
-## Friction/damping applied to slow the grenade.
-@export var ground_friction: float = 300.0
+## Friction/damping applied to slow the grenade (reduced for easier rolling).
+@export var ground_friction: float = 150.0
+
+## Bounce coefficient when hitting walls (0.0 = no bounce, 1.0 = full bounce).
+@export var wall_bounce: float = 0.4
 
 ## Sound range multiplier (2 = audible at 2 viewport distance).
 @export var sound_range_multiplier: float = 2.0
+
+## Minimum velocity to trigger landing sound (prevents multiple triggers).
+@export var landing_velocity_threshold: float = 50.0
 
 ## Whether the grenade timer has been activated.
 var _timer_active: bool = false
@@ -52,6 +58,15 @@ var _blink_timer: float = 0.0
 ## Blink interval - gets faster as explosion approaches.
 var _blink_interval: float = 0.5
 
+## Track if landing sound has been played (grenade has come to rest).
+var _has_landed: bool = false
+
+## Track if activation sound has been played.
+var _activation_sound_played: bool = false
+
+## Track previous velocity for landing detection.
+var _previous_velocity: Vector2 = Vector2.ZERO
+
 ## Signal emitted when the grenade explodes.
 signal exploded(position: Vector2, grenade: GrenadeBase)
 
@@ -63,7 +78,13 @@ func _ready() -> void:
 
 	# Set up physics
 	gravity_scale = 0.0  # Top-down, no gravity
-	linear_damp = 2.0  # Natural slowdown
+	linear_damp = 1.0  # Reduced for easier rolling
+
+	# Set up physics material for wall bouncing
+	var physics_material := PhysicsMaterial.new()
+	physics_material.bounce = wall_bounce
+	physics_material.friction = 0.3  # Low friction for rolling
+	physics_material_override = physics_material
 
 	# Connect to body entered for bounce effects
 	body_entered.connect(_on_body_entered)
@@ -83,6 +104,15 @@ func _physics_process(delta: float) -> void:
 		else:
 			linear_velocity -= friction_force
 
+	# Check for landing (grenade comes to near-stop after being thrown)
+	if not _has_landed and _timer_active:
+		var current_speed := linear_velocity.length()
+		var previous_speed := _previous_velocity.length()
+		# Grenade has landed when it was moving fast and now nearly stopped
+		if previous_speed > landing_velocity_threshold and current_speed < landing_velocity_threshold:
+			_on_grenade_landed()
+	_previous_velocity = linear_velocity
+
 	# Update timer if active
 	if _timer_active:
 		_time_remaining -= delta
@@ -99,6 +129,12 @@ func activate_timer() -> void:
 		return
 	_timer_active = true
 	_time_remaining = fuse_time
+
+	# Play activation sound (pin pull)
+	if not _activation_sound_played:
+		_activation_sound_played = true
+		_play_activation_sound()
+
 	FileLogger.info("[GrenadeBase] Timer activated! %.1f seconds until explosion" % fuse_time)
 
 
@@ -199,11 +235,9 @@ func _update_blink_effect(delta: float) -> void:
 
 ## Handle collision with bodies (bounce off walls).
 func _on_body_entered(body: Node) -> void:
-	# Play bounce sound if hitting a wall
+	# Play wall collision sound if hitting a wall/obstacle
 	if body is StaticBody2D or body is TileMap:
-		var audio_manager: Node = get_node_or_null("/root/AudioManager")
-		if audio_manager and audio_manager.has_method("play_grenade_bounce"):
-			audio_manager.play_grenade_bounce(global_position)
+		_play_wall_collision_sound()
 
 
 ## Check if a position is within the grenade's effect radius.
@@ -224,3 +258,26 @@ func is_timer_active() -> bool:
 ## Check if the grenade has exploded.
 func has_exploded() -> bool:
 	return _has_exploded
+
+
+## Play activation sound (pin pull) when grenade timer is activated.
+func _play_activation_sound() -> void:
+	var audio_manager: Node = get_node_or_null("/root/AudioManager")
+	if audio_manager and audio_manager.has_method("play_grenade_activation"):
+		audio_manager.play_grenade_activation(global_position)
+
+
+## Play wall collision sound when grenade hits a wall.
+func _play_wall_collision_sound() -> void:
+	var audio_manager: Node = get_node_or_null("/root/AudioManager")
+	if audio_manager and audio_manager.has_method("play_grenade_wall_hit"):
+		audio_manager.play_grenade_wall_hit(global_position)
+
+
+## Called when grenade comes to rest on the ground.
+func _on_grenade_landed() -> void:
+	_has_landed = true
+	var audio_manager: Node = get_node_or_null("/root/AudioManager")
+	if audio_manager and audio_manager.has_method("play_grenade_landing"):
+		audio_manager.play_grenade_landing(global_position)
+	FileLogger.info("[GrenadeBase] Grenade landed at %s" % str(global_position))
