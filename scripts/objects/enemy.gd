@@ -63,7 +63,8 @@ enum BehaviorMode {
 
 ## Whether FOV checking is enabled.
 ## When true, targets must be within the FOV cone to be visible.
-@export var fov_enabled: bool = true
+## Defaults to false (disabled) - controlled by experimental settings menu.
+@export var fov_enabled: bool = false
 
 ## Time between shots in seconds.
 ## Default matches assault rifle fire rate (10 shots/second = 0.1s cooldown).
@@ -585,6 +586,14 @@ var _cover_aim_side: float = 1.0
 ## Offset from cover center for aiming at exits (pixels).
 const COVER_EXIT_AIM_OFFSET: float = 80.0
 
+## Hysteresis timer for cover tracking - how long player must be visible before resetting cover tracking.
+## This prevents rapid flickering between "behind cover" and "visible" states.
+var _cover_tracking_visible_timer: float = 0.0
+
+## Minimum time player must be continuously visible before resetting cover tracking state.
+## This provides hysteresis to prevent state flickering at obstacle edges.
+const COVER_TRACKING_HYSTERESIS_TIME: float = 0.3
+
 
 func _ready() -> void:
 	_initial_position = global_position
@@ -612,6 +621,9 @@ func _ready() -> void:
 	# Preload bullet scene if not set in inspector
 	if bullet_scene == null:
 		bullet_scene = preload("res://scenes/projectiles/Bullet.tscn")
+
+	# Connect to GameManager for experimental FOV setting
+	_connect_experimental_fov_signal()
 
 
 ## Initialize health with random value between min and max.
@@ -913,6 +925,26 @@ func _connect_debug_mode_signal() -> void:
 func _on_debug_mode_toggled(enabled: bool) -> void:
 	debug_label_enabled = enabled
 	_update_debug_label()
+	queue_redraw()  # Redraw to show/hide FOV cone
+
+
+## Connect to GameManager for experimental FOV setting.
+## This allows the FOV to be toggled via the experimental settings menu.
+func _connect_experimental_fov_signal() -> void:
+	var game_manager: Node = get_node_or_null("/root/GameManager")
+	if game_manager:
+		# Connect to experimental FOV toggle signal
+		if game_manager.has_signal("experimental_fov_toggled"):
+			game_manager.experimental_fov_toggled.connect(_on_experimental_fov_toggled)
+		# Sync with current experimental FOV state
+		var fov_setting = game_manager.get("experimental_fov_enabled")
+		if fov_setting != null:
+			fov_enabled = fov_setting
+
+
+## Called when experimental FOV setting is toggled via settings menu.
+func _on_experimental_fov_toggled(enabled: bool) -> void:
+	fov_enabled = enabled
 	queue_redraw()  # Redraw to show/hide FOV cone
 
 
@@ -3463,17 +3495,24 @@ func _check_player_visibility() -> void:
 		# This is used to determine if lead prediction should be enabled
 		_player_visibility_ratio = _calculate_player_visibility_ratio()
 
-		# Player is visible again - reset cover tracking
+		# Player is visible - use hysteresis before resetting cover tracking
+		# This prevents rapid flickering between "behind cover" and "visible" states
 		if _tracking_player_behind_cover:
-			_tracking_player_behind_cover = false
-			_player_cover_obstacle = null
-			_player_cover_collision_point = Vector2.ZERO
-			_log_debug("Player emerged from cover, resuming direct tracking")
-			_log_to_file("Player emerged from cover, resuming direct tracking")
+			_cover_tracking_visible_timer += get_physics_process_delta_time()
+			# Only reset cover tracking after player has been continuously visible
+			if _cover_tracking_visible_timer >= COVER_TRACKING_HYSTERESIS_TIME:
+				_tracking_player_behind_cover = false
+				_player_cover_obstacle = null
+				_player_cover_collision_point = Vector2.ZERO
+				_cover_tracking_visible_timer = 0.0
+				_log_debug("Player emerged from cover, resuming direct tracking")
+				_log_to_file("Player emerged from cover, resuming direct tracking")
 	else:
 		# Lost line of sight - reset the timer and visibility ratio
 		_continuous_visibility_timer = 0.0
 		_player_visibility_ratio = 0.0
+		# Reset the hysteresis timer since player is behind cover again
+		_cover_tracking_visible_timer = 0.0
 
 
 ## Aim the enemy sprite/direction at the player using gradual rotation.
@@ -3921,6 +3960,7 @@ func _reset() -> void:
 	_tracking_player_behind_cover = false
 	_cover_aim_alternate_timer = 0.0
 	_cover_aim_side = 1.0
+	_cover_tracking_visible_timer = 0.0
 	_initialize_health()
 	_initialize_ammo()
 	_update_health_visual()

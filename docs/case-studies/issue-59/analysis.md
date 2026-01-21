@@ -8,10 +8,12 @@
 - When player hides behind cover, enemy aims at where player might emerge
 - Enemy alternates aim between two exit points (above and below cover)
 - When player becomes visible again, normal aiming resumes
+- Enemy should NOT rotate toward player when there's an obstacle blocking view
 
 **Actual behavior (bug):**
 - Enemy continues to track player's actual position even behind cover
 - Enemy rotation appears correct but bullets still shoot toward hidden player
+- Rapid flickering between "behind cover" and "visible" states causes unstable behavior
 
 ## Timeline of Investigation
 
@@ -40,101 +42,145 @@
 
 User provided game log (`game_log_20260121_053401.txt`) showing the issue still occurs.
 
+### Session 3: Root Cause Found and Fixed (2026-01-21 ~02:46)
+
+Found that `_shoot()` was using `_player.global_position` directly, ignoring cover tracking.
+
+### Session 4: User Reports Continued Issues (2026-01-21 ~02:55)
+
+User reported two new issues:
+1. **FOV (view limitation) should be experimental** - Move to settings menu, disabled by default
+2. **Enemy still rotates toward player behind obstacle** - In combat mode, enemy tracks player through walls
+
+New game logs provided:
+- `game_log_20260121_054813.txt` (892KB)
+- `game_log_20260121_055535.txt` (3.4KB)
+
 ## Root Cause Analysis
 
-### Log Analysis
+### Session 4 Log Analysis
 
-Searched game log for cover-related messages:
-- Found many `IN_COVER` state transitions (enemy taking cover from player)
-- **No "Player hid behind cover" messages appeared**
-- This indicates `_log_debug()` messages were not being logged
+Analysis of `game_log_20260121_054813.txt` revealed a critical problem:
 
-### Code Review
-
-Examined `_log_debug()` function:
-```gdscript
-func _log_debug(message: String) -> void:
-    if debug_logging:
-        print("[Enemy %s] %s" % [name, message])
+```
+[05:48:33] [ENEMY] [Enemy10] Player hid behind cover at (1144.516, 1626), obstacle: HallTable
+[05:48:33] [ENEMY] [Enemy10] Player emerged from cover, resuming direct tracking
+[05:48:33] [ENEMY] [Enemy10] Player hid behind cover at (1144.516, 1626), obstacle: HallTable
+[05:48:33] [ENEMY] [Enemy10] Player emerged from cover, resuming direct tracking
+...
 ```
 
-The `debug_logging` variable is `false` by default, so cover tracking debug messages never appeared in the log.
+**Rapid state flickering** - The enemy is rapidly alternating between "behind cover" and "visible" states multiple times per second.
 
-### Critical Bug Found
+### Root Cause #1: Visibility Flickering
 
-**In `_shoot()` function (line 3507):**
-```gdscript
-func _shoot() -> void:
-    ...
-    var target_position := _player.global_position  # <-- BUG: Always uses player's actual position!
+The cover detection system checks visibility every physics frame without any hysteresis. At the edge of cover/obstacles, the raycast result can change frame-to-frame based on:
+- Slight enemy rotation changes
+- Sub-pixel position changes
+- Physics state variations
 
-    # Apply lead prediction if enabled
-    if enable_lead_prediction:
-        target_position = _calculate_lead_prediction()
-    ...
-```
+This causes `_tracking_player_behind_cover` to flip rapidly, which:
+- Spams log messages
+- Makes enemy aim unstable
+- Prevents consistent cover tracking behavior
 
-The `_shoot()` function completely ignores the cover tracking system and always shoots at `_player.global_position`.
+### Root Cause #2: FOV Default Enabled
 
-**Result:** The enemy visually rotates toward cover exit points (via `_aim_at_player()` using `_get_aim_target_position()`), but the bullets are still fired at the player's actual hidden position.
-
-### Additional Issues Found
-
-1. **No logging to file** - Cover tracking uses `_log_debug()` which only prints to console when `debug_logging=true`, not to the file logger. Important events should use `_log_to_file()`.
-
-2. **Shooting behavior inconsistency** - Even if the enemy can't see the player, bullets may still be fired in their direction if enemy is in certain states.
+The FOV (field of view) limitation was enabled by default (`fov_enabled = true`), which:
+- Changed enemy behavior significantly
+- Was not requested to be on by default
+- Should be an experimental/optional feature
 
 ## Solution
 
-### Fix 1: Make `_shoot()` Use Cover Exit Position
+### Fix 1: Add Hysteresis to Cover Tracking
 
-The `_shoot()` function should use `_get_aim_target_position()` when determining where to shoot:
+Added a timer-based hysteresis system to prevent rapid state flickering:
 
 ```gdscript
-func _shoot() -> void:
-    ...
-    # When player is behind cover, shoot at cover exit points, not player position
-    var base_target := _get_aim_target_position()
-    var target_position := base_target
+## Hysteresis timer for cover tracking
+var _cover_tracking_visible_timer: float = 0.0
 
-    # Only apply lead prediction when shooting at visible player
-    if enable_lead_prediction and not _tracking_player_behind_cover:
-        target_position = _calculate_lead_prediction()
-    ...
+## Minimum time player must be continuously visible before resetting cover tracking
+const COVER_TRACKING_HYSTERESIS_TIME: float = 0.3
+
+# In _check_player_visibility():
+if _tracking_player_behind_cover:
+    _cover_tracking_visible_timer += delta
+    # Only reset after player has been continuously visible
+    if _cover_tracking_visible_timer >= COVER_TRACKING_HYSTERESIS_TIME:
+        _tracking_player_behind_cover = false
+        # ... reset other state
 ```
 
-### Fix 2: Add File Logging for Cover Tracking
+This ensures:
+- Cover tracking state is stable
+- No rapid flickering in logs
+- Enemy behavior is predictable
 
-Add `_log_to_file()` calls for important cover tracking events:
-- When player hides behind cover
-- When player emerges from cover
-- When switching aim sides
+### Fix 2: Move FOV to Experimental Settings
 
-### Fix 3: Prevent Shooting When Player Not Visible
+Created new experimental settings menu accessible from pause menu (ESC):
 
-Consider whether enemies should shoot at all when tracking a player behind cover, or only aim there as a deterrent. Current implementation allows shooting at cover exits which seems intentional for suppressive fire.
+1. Created `scripts/ui/experimental_menu.gd` - Menu controller
+2. Created `scenes/ui/ExperimentalMenu.tscn` - Menu scene
+3. Updated `scripts/ui/pause_menu.gd` - Added "Experimental" button
+4. Updated `scenes/ui/PauseMenu.tscn` - Added button node
+5. Updated `scripts/autoload/game_manager.gd` - Added `experimental_fov_enabled` setting
+6. Updated `scripts/objects/enemy.gd`:
+   - Changed default `fov_enabled = false`
+   - Added signal connection to sync with game manager setting
+
+### Fix 3: Ensure Cover Tracking Uses Proper Aiming (Previous Session)
+
+The `_shoot()` function now uses `_get_aim_target_position()` which respects cover tracking state.
 
 ## Files Modified
 
-- `scripts/objects/enemy.gd` - Main implementation
+- `scripts/objects/enemy.gd` - Cover hysteresis, FOV setting sync
+- `scripts/autoload/game_manager.gd` - Experimental FOV setting
+- `scripts/ui/pause_menu.gd` - Experimental menu integration
+- `scripts/ui/experimental_menu.gd` - NEW: Menu controller
+- `scenes/ui/PauseMenu.tscn` - Experimental button
+- `scenes/ui/ExperimentalMenu.tscn` - NEW: Menu scene
 
 ## Test Plan
 
-1. Enable debug mode (F7) in game
-2. Find enemy and engage in combat
-3. Hide behind cover/obstacle
-4. Verify:
-   - Purple X appears at cover collision point
-   - Lime green line shows aim target at cover exit
-   - Enemy bullets are actually fired at cover exit points (not at player)
-   - Enemy alternates aim between both exit points
-5. Emerge from cover and verify normal tracking resumes
+1. **Test Cover Tracking Stability:**
+   - Enable debug mode (F7)
+   - Engage enemy and hide behind cover
+   - Verify logs don't show rapid flickering
+   - Verify purple X and lime green lines remain stable
+
+2. **Test FOV Setting:**
+   - Press ESC to open pause menu
+   - Click "Experimental"
+   - Toggle "Enemy View Limitation (FOV)"
+   - Verify enemies have 360° vision when disabled (default)
+   - Verify enemies have 100° FOV when enabled
+
+3. **Test Combat Behavior:**
+   - With FOV disabled, verify enemies detect player from any direction
+   - Hide behind obstacle, verify enemy doesn't shoot through it
+   - Verify enemy aims at cover exit points, not player position
 
 ## Related Issues and PRs
 
 - PR #156: Adds FOV (field of view) to enemies - merged into this fix
 - Issue #66: Original FOV request
 
+## Lessons Learned
+
+1. **State changes need hysteresis** - When transitioning between states based on continuous conditions (like visibility raycasts), always add a minimum duration requirement to prevent flickering.
+
+2. **Experimental features should be opt-in** - New features that significantly change gameplay should default to disabled and be clearly labeled as experimental.
+
+3. **Visual and actual behavior must match** - The enemy rotation and bullet direction must use the same targeting logic.
+
 ## Conclusion
 
-The bug was a classic case of "visual feedback not matching actual behavior" - the enemy appeared to aim correctly (rotation) but bullets went to the wrong target. The fix ensures both visual aim AND bullet trajectory respect the cover exit position system.
+This session addressed two user-reported issues:
+1. FOV is now an experimental setting, disabled by default, accessible via pause menu
+2. Cover tracking state is now stable with hysteresis, preventing rapid state flickering
+
+The cover tracking system now provides smooth, predictable behavior when the player hides behind obstacles.

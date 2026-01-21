@@ -23,6 +23,12 @@ var player: Node2D = null
 ## Toggle with F7 key - works in both editor and exported builds.
 var debug_mode_enabled: bool = false
 
+## Whether experimental FOV (field of view) limitation for enemies is enabled.
+## When disabled, enemies have 360 degree vision.
+## When enabled, enemies have limited FOV (100 degrees by default).
+## Disabled by default as an experimental feature.
+var experimental_fov_enabled: bool = false
+
 ## Signal emitted when an enemy is killed (for screen effects).
 signal enemy_killed
 
@@ -34,6 +40,9 @@ signal stats_updated
 
 ## Signal emitted when debug mode is toggled (F7 key).
 signal debug_mode_toggled(enabled: bool)
+
+## Signal emitted when experimental FOV setting changes.
+signal experimental_fov_toggled(enabled: bool)
 
 
 func _ready() -> void:
@@ -131,3 +140,12 @@ func _log_to_file(message: String) -> void:
 		file_logger.log_info("[GameManager] " + message)
 	else:
 		print("[GameManager] " + message)
+
+
+## Sets the experimental FOV enabled state.
+## When enabled, enemies will use limited field of view (100 degrees).
+## When disabled, enemies will have 360 degree vision (default).
+func set_experimental_fov_enabled(enabled: bool) -> void:
+	experimental_fov_enabled = enabled
+	experimental_fov_toggled.emit(enabled)
+	_log_to_file("Experimental FOV toggled: %s" % ("ON" if enabled else "OFF"))

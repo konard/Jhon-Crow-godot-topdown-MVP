@@ -1,0 +1,46 @@
+[05:55:35] [INFO] ============================================================
+[05:55:35] [INFO] GAME LOG STARTED
+[05:55:35] [INFO] ============================================================
+[05:55:35] [INFO] Timestamp: 2026-01-21T05:55:35
+[05:55:35] [INFO] Log file: I:/Загрузки/godot exe/game_log_20260121_055535.txt
+[05:55:35] [INFO] Executable: I:/Загрузки/godot exe/Godot-Top-Down-Template.exe
+[05:55:35] [INFO] OS: Windows
+[05:55:35] [INFO] Debug build: false
+[05:55:35] [INFO] Engine version: 4.3-stable (official)
+[05:55:35] [INFO] Project: Godot Top-Down Template
+[05:55:35] [INFO] ------------------------------------------------------------
+[05:55:35] [INFO] [GameManager] GameManager ready
+[05:55:35] [INFO] [SoundPropagation] SoundPropagation autoload initialized
+[05:55:35] [INFO] [SoundPropagation] Registered listener: Enemy1 (total: 1)
+[05:55:35] [ENEMY] [Enemy1] Registered as sound listener
+[05:55:35] [ENEMY] [Enemy1] Enemy spawned at (300, 350), health: 4, behavior: GUARD, player_found: yes
+[05:55:35] [INFO] [SoundPropagation] Registered listener: Enemy2 (total: 2)
+[05:55:35] [ENEMY] [Enemy2] Registered as sound listener
+[05:55:35] [ENEMY] [Enemy2] Enemy spawned at (400, 550), health: 3, behavior: GUARD, player_found: yes
+[05:55:35] [INFO] [SoundPropagation] Registered listener: Enemy3 (total: 3)
+[05:55:35] [ENEMY] [Enemy3] Registered as sound listener
+[05:55:35] [ENEMY] [Enemy3] Enemy spawned at (700, 750), health: 2, behavior: GUARD, player_found: yes
+[05:55:35] [INFO] [SoundPropagation] Registered listener: Enemy4 (total: 4)
+[05:55:35] [ENEMY] [Enemy4] Registered as sound listener
+[05:55:35] [ENEMY] [Enemy4] Enemy spawned at (800, 900), health: 3, behavior: GUARD, player_found: yes
+[05:55:35] [INFO] [SoundPropagation] Registered listener: Enemy5 (total: 5)
+[05:55:35] [ENEMY] [Enemy5] Registered as sound listener
+[05:55:35] [ENEMY] [Enemy5] Enemy spawned at (1700, 350), health: 4, behavior: GUARD, player_found: yes
+[05:55:35] [INFO] [SoundPropagation] Registered listener: Enemy6 (total: 6)
+[05:55:35] [ENEMY] [Enemy6] Registered as sound listener
+[05:55:35] [ENEMY] [Enemy6] Enemy spawned at (1950, 450), health: 3, behavior: GUARD, player_found: yes
+[05:55:35] [INFO] [SoundPropagation] Registered listener: Enemy7 (total: 7)
+[05:55:35] [ENEMY] [Enemy7] Registered as sound listener
+[05:55:35] [ENEMY] [Enemy7] Enemy spawned at (1606.114, 893.8859), health: 2, behavior: PATROL, player_found: yes
+[05:55:35] [INFO] [SoundPropagation] Registered listener: Enemy8 (total: 8)
+[05:55:35] [ENEMY] [Enemy8] Registered as sound listener
+[05:55:35] [ENEMY] [Enemy8] Enemy spawned at (1900, 1450), health: 4, behavior: GUARD, player_found: yes
+[05:55:35] [INFO] [SoundPropagation] Registered listener: Enemy9 (total: 9)
+[05:55:35] [ENEMY] [Enemy9] Registered as sound listener
+[05:55:35] [ENEMY] [Enemy9] Enemy spawned at (2100, 1550), health: 3, behavior: GUARD, player_found: yes
+[05:55:35] [INFO] [SoundPropagation] Registered listener: Enemy10 (total: 10)
+[05:55:35] [ENEMY] [Enemy10] Registered as sound listener
+[05:55:35] [ENEMY] [Enemy10] Enemy spawned at (1200, 1550), health: 2, behavior: PATROL, player_found: yes
+[05:55:36] [INFO] ------------------------------------------------------------
+[05:55:36] [INFO] GAME LOG ENDED: 2026-01-21T05:55:36
+[05:55:36] [INFO] ============================================================
