@@ -1092,8 +1092,9 @@ public partial class Player : BaseCharacter
             dragDistance = 50.0f; // Minimum throw distance
         }
 
-        // Increase throw sensitivity - multiply drag distance
-        float sensitivityMultiplier = 3.0f;
+        // Increase throw sensitivity significantly - multiply drag distance by 9x
+        // (3x for sensitivity * 3x for user-requested range increase)
+        float sensitivityMultiplier = 9.0f;
         float adjustedDragDistance = dragDistance * sensitivityMultiplier;
 
         LogToFile($"[Player.Grenade] Throwing! Direction: {throwDirection}, Drag distance: {dragDistance} (adjusted: {adjustedDragDistance})");
@@ -1101,8 +1102,9 @@ public partial class Player : BaseCharacter
         // Rotate player to face throw direction (prevents grenade hitting player when throwing upward)
         RotatePlayerForThrow(throwDirection);
 
-        // Offset grenade spawn position in throw direction to avoid collision
-        float spawnOffset = 30.0f; // Pixels in front of player
+        // IMPORTANT: Set grenade position to player's CURRENT position (not where it was activated)
+        // Offset grenade spawn position in throw direction to avoid collision with player
+        float spawnOffset = 60.0f; // Increased from 30 to 60 pixels in front of player to avoid hitting
         Vector2 spawnPosition = GlobalPosition + throwDirection * spawnOffset;
         _activeGrenade.GlobalPosition = spawnPosition;
 

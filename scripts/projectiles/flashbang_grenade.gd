@@ -15,9 +15,9 @@ class_name FlashbangGrenade
 ## Duration of stun effect in seconds.
 @export var stun_duration: float = 6.0
 
-## Effect radius - approximately a small room size.
-## Building level rooms are roughly 200-300 pixels across.
-@export var effect_radius: float = 200.0
+## Effect radius - doubled per user request.
+## Now covers larger areas for better tactical usage.
+@export var effect_radius: float = 400.0
 
 
 func _ready() -> void:

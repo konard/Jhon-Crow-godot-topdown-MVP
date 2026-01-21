@@ -17,15 +17,15 @@ class_name GrenadeBase
 @export var fuse_time: float = 4.0
 
 ## Maximum throw speed in pixels per second.
-## This corresponds to max drag distance creating viewport-length throw.
-@export var max_throw_speed: float = 1280.0
+## Increased to allow throws 3x farther than viewport length (user requested).
+@export var max_throw_speed: float = 3840.0
 
 ## Minimum throw speed for a minimal drag.
-@export var min_throw_speed: float = 50.0
+@export var min_throw_speed: float = 150.0
 
 ## Drag multiplier to convert drag distance to throw speed.
-## Calibrated so viewport-length drag = viewport-length throw.
-@export var drag_to_speed_multiplier: float = 4.0
+## Increased for stronger throws - small drags produce strong throws.
+@export var drag_to_speed_multiplier: float = 12.0
 
 ## Friction/damping applied to slow the grenade.
 @export var ground_friction: float = 300.0

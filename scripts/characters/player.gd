@@ -880,15 +880,16 @@ func _throw_grenade(drag_end: Vector2) -> void:
 
 	var throw_direction := drag_vector.normalized()
 
-	# Increase throw sensitivity - multiply drag distance
-	var sensitivity_multiplier := 3.0
+	# Increase throw sensitivity significantly - multiply drag distance by 9x
+	# (3x for sensitivity * 3x for user-requested range increase)
+	var sensitivity_multiplier := 9.0
 	var adjusted_drag_distance := drag_distance * sensitivity_multiplier
 
-	# Clamp max drag distance to viewport length
+	# Clamp max drag distance to viewport length * 3 (user requested 3x farther)
 	var viewport := get_viewport()
-	var max_drag_distance := 1280.0 * sensitivity_multiplier  # Default viewport width with sensitivity
+	var max_drag_distance := 3840.0  # Default 1280 * 3
 	if viewport:
-		max_drag_distance = viewport.get_visible_rect().size.x * sensitivity_multiplier
+		max_drag_distance = viewport.get_visible_rect().size.x * 3.0
 	adjusted_drag_distance = minf(adjusted_drag_distance, max_drag_distance)
 
 	FileLogger.info("[Player.Grenade] Throwing! Direction: %s, Drag: %.1f (adjusted: %.1f)" % [str(throw_direction), drag_distance, adjusted_drag_distance])
@@ -896,8 +897,9 @@ func _throw_grenade(drag_end: Vector2) -> void:
 	# Rotate player to face throw direction (prevents grenade hitting player when throwing upward)
 	_rotate_player_for_throw(throw_direction)
 
-	# Offset grenade spawn position in throw direction to avoid collision
-	var spawn_offset := 30.0  # Pixels in front of player
+	# IMPORTANT: Set grenade position to player's CURRENT position (not where it was activated)
+	# Offset grenade spawn position in throw direction to avoid collision with player
+	var spawn_offset := 60.0  # Increased from 30 to 60 pixels in front of player to avoid hitting
 	var spawn_position := global_position + throw_direction * spawn_offset
 	_active_grenade.global_position = spawn_position
 
