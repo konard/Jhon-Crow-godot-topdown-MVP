@@ -197,6 +197,9 @@ const PLAYER_DISTRACTION_ANGLE: float = 0.4014
 ## Reference to the sprite for color changes.
 @onready var _sprite: Sprite2D = $Sprite2D
 
+## Reference to the weapon sprite for visual rotation.
+@onready var _weapon_sprite: Sprite2D = $WeaponSprite
+
 ## RayCast2D for line of sight detection.
 @onready var _raycast: RayCast2D = $RayCast2D
 
@@ -950,6 +953,9 @@ func _physics_process(delta: float) -> void:
 	# Request redraw for debug visualization
 	if debug_label_enabled:
 		queue_redraw()
+
+	# Update weapon sprite rotation to match enemy aim direction
+	_update_weapon_sprite_rotation()
 
 	move_and_slide()
 
@@ -3633,6 +3639,22 @@ func _get_health_percent() -> float:
 	if _max_health <= 0:
 		return 0.0
 	return float(_current_health) / float(_max_health)
+
+
+## Updates the weapon sprite rotation to match the enemy's aim direction.
+## Also handles vertical flipping when aiming left to avoid upside-down appearance.
+func _update_weapon_sprite_rotation() -> void:
+	if not _weapon_sprite:
+		return
+
+	# The weapon sprite should point in the same direction as the enemy is facing
+	# The enemy's rotation property already represents the aim direction
+	_weapon_sprite.rotation = rotation
+
+	# Flip the sprite vertically when aiming left (to avoid upside-down rifle)
+	# This happens when the angle is greater than 90 degrees or less than -90 degrees
+	var aiming_left := absf(rotation) > PI / 2.0
+	_weapon_sprite.flip_v = aiming_left
 
 
 ## Returns the effective detection delay based on difficulty.
