@@ -277,6 +277,101 @@ The aggressiveness requirement (15 kills/minute) serves several purposes:
 3. **Matches Hotline Miami style**: Fast, aggressive play is the intended way to earn high scores
 4. **Balances gameplay**: Regular play still viable, but skilled aggressive play earns more
 
+## Update 2026-01-21: Counter Issues Investigation
+
+### User Report
+User reported (translated from Russian): "Ammo counter and enemy counter is broken"
+
+### Log Analysis (2026-01-21)
+
+Two new log files were provided:
+- `game_log_20260121_133914.txt`
+- `game_log_20260121_134045.txt`
+
+#### Critical Observation
+**No `[BuildingLevel]` log entries appear in either file.**
+
+The logs show:
+1. **Enemy deaths logged correctly**: `[ENEMY] [Enemy3] Enemy died (ricochet=false, penetration=false)`
+2. **Sound propagation working**: `[INFO] [SoundPropagation] Unregistered listener: Enemy3 (remaining: 9)`
+3. **Autoloads initializing**: `[GameManager]`, `[SoundPropagation]`, `[PenultimateHit]`, `[LastChance]`
+
+But NO:
+- `[BuildingLevel] BuildingLevel _ready() started`
+- `[BuildingLevel] Setup tracking for X enemies`
+- `[BuildingLevel] Enemy died signal received`
+
+### Root Cause Hypothesis
+
+The `building_level.gd` script's `_ready()` function uses `print()` statements which:
+1. Go to stdout (console)
+2. Do NOT appear in FileLogger output
+3. Are invisible in exported Windows builds
+
+Therefore, the existing logs cannot tell us whether `building_level.gd` is executing at all.
+
+### Diagnostic Additions (Commit 89a33df)
+
+Added comprehensive `_log_to_file()` tracing:
+
+```gdscript
+func _ready() -> void:
+    _log_to_file("BuildingLevel _ready() started")
+    # ... existing code ...
+    _log_to_file("Enemy count label found: %s" % str(_enemy_count_label != null))
+    # ... existing code ...
+    _log_to_file("BuildingLevel _ready() completed")
+
+func _setup_enemy_tracking() -> void:
+    _log_to_file("_setup_enemy_tracking() started")
+    # ...
+    _log_to_file("Found Environment/Enemies node with %d children" % enemies_node.get_child_count())
+    # ...
+    _log_to_file("Setup tracking for %d enemies (connected died signal to %d)" % [_initial_enemy_count, connected_count])
+
+func _setup_player_tracking() -> void:
+    _log_to_file("_setup_player_tracking() started")
+    _log_to_file("Found player: %s" % _player.name)
+    _log_to_file("Ammo label found: %s" % str(_ammo_label != null))
+    _log_to_file("Found weapon: AssaultRifle (C# player)")
+    _log_to_file("Initial ammo: %d / %d" % [weapon.CurrentAmmo, weapon.ReserveAmmo])
+    _log_to_file("Weapon AmmoChanged signal connected: %s" % ammo_connected)
+```
+
+### Expected Log Output After Re-Export
+
+When the user re-exports and runs the game, the log should show:
+```
+[BuildingLevel] BuildingLevel _ready() started
+[BuildingLevel] _setup_enemy_tracking() started
+[BuildingLevel] Found Environment/Enemies node with 10 children
+[BuildingLevel] Setup tracking for 10 enemies (connected died signal to 10)
+[BuildingLevel] Enemy count label found: true
+[BuildingLevel] _setup_player_tracking() started
+[BuildingLevel] Found player: Player
+[BuildingLevel] Ammo label found: true
+[BuildingLevel] Found weapon: AssaultRifle (C# player)
+[BuildingLevel] Initial ammo: 30 / 90
+[BuildingLevel] Weapon AmmoChanged signal connected: true
+[BuildingLevel] BuildingLevel _ready() completed
+```
+
+If these entries are missing, the script isn't running at all.
+If some are present but not others, we'll know exactly where it fails.
+
+### Possible Root Causes
+
+1. **Stale export**: User's exported build doesn't contain latest code
+2. **Script attachment error**: building_level.gd not properly attached to scene in export
+3. **C# compilation issue**: GDScript/C# interop problem in exported build
+4. **Signal signature mismatch**: The `died` signal changed from `signal died` to `signal died(is_ricochet_kill: bool, is_penetration_kill: bool)` - callback has default parameters but connection might fail
+
+### Next Steps
+
+1. User needs to re-export the game
+2. Run exported game and share new log
+3. Analyze `[BuildingLevel]` entries to pinpoint failure
+
 ## Related Resources
 - [Hotline Miami Scoring Analysis](https://steamcommunity.com/app/219150/discussions/) (reference)
 - Godot Signal Documentation
