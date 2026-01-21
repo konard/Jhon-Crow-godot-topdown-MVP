@@ -360,6 +360,14 @@ func _freeze_time() -> void:
 	# Physics delta becomes 0 which makes MoveAndSlide() not work.
 	# Instead, we disable all nodes except player.
 
+	# CRITICAL FIX: First, set player and all children to PROCESS_MODE_ALWAYS
+	# This MUST happen BEFORE freezing the scene, because:
+	# 1. The player's parent (scene root) will be set to DISABLED
+	# 2. By default, player has INHERIT, which would inherit DISABLED
+	# 3. Setting to ALWAYS overrides the parent's disabled state
+	if _player != null:
+		_enable_player_processing_always(_player)
+
 	# Freeze all top-level nodes in the scene tree except player and autoloads
 	var root := get_tree().root
 	for child in root.get_children():
@@ -374,6 +382,36 @@ func _freeze_time() -> void:
 
 	# This manager uses PROCESS_MODE_ALWAYS to keep running the timer
 	process_mode = Node.PROCESS_MODE_ALWAYS
+
+
+## Recursively sets the player and all children to PROCESS_MODE_ALWAYS.
+## This is needed because the player's parent scene will be DISABLED,
+## and we need ALWAYS mode to override the inherited disabled state.
+func _enable_player_processing_always(node: Node, depth: int = 0) -> void:
+	if node == null or not is_instance_valid(node):
+		return
+
+	# Store original process mode for restoration later
+	_original_process_modes[node] = node.process_mode
+
+	# Set to ALWAYS so player can move even when parent scene is DISABLED
+	node.process_mode = Node.PROCESS_MODE_ALWAYS
+
+	# Only log the player node itself and important children to avoid spam
+	if depth == 0:
+		_log("Set player %s and all %d children to PROCESS_MODE_ALWAYS" % [node.name, _count_descendants(node)])
+
+	# Recursively enable all children too (weapon, input, animations, etc.)
+	for child in node.get_children():
+		_enable_player_processing_always(child, depth + 1)
+
+
+## Counts total number of descendant nodes.
+func _count_descendants(node: Node) -> int:
+	var count := 0
+	for child in node.get_children():
+		count += 1 + _count_descendants(child)
+	return count
 
 
 ## Recursively freezes a node and its children, except for the player node.

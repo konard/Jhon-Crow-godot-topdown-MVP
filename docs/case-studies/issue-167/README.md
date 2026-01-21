@@ -145,31 +145,104 @@ From `logs-batch4/game_log_20260121_112817.txt`:
 
 The effect lasted exactly 6 seconds as intended, but the player reported they couldn't move during this time.
 
-### Solution
+### Solution (Initial Attempt - Still Broken)
 
-Instead of using `Engine.time_scale = 0`, we now:
+Initially, we tried replacing `Engine.time_scale = 0` with node-based freezing:
 
 1. **Keep `Engine.time_scale` at 1.0** - Physics delta remains normal
 2. **Disable processing on all scene nodes** except the player
 3. **Skip autoloads** (AudioManager, FileLogger, etc.)
-4. **Skip the player and all its children** - They process normally
+4. **Skip the player node** - Don't set it to DISABLED
+
+However, this still didn't work because of **Godot's process mode inheritance**.
+
+## Follow-up Issue 2: Process Mode Inheritance
+
+### Symptom
+
+Even after implementing node-based freezing (instead of `Engine.time_scale = 0`), the player still couldn't move during the time freeze effect.
+
+### Root Cause Analysis
+
+The logs showed:
+```
+[11:41:37] [INFO] [LastChance] Skipping player node: Player
+[11:41:37] [INFO] [LastChance] Froze all nodes except player and autoloads
+```
+
+The code was correctly **skipping** the player node - it didn't set the player to `DISABLED`. But the player still couldn't move. Why?
+
+**The issue was Godot's process mode inheritance:**
+
+1. The player's **parent** (the main scene root) was being set to `PROCESS_MODE_DISABLED`
+2. The player node has `PROCESS_MODE_INHERIT` by default
+3. When a node has `INHERIT`, it inherits the effective process mode from its parent
+4. Since the parent was `DISABLED`, the player inherited `DISABLED` state
+5. Therefore, `_PhysicsProcess()` was never called on the player
+
+**Simply not disabling the player node is not enough - we need to explicitly set the player to `PROCESS_MODE_ALWAYS` to override the inherited disabled state from its parent.**
+
+### Solution (Fixed)
+
+The correct approach requires two steps:
+
+1. **First, set the player AND ALL its children to `PROCESS_MODE_ALWAYS`**
+   - This overrides the inherited disabled state
+   - Must include children (weapon, input handler, animations, etc.)
+
+2. **Then, freeze all other nodes**
+   - Skip the player (already handled above)
+   - Skip autoloads
 
 ```gdscript
 func _freeze_time() -> void:
-    # CRITICAL: Do NOT set Engine.time_scale to 0!
-    # Physics delta becomes 0 which makes MoveAndSlide() not work.
+    # CRITICAL FIX: First, set player and all children to PROCESS_MODE_ALWAYS
+    # This MUST happen BEFORE freezing the scene, because:
+    # 1. The player's parent (scene root) will be set to DISABLED
+    # 2. By default, player has INHERIT, which would inherit DISABLED
+    # 3. Setting to ALWAYS overrides the parent's disabled state
+    if _player != null:
+        _enable_player_processing_always(_player)
 
-    # Freeze all top-level nodes except player and autoloads
+    # Then freeze all other nodes
     var root := get_tree().root
     for child in root.get_children():
         if child.name in ["FileLogger", "AudioManager", ...]:
             continue  # Skip autoloads
         _freeze_node_except_player(child)
+
+func _enable_player_processing_always(node: Node, depth: int = 0) -> void:
+    # Store original process mode for restoration
+    _original_process_modes[node] = node.process_mode
+
+    # Set to ALWAYS to override inherited DISABLED
+    node.process_mode = Node.PROCESS_MODE_ALWAYS
+
+    # Recursively enable all children (weapon, animations, etc.)
+    for child in node.get_children():
+        _enable_player_processing_always(child, depth + 1)
 ```
+
+### Key Insight
+
+The difference between:
+- **Not setting to DISABLED** - Node uses INHERIT → inherits DISABLED from parent → NOT processing
+- **Setting to ALWAYS** - Node explicitly overrides → processes regardless of parent state
 
 ### Files Changed
 
-- `scripts/autoload/last_chance_effects_manager.gd` - Replaced `Engine.time_scale = 0` with node-based freezing
+- `scripts/autoload/last_chance_effects_manager.gd` - Added `_enable_player_processing_always()` function
+
+### Expected Logs After Fix
+
+```
+[LastChance] Player health updated (C# Damaged): 1.0
+[LastChance] Threat detected: Bullet
+[LastChance] Triggering last chance effect!
+[LastChance] Set player Player and all 15 children to PROCESS_MODE_ALWAYS
+[LastChance] Skipping player node: Player
+[LastChance] Froze all nodes except player and autoloads
+```
 
 ## Testing Instructions
 
