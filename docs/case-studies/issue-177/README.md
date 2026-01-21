@@ -99,3 +99,94 @@ Added the complete 3-step grenade throwing mechanic to `Scripts/Characters/Playe
 ## Log Files
 - `logs/game_log_20260121_165728.txt` - First test session
 - `logs/game_log_20260121_165904.txt` - Second test session with multiple attempts
+- `logs/game_log_20260121_185409.txt` - Third test session (throwing issues reported)
+
+---
+
+# Follow-Up: Throwing Mechanics Issues (2026-01-21)
+
+## Reported Problems
+User (Jhon-Crow) reported in PR #180 comments at 2026-01-21T16:00:29Z:
+1. **Slow swings produce fast throws**: "бросок при медленном размахе должен быть медленным и граната должна лететь не далеко" (slow swing throws should be slow and grenade should not fly far)
+2. **Throwing upward doesn't work**: "бросок вверх всё ещё не работает"
+
+## Root Cause Analysis
+
+### Issue 1: All Throws Are at Maximum Speed
+
+**Evidence from logs** (`game_log_20260121_185409.txt`):
+```
+[GrenadeBase] Thrown! Direction: (0.989059, -0.147522), Speed: 3840.0
+[GrenadeBase] Thrown! Direction: (0.97786, -0.209259), Speed: 3840.0
+[GrenadeBase] Thrown! Direction: (0.154324, -0.98802), Speed: 3840.0
+```
+Every throw had the same speed: 3840.0 (the maximum), regardless of drag distance.
+
+**Root Cause**: Double multiplication of sensitivity multipliers:
+1. In `Player.cs` line 1097: `adjustedDragDistance = dragDistance * 9.0f`
+2. In `grenade_base.gd` line 109: `throw_speed = drag_distance * drag_to_speed_multiplier` (12.0)
+
+Result: Even a short drag of 50px → 50 * 9 * 12 = 5400, clamped to max 3840.
+
+**Fix Applied**:
+1. Removed the 9x multiplier from `Player.cs`
+2. Set reasonable values in `grenade_base.gd`:
+   - `max_throw_speed`: 3840 → 2500 (still travels far enough)
+   - `min_throw_speed`: 150 → 100 (gentler minimum)
+   - `drag_to_speed_multiplier`: 12 → 2 (linear mapping: ~1250px drag = max speed)
+
+### Issue 2: Throwing Upward "Doesn't Work"
+
+**Evidence from logs**:
+```
+Direction: (0.15432426, -0.9880203)  // Nearly straight up
+Player rotated for throw: 0 -> -1.4158529
+[GrenadeBase] Thrown! Direction: (0.154324, -0.98802), Speed: 3840.0
+```
+The grenade IS thrown upward (negative Y = up in Godot), so the direction was correct.
+
+**Root Cause**: Grenade collision_mask = 7 (layers 1|2|4 = player|enemies|obstacles).
+When thrown upward, the grenade could immediately collide with the player's collision shape, even with a 60px spawn offset.
+
+**Fix Applied**:
+1. Changed `collision_mask` from 7 to 6 (layers 2|4 = enemies|obstacles only)
+2. Grenades no longer physically collide with the player, allowing throws in any direction
+
+## Technical Details
+
+### Before Fix (Speed Calculation)
+```
+Drag: 194px
+C# multiplier: 194 * 9 = 1746
+GDScript: 1746 * 12 = 20952 → clamped to 3840
+Result: Short drag = max speed ❌
+```
+
+### After Fix (Speed Calculation)
+```
+Drag: 194px
+No C# multiplier
+GDScript: 194 * 2 = 388
+Result: Short drag = slow throw ✓
+
+Drag: 1000px (long swing)
+GDScript: 1000 * 2 = 2000
+Result: Long drag = fast throw ✓
+
+Drag: 1300px (full swing)
+GDScript: 1300 * 2 = 2600 → clamped to 2500
+Result: Maximum throw speed ✓
+```
+
+### Collision Layers Reference
+| Layer | Value | Description |
+|-------|-------|-------------|
+| 1     | 1     | Player      |
+| 2     | 2     | Enemies     |
+| 3     | 4     | Obstacles   |
+| 6     | 32    | Grenades    |
+
+## Files Changed
+- `Scripts/Characters/Player.cs` - Removed 9x sensitivity multiplier
+- `scripts/projectiles/grenade_base.gd` - Updated speed parameters and collision mask
+- `scenes/projectiles/FlashbangGrenade.tscn` - Updated speed values and collision mask

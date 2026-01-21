@@ -1092,12 +1092,9 @@ public partial class Player : BaseCharacter
             dragDistance = 50.0f; // Minimum throw distance
         }
 
-        // Increase throw sensitivity significantly - multiply drag distance by 9x
-        // (3x for sensitivity * 3x for user-requested range increase)
-        float sensitivityMultiplier = 9.0f;
-        float adjustedDragDistance = dragDistance * sensitivityMultiplier;
-
-        LogToFile($"[Player.Grenade] Throwing! Direction: {throwDirection}, Drag distance: {dragDistance} (adjusted: {adjustedDragDistance})");
+        // Pass raw drag distance to grenade - GDScript handles the speed calculation
+        // The grenade's drag_to_speed_multiplier controls the sensitivity
+        LogToFile($"[Player.Grenade] Throwing! Direction: {throwDirection}, Drag distance: {dragDistance}");
 
         // Rotate player to face throw direction (prevents grenade hitting player when throwing upward)
         RotatePlayerForThrow(throwDirection);
@@ -1108,10 +1105,10 @@ public partial class Player : BaseCharacter
         Vector2 spawnPosition = GlobalPosition + throwDirection * spawnOffset;
         _activeGrenade.GlobalPosition = spawnPosition;
 
-        // Call the throw method on the grenade with adjusted distance
+        // Call the throw method on the grenade with raw drag distance
         if (_activeGrenade.HasMethod("throw_grenade"))
         {
-            _activeGrenade.Call("throw_grenade", throwDirection, adjustedDragDistance);
+            _activeGrenade.Call("throw_grenade", throwDirection, dragDistance);
         }
 
         // Emit signal
@@ -1124,7 +1121,7 @@ public partial class Player : BaseCharacter
             audioManager.Call("play_grenade_throw", GlobalPosition);
         }
 
-        LogToFile($"[Player.Grenade] Thrown! Direction: {throwDirection}, Distance: {adjustedDragDistance}");
+        LogToFile($"[Player.Grenade] Thrown! Direction: {throwDirection}, Drag distance: {dragDistance}");
 
         // Reset state (grenade is now independent)
         ResetGrenadeState();

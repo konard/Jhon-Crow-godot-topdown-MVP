@@ -17,15 +17,16 @@ class_name GrenadeBase
 @export var fuse_time: float = 4.0
 
 ## Maximum throw speed in pixels per second.
-## Increased to allow throws 3x farther than viewport length (user requested).
-@export var max_throw_speed: float = 3840.0
+## At max speed, grenade travels ~viewport length in ~0.5 seconds.
+@export var max_throw_speed: float = 2500.0
 
-## Minimum throw speed for a minimal drag.
-@export var min_throw_speed: float = 150.0
+## Minimum throw speed for a minimal drag (gentle lob).
+@export var min_throw_speed: float = 100.0
 
 ## Drag multiplier to convert drag distance to throw speed.
-## Increased for stronger throws - small drags produce strong throws.
-@export var drag_to_speed_multiplier: float = 12.0
+## At viewport width (~1280px) drag, reaches near max speed.
+## At ~100px drag (short swing), produces gentle throw.
+@export var drag_to_speed_multiplier: float = 2.0
 
 ## Friction/damping applied to slow the grenade.
 @export var ground_friction: float = 300.0
@@ -58,7 +59,7 @@ signal exploded(position: Vector2, grenade: GrenadeBase)
 func _ready() -> void:
 	# Set up collision
 	collision_layer = 32  # Layer 6 (custom for grenades)
-	collision_mask = 4 | 2 | 1  # obstacles, enemies, player
+	collision_mask = 4 | 2  # obstacles + enemies (NOT player, to avoid collision when throwing)
 
 	# Set up physics
 	gravity_scale = 0.0  # Top-down, no gravity
