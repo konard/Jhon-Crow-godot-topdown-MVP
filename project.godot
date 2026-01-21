@@ -22,6 +22,7 @@ DifficultyManager="*res://scripts/autoload/difficulty_manager.gd"
 ImpactEffectsManager="*res://scripts/autoload/impact_effects_manager.gd"
 PenultimateHitEffectsManager="*res://scripts/autoload/penultimate_hit_effects_manager.gd"
 LastChanceEffectsManager="*res://scripts/autoload/last_chance_effects_manager.gd"
+StatusEffectsManager="*res://scripts/autoload/status_effects_manager.gd"
 
 [application]
 
@@ -90,6 +91,16 @@ toggle_fire_mode={
 reload_step={
 "deadzone": 0.5,
 "events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":70,"key_label":0,"unicode":102,"location":0,"echo":false,"script":null)
+]
+}
+grenade_prepare={
+"deadzone": 0.5,
+"events": [Object(InputEventKey,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"pressed":false,"keycode":0,"physical_keycode":71,"key_label":0,"unicode":103,"location":0,"echo":false,"script":null)
+]
+}
+grenade_throw={
+"deadzone": 0.5,
+"events": [Object(InputEventMouseButton,"resource_local_to_scene":false,"resource_name":"","device":-1,"window_id":0,"alt_pressed":false,"shift_pressed":false,"ctrl_pressed":false,"meta_pressed":false,"button_mask":2,"position":Vector2(0, 0),"global_position":Vector2(0, 0),"factor":1.0,"button_index":2,"canceled":false,"pressed":true,"double_click":false,"script":null)
 ]
 }
 

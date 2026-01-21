@@ -17,6 +17,12 @@ const WEAPONS: Dictionary = {
 		"unlocked": true,
 		"description": "Standard assault rifle"
 	},
+	"flashbang": {
+		"name": "Flashbang",
+		"icon_path": "res://assets/sprites/weapons/flashbang.png",
+		"unlocked": true,
+		"description": "Stun grenade - blinds enemies for 12s, stuns for 6s. Press G + RMB drag to throw."
+	},
 	"ak47": {
 		"name": "???",
 		"icon_path": "",

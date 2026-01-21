@@ -563,8 +563,18 @@ var _killed_by_ricochet: bool = false
 ## Whether the last hit that killed this enemy was from a bullet that penetrated a wall.
 var _killed_by_penetration: bool = false
 
+## --- Status Effects ---
+## Whether the enemy is currently blinded (cannot see the player).
+var _is_blinded: bool = false
+
+## Whether the enemy is currently stunned (cannot move or act).
+var _is_stunned: bool = false
+
 
 func _ready() -> void:
+	# Add to enemies group for grenade targeting
+	add_to_group("enemies")
+
 	_initial_position = global_position
 	_initialize_health()
 	_initialize_ammo()
@@ -1083,6 +1093,11 @@ func _can_shoot() -> bool:
 
 ## Process the AI state machine.
 func _process_ai_state(delta: float) -> void:
+	# If stunned, stop all movement and actions - do nothing
+	if _is_stunned:
+		velocity = Vector2.ZERO
+		return
+
 	var previous_state := _current_state
 
 	# HIGHEST PRIORITY: If player is distracted (aim > 23° away from enemy),
@@ -3293,6 +3308,11 @@ func _check_player_visibility() -> void:
 	_can_see_player = false
 	_player_visibility_ratio = 0.0
 
+	# If blinded, cannot see player at all
+	if _is_blinded:
+		_continuous_visibility_timer = 0.0
+		return
+
 	if _player == null or not _raycast:
 		_continuous_visibility_timer = 0.0
 		return
@@ -4197,3 +4217,51 @@ func _get_nav_path_distance(target_pos: Vector2) -> float:
 
 	_nav_agent.target_position = target_pos
 	return _nav_agent.distance_to_target()
+
+
+# ============================================================================
+# Status Effects (Blindness, Stun)
+# ============================================================================
+
+
+## Set the blinded state (from flashbang grenade).
+## When blinded, the enemy cannot see the player.
+func set_blinded(blinded: bool) -> void:
+	var was_blinded := _is_blinded
+	_is_blinded = blinded
+
+	if blinded and not was_blinded:
+		_log_debug("Enemy is now BLINDED - cannot see player")
+		_log_to_file("Status effect: BLINDED applied")
+		# Force lose sight of player
+		_can_see_player = false
+		_continuous_visibility_timer = 0.0
+	elif not blinded and was_blinded:
+		_log_debug("Enemy is no longer blinded")
+		_log_to_file("Status effect: BLINDED removed")
+
+
+## Set the stunned state (from flashbang grenade).
+## When stunned, the enemy cannot move or take actions.
+func set_stunned(stunned: bool) -> void:
+	var was_stunned := _is_stunned
+	_is_stunned = stunned
+
+	if stunned and not was_stunned:
+		_log_debug("Enemy is now STUNNED - cannot move")
+		_log_to_file("Status effect: STUNNED applied")
+		# Stop all movement
+		velocity = Vector2.ZERO
+	elif not stunned and was_stunned:
+		_log_debug("Enemy is no longer stunned")
+		_log_to_file("Status effect: STUNNED removed")
+
+
+## Check if the enemy is currently blinded.
+func is_blinded() -> bool:
+	return _is_blinded
+
+
+## Check if the enemy is currently stunned.
+func is_stunned() -> bool:
+	return _is_stunned
