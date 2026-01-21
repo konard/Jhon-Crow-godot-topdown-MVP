@@ -159,15 +159,23 @@ var _grenade_drag_active: bool = false
 
 
 func _ready() -> void:
+	FileLogger.info("[Player] Initializing player...")
+
 	# Preload bullet scene if not set in inspector
 	if bullet_scene == null:
 		bullet_scene = preload("res://scenes/projectiles/Bullet.tscn")
+		FileLogger.info("[Player] Bullet scene preloaded")
 
 	# Preload grenade scene if not set in inspector
 	if grenade_scene == null:
 		var grenade_path := "res://scenes/projectiles/FlashbangGrenade.tscn"
 		if ResourceLoader.exists(grenade_path):
 			grenade_scene = load(grenade_path)
+			FileLogger.info("[Player] Grenade scene loaded from: %s" % grenade_path)
+		else:
+			FileLogger.info("[Player] WARNING: Grenade scene not found at: %s" % grenade_path)
+	else:
+		FileLogger.info("[Player] Grenade scene already set in inspector")
 
 	# Get max ammo from DifficultyManager based on current difficulty
 	var difficulty_manager: Node = get_node_or_null("/root/DifficultyManager")
@@ -179,8 +187,15 @@ func _ready() -> void:
 
 	_current_ammo = max_ammo
 	_current_health = max_health
+	_current_grenades = max_grenades
 	_is_alive = true
 	_update_health_visual()
+
+	FileLogger.info("[Player] Ready! Ammo: %d/%d, Grenades: %d/%d, Health: %d/%d" % [
+		_current_ammo, max_ammo,
+		_current_grenades, max_grenades,
+		_current_health, max_health
+	])
 
 
 func _physics_process(delta: float) -> void:
@@ -209,8 +224,17 @@ func _physics_process(delta: float) -> void:
 		if _reload_timer >= reload_time:
 			_complete_simple_reload()
 
-	# Handle shooting input
-	if Input.is_action_just_pressed("shoot"):
+	# Handle grenade input first (so it can consume shoot input)
+	_handle_grenade_input()
+
+	# Make active grenade follow player if held
+	if _active_grenade != null and is_instance_valid(_active_grenade):
+		_active_grenade.global_position = global_position
+
+	# Handle shooting input (only if not in grenade preparation state)
+	# Grenade steps 2 and 3 use LMB, so don't shoot during those
+	var can_shoot := _grenade_state == GrenadeState.IDLE or _grenade_state == GrenadeState.TIMER_STARTED
+	if can_shoot and Input.is_action_just_pressed("shoot"):
 		_shoot()
 
 	# Handle reload input based on mode
@@ -218,9 +242,6 @@ func _physics_process(delta: float) -> void:
 		_handle_simple_reload_input()
 	else:  # Sequence mode
 		_handle_sequence_reload_input()
-
-	# Handle grenade input
-	_handle_grenade_input()
 
 
 func _get_input_direction() -> Vector2:
@@ -611,64 +632,229 @@ func _on_difficulty_changed(_new_difficulty: int) -> void:
 # Grenade System
 # ============================================================================
 
+## Grenade throw state machine.
+## Step 1: G + RMB drag right = start timer (pin pulled)
+## Step 2: Hold LMB -> Hold RMB while holding LMB -> Release LMB = prepare to throw
+## Step 3: RMB still held -> drag in direction and release = throw
+enum GrenadeState {
+	IDLE,           # No grenade action
+	TIMER_STARTED,  # Step 1 complete: timer running, waiting for throw preparation
+	PREPARING,      # Step 2 in progress: LMB held, waiting for RMB
+	READY_TO_AIM,   # Step 2 complete: LMB+RMB held, waiting for LMB release
+	AIMING          # Step 3: RMB held, drag to aim and release to throw
+}
 
-## Handle grenade input.
-## Usage pattern:
-## 1. Hold G to prepare grenade (starts timer)
-## 2. Press and hold RMB to start drag
-## 3. Release RMB to throw in drag direction with drag distance determining speed
+## Current grenade state.
+var _grenade_state: int = GrenadeState.IDLE
+
+## Active grenade instance (created when timer starts).
+var _active_grenade: RigidBody2D = null
+
+## Position where the aiming drag started.
+var _aim_drag_start: Vector2 = Vector2.ZERO
+
+## Time when the grenade timer was started (for tracking in case grenade explodes in hand).
+var _grenade_timer_start_time: float = 0.0
+
+
+## Handle grenade input with 3-step mechanic.
+## Step 1: G + RMB drag right = start timer (pull pin)
+## Step 2: Hold LMB -> while holding LMB press and hold RMB -> release LMB = prepare to throw
+## Step 3: RMB still held -> drag in direction and release = throw
 func _handle_grenade_input() -> void:
-	# Check if G key is pressed/held to prepare grenade
-	if Input.is_action_pressed("grenade_prepare"):
-		if not _is_preparing_grenade and _current_grenades > 0:
-			_start_grenade_prepare()
-	else:
-		# G released without throwing - cancel preparation
-		if _is_preparing_grenade and not _grenade_drag_active:
-			_cancel_grenade_prepare()
+	# Check for active grenade explosion (explodes in hand after 4 seconds)
+	if _active_grenade != null and not is_instance_valid(_active_grenade):
+		# Grenade was destroyed (exploded)
+		_reset_grenade_state()
+		return
 
-	# If preparing, handle the drag throw mechanic
-	if _is_preparing_grenade:
-		# Start drag on RMB press
+	match _grenade_state:
+		GrenadeState.IDLE:
+			_handle_grenade_idle_state()
+		GrenadeState.TIMER_STARTED:
+			_handle_grenade_timer_started_state()
+		GrenadeState.PREPARING:
+			_handle_grenade_preparing_state()
+		GrenadeState.READY_TO_AIM:
+			_handle_grenade_ready_to_aim_state()
+		GrenadeState.AIMING:
+			_handle_grenade_aiming_state()
+
+
+## Handle IDLE state: waiting for G + RMB drag right to start timer.
+func _handle_grenade_idle_state() -> void:
+	# Check if G key is held and player has grenades
+	if Input.is_action_pressed("grenade_prepare") and _current_grenades > 0:
+		# Start drag tracking for step 1
 		if Input.is_action_just_pressed("grenade_throw"):
 			_grenade_drag_start = get_global_mouse_position()
 			_grenade_drag_active = true
+			FileLogger.info("[Player.Grenade] Step 1 started: G held, RMB pressed at %s" % str(_grenade_drag_start))
 
-		# Throw on RMB release (if drag was active)
-		if Input.is_action_just_released("grenade_throw") and _grenade_drag_active:
+		# Check for drag release (complete step 1)
+		if _grenade_drag_active and Input.is_action_just_released("grenade_throw"):
 			var drag_end := get_global_mouse_position()
-			_throw_grenade(drag_end)
+			var drag_vector := drag_end - _grenade_drag_start
+
+			# Check if dragged to the right (positive X direction)
+			if drag_vector.x > 20.0:  # Minimum drag distance
+				_start_grenade_timer()
+				FileLogger.info("[Player.Grenade] Step 1 complete: Timer started! Drag right detected (%.1f pixels)" % drag_vector.x)
+			else:
+				FileLogger.info("[Player.Grenade] Step 1 cancelled: Drag was not to the right (x=%.1f)" % drag_vector.x)
+
+			_grenade_drag_active = false
+	else:
+		_grenade_drag_active = false
 
 
-## Start preparing a grenade (G pressed).
-func _start_grenade_prepare() -> void:
-	if _current_grenades <= 0:
+## Handle TIMER_STARTED state: waiting for LMB to start preparation.
+func _handle_grenade_timer_started_state() -> void:
+	# G must still be held to continue
+	if not Input.is_action_pressed("grenade_prepare"):
+		# G released - cancel and drop grenade
+		FileLogger.info("[Player.Grenade] Cancelled: G released while timer running")
+		_drop_grenade_at_feet()
 		return
 
-	_is_preparing_grenade = true
+	# Check for LMB press to start step 2
+	if Input.is_action_just_pressed("shoot"):
+		_grenade_state = GrenadeState.PREPARING
+		_is_preparing_grenade = true
+		FileLogger.info("[Player.Grenade] Step 2 started: LMB pressed, waiting for RMB")
 
-	# Play preparation sound (pin pull)
+
+## Handle PREPARING state: LMB held, waiting for RMB.
+func _handle_grenade_preparing_state() -> void:
+	# G must still be held
+	if not Input.is_action_pressed("grenade_prepare"):
+		FileLogger.info("[Player.Grenade] Cancelled: G released during preparation")
+		_drop_grenade_at_feet()
+		return
+
+	# LMB must still be held
+	if not Input.is_action_pressed("shoot"):
+		# LMB released too early - cancel
+		_grenade_state = GrenadeState.TIMER_STARTED
+		_is_preparing_grenade = false
+		FileLogger.info("[Player.Grenade] Step 2 cancelled: LMB released before RMB pressed")
+		return
+
+	# Check for RMB press while LMB held
+	if Input.is_action_just_pressed("grenade_throw"):
+		_grenade_state = GrenadeState.READY_TO_AIM
+		FileLogger.info("[Player.Grenade] Step 2 progress: LMB+RMB held, release LMB to aim")
+
+
+## Handle READY_TO_AIM state: LMB+RMB held, waiting for LMB release.
+func _handle_grenade_ready_to_aim_state() -> void:
+	# G must still be held
+	if not Input.is_action_pressed("grenade_prepare"):
+		FileLogger.info("[Player.Grenade] Cancelled: G released during ready-to-aim")
+		_drop_grenade_at_feet()
+		return
+
+	# RMB must still be held
+	if not Input.is_action_pressed("grenade_throw"):
+		# RMB released - cancel back to preparing
+		_grenade_state = GrenadeState.PREPARING
+		FileLogger.info("[Player.Grenade] Step 2 cancelled: RMB released before LMB")
+		return
+
+	# Check for LMB release (complete step 2)
+	if Input.is_action_just_released("shoot"):
+		_grenade_state = GrenadeState.AIMING
+		_aim_drag_start = get_global_mouse_position()
+		FileLogger.info("[Player.Grenade] Step 2 complete: Now aiming! Drag and release RMB to throw")
+
+
+## Handle AIMING state: RMB held, drag to aim and release to throw.
+func _handle_grenade_aiming_state() -> void:
+	# G must still be held
+	if not Input.is_action_pressed("grenade_prepare"):
+		FileLogger.info("[Player.Grenade] Cancelled: G released during aiming")
+		_drop_grenade_at_feet()
+		return
+
+	# Check for RMB release (complete step 3 - throw!)
+	if Input.is_action_just_released("grenade_throw"):
+		var drag_end := get_global_mouse_position()
+		_throw_grenade(drag_end)
+		FileLogger.info("[Player.Grenade] Step 3 complete: Grenade thrown!")
+
+
+## Start the grenade timer (step 1 complete - pin pulled).
+## Creates the grenade instance and starts its 4-second fuse.
+func _start_grenade_timer() -> void:
+	if _current_grenades <= 0:
+		FileLogger.info("[Player.Grenade] Cannot start timer: no grenades")
+		return
+
+	if grenade_scene == null:
+		FileLogger.info("[Player.Grenade] Cannot start timer: grenade_scene is null")
+		return
+
+	# Create grenade instance (held by player)
+	_active_grenade = grenade_scene.instantiate()
+	if _active_grenade == null:
+		FileLogger.info("[Player.Grenade] Failed to instantiate grenade scene")
+		return
+
+	_active_grenade.global_position = global_position
+
+	# Add grenade to scene (it will follow player until thrown)
+	get_tree().current_scene.add_child(_active_grenade)
+
+	# Activate the grenade timer (starts 4s countdown)
+	if _active_grenade.has_method("activate_timer"):
+		_active_grenade.activate_timer()
+
+	# Update state
+	_grenade_state = GrenadeState.TIMER_STARTED
+	_grenade_timer_start_time = Time.get_ticks_msec() / 1000.0
+
+	# Decrement grenade count now (pin is pulled)
+	_current_grenades -= 1
+	grenade_changed.emit(_current_grenades, max_grenades)
+
+	# Play pin pull sound
 	var audio_manager: Node = get_node_or_null("/root/AudioManager")
 	if audio_manager and audio_manager.has_method("play_grenade_prepare"):
 		audio_manager.play_grenade_prepare(global_position)
 
+	FileLogger.info("[Player.Grenade] Timer started, grenade created at %s" % str(global_position))
 
-## Cancel grenade preparation.
-func _cancel_grenade_prepare() -> void:
+
+## Drop the grenade at player's feet (when G is released before throwing).
+func _drop_grenade_at_feet() -> void:
+	if _active_grenade != null and is_instance_valid(_active_grenade):
+		# Grenade stays where it is (at player's last position)
+		# It will explode when timer runs out
+		FileLogger.info("[Player.Grenade] Grenade dropped at feet at %s" % str(_active_grenade.global_position))
+	_reset_grenade_state()
+
+
+## Reset grenade state to idle.
+func _reset_grenade_state() -> void:
+	_grenade_state = GrenadeState.IDLE
 	_is_preparing_grenade = false
 	_grenade_drag_active = false
 	_grenade_drag_start = Vector2.ZERO
+	_aim_drag_start = Vector2.ZERO
+	_active_grenade = null
+	FileLogger.info("[Player.Grenade] State reset to IDLE")
 
 
-## Throw the grenade based on drag direction and distance.
+## Throw the grenade based on aiming drag direction and distance.
 ## @param drag_end: The position where the mouse drag ended.
 func _throw_grenade(drag_end: Vector2) -> void:
-	if grenade_scene == null or _current_grenades <= 0:
-		_cancel_grenade_prepare()
+	if _active_grenade == null or not is_instance_valid(_active_grenade):
+		FileLogger.info("[Player.Grenade] Cannot throw: no active grenade")
+		_reset_grenade_state()
 		return
 
-	# Calculate throw direction and distance
-	var drag_vector := drag_end - _grenade_drag_start
+	# Calculate throw direction and distance from aiming drag
+	var drag_vector := drag_end - _aim_drag_start
 	var drag_distance := drag_vector.length()
 
 	# If drag is too short (dropped at feet), use minimum throw
@@ -686,24 +872,14 @@ func _throw_grenade(drag_end: Vector2) -> void:
 
 	var throw_direction := drag_vector.normalized()
 
-	# Create grenade instance
-	var grenade: RigidBody2D = grenade_scene.instantiate()
-	grenade.global_position = global_position
-
-	# Activate the grenade timer (starts 4s countdown)
-	if grenade.has_method("activate_timer"):
-		grenade.activate_timer()
+	# Set grenade position to player's current position (in case player moved)
+	_active_grenade.global_position = global_position
 
 	# Set the throw velocity
-	if grenade.has_method("throw_grenade"):
-		grenade.throw_grenade(throw_direction, drag_distance)
+	if _active_grenade.has_method("throw_grenade"):
+		_active_grenade.throw_grenade(throw_direction, drag_distance)
 
-	# Add grenade to scene
-	get_tree().current_scene.add_child(grenade)
-
-	# Update grenade count
-	_current_grenades -= 1
-	grenade_changed.emit(_current_grenades, max_grenades)
+	# Emit signal
 	grenade_thrown.emit()
 
 	# Play throw sound
@@ -711,8 +887,10 @@ func _throw_grenade(drag_end: Vector2) -> void:
 	if audio_manager and audio_manager.has_method("play_grenade_throw"):
 		audio_manager.play_grenade_throw(global_position)
 
-	# Reset preparation state
-	_cancel_grenade_prepare()
+	FileLogger.info("[Player.Grenade] Thrown! Direction: %s, Distance: %.1f" % [str(throw_direction), drag_distance])
+
+	# Reset state (grenade is now independent)
+	_reset_grenade_state()
 
 
 ## Get current grenade count.

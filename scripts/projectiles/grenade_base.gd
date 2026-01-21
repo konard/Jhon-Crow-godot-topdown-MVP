@@ -67,6 +67,8 @@ func _ready() -> void:
 	# Connect to body entered for bounce effects
 	body_entered.connect(_on_body_entered)
 
+	FileLogger.info("[GrenadeBase] Grenade created at %s" % str(global_position))
+
 
 func _physics_process(delta: float) -> void:
 	if _has_exploded:
@@ -92,9 +94,11 @@ func _physics_process(delta: float) -> void:
 ## Activate the grenade timer. Call this when the player starts the throwing motion.
 func activate_timer() -> void:
 	if _timer_active:
+		FileLogger.info("[GrenadeBase] Timer already active")
 		return
 	_timer_active = true
 	_time_remaining = fuse_time
+	FileLogger.info("[GrenadeBase] Timer activated! %.1f seconds until explosion" % fuse_time)
 
 
 ## Throw the grenade in a direction with speed based on drag distance.
@@ -114,6 +118,8 @@ func throw_grenade(direction: Vector2, drag_distance: float) -> void:
 	# Rotate to face direction
 	rotation = direction.angle()
 
+	FileLogger.info("[GrenadeBase] Thrown! Direction: %s, Speed: %.1f" % [str(direction), throw_speed])
+
 
 ## Get the explosion effect radius. Override in subclasses.
 func _get_effect_radius() -> float:
@@ -132,6 +138,8 @@ func _explode() -> void:
 	if _has_exploded:
 		return
 	_has_exploded = true
+
+	FileLogger.info("[GrenadeBase] EXPLODED at %s!" % str(global_position))
 
 	# Play explosion sound
 	_play_explosion_sound()

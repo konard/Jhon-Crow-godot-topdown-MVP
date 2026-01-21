@@ -6,7 +6,8 @@ extends Node2D
 ## 2. Player shoots at targets (LMB)
 ## 3. Player switches fire mode (B key) - only if player has assault rifle
 ## 4. Player reloads using R -> F -> R sequence
-## 5. Shows completion message with Q restart hint
+## 5. Player throws a grenade (G + RMB drag right, then LMB -> LMB+RMB -> release LMB, then RMB drag and release)
+## 6. Shows completion message with Q restart hint
 ##
 ## Floating key prompts appear near the player until the action is completed.
 
@@ -25,6 +26,7 @@ enum TutorialStep {
 	SHOOT_TARGETS,
 	SWITCH_FIRE_MODE,
 	RELOAD,
+	THROW_GRENADE,
 	COMPLETED
 }
 
@@ -42,6 +44,9 @@ var _has_reloaded: bool = false
 
 ## Whether the player has switched fire mode.
 var _has_switched_fire_mode: bool = false
+
+## Whether the player has thrown a grenade.
+var _has_thrown_grenade: bool = false
 
 ## Whether the player has an assault rifle (for fire mode tutorial step).
 var _has_assault_rifle: bool = false
@@ -114,6 +119,9 @@ func _process(_delta: float) -> void:
 		TutorialStep.RELOAD:
 			# Reloading is tracked via player signal
 			pass
+		TutorialStep.THROW_GRENADE:
+			# Grenade throwing is tracked via player signal
+			pass
 		TutorialStep.COMPLETED:
 			# Tutorial is complete
 			pass
@@ -145,6 +153,14 @@ func _connect_player_signals() -> void:
 		# GDScript player
 		if _player.has_signal("reload_completed"):
 			_player.reload_completed.connect(_on_player_reload_completed)
+
+	# Connect to grenade thrown signal (both C# and GDScript players)
+	if _player.has_signal("GrenadeThrown"):
+		_player.GrenadeThrown.connect(_on_player_grenade_thrown)
+		print("Tutorial: Connected to GrenadeThrown signal (C#)")
+	elif _player.has_signal("grenade_thrown"):
+		_player.grenade_thrown.connect(_on_player_grenade_thrown)
+		print("Tutorial: Connected to grenade_thrown signal (GDScript)")
 
 
 ## Setup ammo tracking for the player's weapon.
@@ -291,6 +307,17 @@ func _on_player_reload_completed() -> void:
 	if not _has_reloaded:
 		_has_reloaded = true
 		print("Tutorial: Player reloaded")
+		_advance_to_step(TutorialStep.THROW_GRENADE)
+
+
+## Called when player throws a grenade.
+func _on_player_grenade_thrown() -> void:
+	if _current_step != TutorialStep.THROW_GRENADE:
+		return
+
+	if not _has_thrown_grenade:
+		_has_thrown_grenade = true
+		print("Tutorial: Player threw grenade")
 		_advance_to_step(TutorialStep.COMPLETED)
 
 
@@ -365,6 +392,12 @@ func _update_prompt_text() -> void:
 			_prompt_label.text = "[B] Переключи режим стрельбы"
 		TutorialStep.RELOAD:
 			_prompt_label.text = "[R] [F] [R] Перезарядись"
+		TutorialStep.THROW_GRENADE:
+			# 3-step grenade throwing:
+			# Step 1: G + RMB drag right = start timer
+			# Step 2: LMB -> LMB+RMB -> release LMB = prepare
+			# Step 3: RMB drag and release = throw
+			_prompt_label.text = "[G+ПКМ вправо] [ЛКМ+ПКМ] [ПКМ бросок]"
 		TutorialStep.COMPLETED:
 			_prompt_label.text = ""
 
