@@ -134,6 +134,106 @@ After the fix:
 3. Starting a level should equip the Mini UZI
 4. Weapon should function with all specified properties (15 shots/sec, 0.5 damage, etc.)
 
+---
+
+# Phase 2: Additional Bug Fixes (PR #219 - Iteration 2)
+
+## New Issues Discovered
+
+After the initial fix, user testing revealed two additional bugs:
+
+### Bug 1: UZI always shoots to the right
+
+**Symptom:** "узи сейчас стреляет всегда в одном направлении (вправо)"
+(Translation: "UZI always shoots in one direction (to the right)")
+
+### Bug 2: UZI bullets don't stop during Last Chance mode
+
+**Symptom:** "во время последнего шанса на высокой сложности пули узи не останавливаются"
+(Translation: "During last chance on high difficulty, UZI bullets don't stop")
+
+## Root Cause Analysis
+
+### Bug 1: Direction Issue - Property Name Case Mismatch
+
+**Problem:** C# and GDScript have different naming conventions:
+- C# uses PascalCase: `Direction`, `Speed`, `ShooterId`, `ShooterPosition`
+- GDScript uses snake_case: `direction`, `speed`, `shooter_id`, `shooter_position`
+
+In `Scripts/AbstractClasses/BaseWeapon.cs` (lines 341-367), the code was setting properties using PascalCase:
+```csharp
+bullet.Set("Direction", direction);
+bullet.Set("Speed", WeaponData.BulletSpeed);
+bullet.Set("ShooterId", owner.GetInstanceId());
+bullet.Set("ShooterPosition", GlobalPosition);
+```
+
+But the `scripts/projectiles/bullet.gd` script (line 33) declares the property as:
+```gdscript
+var direction: Vector2 = Vector2.RIGHT
+```
+
+Since Godot property names are case-sensitive, `Direction` != `direction`, so the direction was never set, defaulting to `Vector2.RIGHT`.
+
+### Bug 2: Bullets Not Freezing - Same Case Mismatch
+
+The `scripts/autoload/last_chance_effects_manager.gd` (lines 825-829) checks for `shooter_id`:
+```gdscript
+if "shooter_id" in node:
+    shooter_id = node.shooter_id
+elif "ShooterId" in node:
+    shooter_id = node.ShooterId
+```
+
+While this code handles both cases, the underlying issue was that C# weapons were setting `ShooterId` (PascalCase), which worked with the fallback, but fixing the direction issue required fixing all properties to use consistent snake_case.
+
+## Solution
+
+### Fix Applied to `Scripts/AbstractClasses/BaseWeapon.cs`
+
+Changed property names from PascalCase to snake_case to match GDScript conventions:
+
+**Before:**
+```csharp
+bullet.Set("Direction", direction);
+bullet.Set("Speed", WeaponData.BulletSpeed);
+bullet.Set("ShooterId", owner.GetInstanceId());
+bullet.Set("ShooterPosition", GlobalPosition);
+```
+
+**After:**
+```csharp
+bullet.Set("direction", direction);
+bullet.Set("speed", WeaponData.BulletSpeed);
+bullet.Set("shooter_id", owner.GetInstanceId());
+bullet.Set("shooter_position", GlobalPosition);
+```
+
+## Lessons Learned (Updated)
+
+1. **Cross-Language Property Access:**
+   - When C# code sets properties on GDScript nodes, use GDScript naming conventions (snake_case)
+   - Godot property names are **case-sensitive**
+   - Document the expected property names in comments
+
+2. **Testing Checklist for Cross-Language Features:**
+   - [ ] Verify property names match between C# and GDScript
+   - [ ] Test actual bullet direction in gameplay
+   - [ ] Test with game mechanics that depend on bullet properties (Last Chance mode)
+   - [ ] Log property values during debugging
+
+## Files Modified in Phase 2
+
+- `Scripts/AbstractClasses/BaseWeapon.cs` - Fixed property names to use snake_case
+
+## Game Logs Analyzed
+
+- `docs/case-studies/issue-218/logs/game_log_20260122_102037.txt` - Initial test
+- `docs/case-studies/issue-218/logs/game_log_20260122_102836.txt` - Detailed gameplay test showing:
+  - Mini UZI successfully selected from armory (line 80)
+  - Bullet penetration warnings about shooter_position=(0,0) indicating the fix was needed
+  - Last Chance mode detecting "Bullet" and "Bullet9mm" threats
+
 ## Related Files
 
 - `Scripts/Weapons/MiniUzi.cs` - Weapon implementation
