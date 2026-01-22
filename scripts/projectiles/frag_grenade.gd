@@ -145,6 +145,13 @@ func _on_explode() -> void:
 	for enemy in enemies:
 		_apply_explosion_damage(enemy)
 
+	# Also damage the player if in blast radius (offensive grenade deals same damage to all)
+	# Per issue #261: "наступательная граната должна наносить такой же урон игроку как и врагам"
+	# Translation: "offensive grenade should deal the same damage to the player as it does to enemies"
+	var player := _get_player_in_radius()
+	if player != null:
+		_apply_explosion_damage(player)
+
 	# Spawn shrapnel in all directions
 	_spawn_shrapnel()
 
@@ -216,6 +223,37 @@ func _get_enemies_in_radius() -> Array:
 				enemies_in_range.append(enemy)
 
 	return enemies_in_range
+
+
+## Find the player if within the effect radius (for offensive grenade damage).
+## Returns null if player is not in radius or has no line of sight.
+func _get_player_in_radius() -> Node2D:
+	var player: Node2D = null
+
+	# Check for player in "player" group
+	var players := get_tree().get_nodes_in_group("player")
+	if players.size() > 0 and players[0] is Node2D:
+		player = players[0] as Node2D
+
+	# Fallback: check for node named "Player" in current scene
+	if player == null:
+		var scene := get_tree().current_scene
+		if scene:
+			player = scene.get_node_or_null("Player") as Node2D
+
+	if player == null:
+		return null
+
+	# Check if player is in effect radius
+	if not is_in_effect_radius(player.global_position):
+		return null
+
+	# Check line of sight (player must be exposed to blast, walls block damage)
+	if not _has_line_of_sight_to(player):
+		return null
+
+	FileLogger.info("[FragGrenade] Player found in blast radius at distance %.1f" % global_position.distance_to(player.global_position))
+	return player
 
 
 ## Check if there's line of sight from grenade to target.
