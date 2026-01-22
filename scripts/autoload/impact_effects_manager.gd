@@ -31,8 +31,9 @@ const MAX_BLOOD_DECALS: int = 100
 ## Maximum distance to check for walls for blood splatters (in pixels).
 const WALL_SPLATTER_CHECK_DISTANCE: float = 100.0
 
-## Collision layer for walls (typically layer 1).
-const WALL_COLLISION_LAYER: int = 1
+## Collision layer for walls/obstacles (layer 3 = bitmask 4).
+## Layer mapping: 1=player, 2=enemies, 3=obstacles, 4=pickups, 5=projectiles, 6=targets
+const WALL_COLLISION_LAYER: int = 4
 
 ## Maximum number of bullet holes is unlimited (permanent holes as requested).
 ## Set to 0 to disable cleanup limit.
@@ -53,9 +54,22 @@ var _penetration_hole_scene: PackedScene = null
 ## Enable/disable debug logging for effect spawning.
 var _debug_effects: bool = false
 
+## Reference to FileLogger for persistent logging.
+var _file_logger: Node = null
+
 
 func _ready() -> void:
+	_file_logger = get_node_or_null("/root/FileLogger")
 	_preload_effect_scenes()
+	_log_info("ImpactEffectsManager ready - scenes loaded")
+
+
+## Logs to FileLogger if available.
+func _log_info(message: String) -> void:
+	if _file_logger and _file_logger.has_method("log_info"):
+		_file_logger.log_info("[ImpactEffects] " + message)
+	elif _debug_effects:
+		print("[ImpactEffectsManager] " + message)
 
 
 ## Preloads all particle effect scenes for efficient instantiation.
@@ -66,35 +80,52 @@ func _preload_effect_scenes() -> void:
 	var sparks_path := "res://scenes/effects/SparksEffect.tscn"
 	var blood_decal_path := "res://scenes/effects/BloodDecal.tscn"
 
+	# Track loaded scenes for logging
+	var loaded_scenes: Array[String] = []
+	var missing_scenes: Array[String] = []
+
 	if ResourceLoader.exists(dust_path):
 		_dust_effect_scene = load(dust_path)
+		loaded_scenes.append("DustEffect")
 		if _debug_effects:
 			print("[ImpactEffectsManager] Loaded DustEffect scene")
 	else:
+		missing_scenes.append("DustEffect")
 		push_warning("ImpactEffectsManager: DustEffect scene not found at " + dust_path)
 
 	if ResourceLoader.exists(blood_path):
 		_blood_effect_scene = load(blood_path)
+		loaded_scenes.append("BloodEffect")
 		if _debug_effects:
 			print("[ImpactEffectsManager] Loaded BloodEffect scene")
 	else:
+		missing_scenes.append("BloodEffect")
 		push_warning("ImpactEffectsManager: BloodEffect scene not found at " + blood_path)
 
 	if ResourceLoader.exists(sparks_path):
 		_sparks_effect_scene = load(sparks_path)
+		loaded_scenes.append("SparksEffect")
 		if _debug_effects:
 			print("[ImpactEffectsManager] Loaded SparksEffect scene")
 	else:
+		missing_scenes.append("SparksEffect")
 		push_warning("ImpactEffectsManager: SparksEffect scene not found at " + sparks_path)
 
 	if ResourceLoader.exists(blood_decal_path):
 		_blood_decal_scene = load(blood_decal_path)
+		loaded_scenes.append("BloodDecal")
 		if _debug_effects:
 			print("[ImpactEffectsManager] Loaded BloodDecal scene")
 	else:
+		missing_scenes.append("BloodDecal")
 		# Blood decals are optional - don't warn, just log in debug mode
 		if _debug_effects:
 			print("[ImpactEffectsManager] BloodDecal scene not found (optional)")
+
+	# Log summary of loaded scenes
+	_log_info("Scenes loaded: %s" % [", ".join(loaded_scenes)])
+	if missing_scenes.size() > 0:
+		_log_info("Missing scenes: %s" % [", ".join(missing_scenes)])
 
 	var bullet_hole_path := "res://scenes/effects/BulletHole.tscn"
 	if ResourceLoader.exists(bullet_hole_path):
@@ -163,16 +194,20 @@ func spawn_dust_effect(position: Vector2, surface_normal: Vector2, caliber_data:
 ## @param caliber_data: Optional caliber data for effect scaling.
 ## @param is_lethal: Whether the hit was lethal (affects intensity and decal spawning).
 func spawn_blood_effect(position: Vector2, hit_direction: Vector2, caliber_data: Resource = null, is_lethal: bool = true) -> void:
+	_log_info("spawn_blood_effect at %s, dir=%s, lethal=%s" % [position, hit_direction, is_lethal])
+
 	if _debug_effects:
 		print("[ImpactEffectsManager] spawn_blood_effect at ", position, " dir=", hit_direction, " lethal=", is_lethal)
 
 	if _blood_effect_scene == null:
+		_log_info("ERROR: _blood_effect_scene is null - cannot spawn blood effect")
 		if _debug_effects:
 			print("[ImpactEffectsManager] ERROR: _blood_effect_scene is null")
 		return
 
 	var effect := _blood_effect_scene.instantiate() as GPUParticles2D
 	if effect == null:
+		_log_info("ERROR: Failed to instantiate blood effect from scene")
 		if _debug_effects:
 			print("[ImpactEffectsManager] ERROR: Failed to instantiate blood effect")
 		return
@@ -207,6 +242,7 @@ func spawn_blood_effect(position: Vector2, hit_direction: Vector2, caliber_data:
 	# Check for nearby walls and spawn wall splatters
 	_spawn_wall_blood_splatter(position, hit_direction, effect_scale, is_lethal)
 
+	_log_info("Blood effect spawned at %s (scale=%s)" % [position, effect_scale])
 	if _debug_effects:
 		print("[ImpactEffectsManager] Blood effect spawned successfully")
 
@@ -285,10 +321,12 @@ func _add_effect_to_scene(effect: Node2D) -> void:
 ## @param intensity: Scale multiplier for decal size.
 func _spawn_blood_decal(position: Vector2, hit_direction: Vector2, intensity: float = 1.0) -> void:
 	if _blood_decal_scene == null:
+		_log_info("Blood decal scene is null - skipping floor decal")
 		return
 
 	var decal := _blood_decal_scene.instantiate() as Node2D
 	if decal == null:
+		_log_info("Failed to instantiate blood decal")
 		return
 
 	# Position slightly offset in hit direction (blood travels before landing)
@@ -313,6 +351,7 @@ func _spawn_blood_decal(position: Vector2, hit_direction: Vector2, intensity: fl
 		if oldest and is_instance_valid(oldest):
 			oldest.queue_free()
 
+	_log_info("Blood decal spawned at %s (total: %d)" % [decal.global_position, _blood_decals.size()])
 	if _debug_effects:
 		print("[ImpactEffectsManager] Blood decal spawned, total: ", _blood_decals.size())
 
@@ -364,6 +403,7 @@ func _spawn_wall_blood_splatter(hit_position: Vector2, hit_direction: Vector2, i
 	var wall_hit_pos: Vector2 = result.position
 	var wall_normal: Vector2 = result.normal
 
+	_log_info("Wall found for blood splatter at %s (dist=%d px)" % [wall_hit_pos, hit_position.distance_to(wall_hit_pos)])
 	if _debug_effects:
 		print("[ImpactEffectsManager] Wall found at ", wall_hit_pos, " normal=", wall_normal)
 

@@ -194,6 +194,13 @@ func test_wall_collision_layer_constant_exists() -> void:
 		"Manager should have WALL_COLLISION_LAYER constant")
 
 
+func test_wall_collision_layer_is_correct_bitmask() -> void:
+	# WALL_COLLISION_LAYER should be 4 (bitmask for layer 3 = obstacles)
+	# Layer mapping: 1=player(1), 2=enemies(2), 3=obstacles(4), etc.
+	assert_eq(impact_manager.WALL_COLLISION_LAYER, 4,
+		"WALL_COLLISION_LAYER should be 4 (layer 3 = obstacles)")
+
+
 func test_spawn_wall_blood_splatter_method_exists() -> void:
 	# The wall splatter spawning method should exist
 	assert_true(impact_manager.has_method("_spawn_wall_blood_splatter"),
