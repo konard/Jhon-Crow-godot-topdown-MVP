@@ -27,6 +27,8 @@ public enum ShotgunActionState
 /// <summary>
 /// Pump-action shotgun with multi-pellet spread.
 /// Features semi-automatic fire, pump-action cycling, and tube magazine.
+/// Fires ShotgunPellet projectiles with limited ricochet (35 degrees max).
+/// Pellets fire in a "swarm" pattern with slight delays between each.
 /// No laser sight, large screen shake per shot.
 /// </summary>
 public partial class Shotgun : BaseWeapon
@@ -42,6 +44,28 @@ public partial class Shotgun : BaseWeapon
     /// </summary>
     [Export]
     public int MaxPellets { get; set; } = 12;
+
+    /// <summary>
+    /// Pellet scene to instantiate when firing.
+    /// Uses ShotgunPellet which has limited ricochet (35 degrees).
+    /// If not set, falls back to BulletScene.
+    /// </summary>
+    [Export]
+    public PackedScene? PelletScene { get; set; }
+
+    /// <summary>
+    /// Delay between each pellet spawn in seconds.
+    /// Creates a "swarm" effect where pellets don't all fire at once.
+    /// Default 8ms per pellet.
+    /// </summary>
+    [Export]
+    public float PelletSpawnDelay { get; set; } = 0.008f;
+
+    /// <summary>
+    /// Whether this weapon uses a tube magazine (shell-by-shell loading).
+    /// When true, the magazine UI should be hidden and replaced with shell count.
+    /// </summary>
+    public bool UsesTubeMagazine { get; } = true;
 
     /// <summary>
     /// Whether the shotgun has been fired and needs cycling.
@@ -97,7 +121,21 @@ public partial class Shotgun : BaseWeapon
             GD.Print("[Shotgun] No ShotgunSprite node (visual model not yet added as per requirements)");
         }
 
-        GD.Print($"[Shotgun] Ready - MinPellets={MinPellets}, MaxPellets={MaxPellets}");
+        // Load pellet scene if not set
+        if (PelletScene == null)
+        {
+            PelletScene = GD.Load<PackedScene>("res://scenes/projectiles/csharp/ShotgunPellet.tscn");
+            if (PelletScene != null)
+            {
+                GD.Print("[Shotgun] Loaded ShotgunPellet scene");
+            }
+            else
+            {
+                GD.PrintErr("[Shotgun] WARNING: Could not load ShotgunPellet.tscn, will fallback to BulletScene");
+            }
+        }
+
+        GD.Print($"[Shotgun] Ready - MinPellets={MinPellets}, MaxPellets={MaxPellets}, PelletDelay={PelletSpawnDelay}s");
     }
 
     public override void _Process(double delta)
@@ -154,7 +192,9 @@ public partial class Shotgun : BaseWeapon
     }
 
     /// <summary>
-    /// Fires the shotgun - spawns multiple pellets with spread.
+    /// Fires the shotgun - spawns multiple pellets with spread in a swarm pattern.
+    /// Pellets are spawned with slight delays to create a natural swarm effect
+    /// where some pellets are ahead of others.
     /// </summary>
     /// <param name="direction">Base direction to fire.</param>
     /// <returns>True if the weapon fired successfully.</returns>
@@ -174,8 +214,9 @@ public partial class Shotgun : BaseWeapon
             return false;
         }
 
-        // Check fire rate
-        if (!CanFire || WeaponData == null || BulletScene == null)
+        // Check fire rate - use either BulletScene or PelletScene
+        PackedScene? projectileScene = PelletScene ?? BulletScene;
+        if (!CanFire || WeaponData == null || projectileScene == null)
         {
             return false;
         }
@@ -191,30 +232,10 @@ public partial class Shotgun : BaseWeapon
         float spreadRadians = Mathf.DegToRad(spreadAngle);
         float halfSpread = spreadRadians / 2.0f;
 
-        GD.Print($"[Shotgun] Firing {pelletCount} pellets with {spreadAngle}° spread");
+        GD.Print($"[Shotgun] Firing {pelletCount} pellets with {spreadAngle}° spread (swarm pattern)");
 
-        // Spawn pellets with distributed spread
-        for (int i = 0; i < pelletCount; i++)
-        {
-            // Distribute pellets evenly across the spread cone with some randomness
-            float baseAngle;
-            if (pelletCount > 1)
-            {
-                // Distribute pellets across the cone
-                float progress = (float)i / (pelletCount - 1);
-                baseAngle = Mathf.Lerp(-halfSpread, halfSpread, progress);
-                // Add small random deviation
-                baseAngle += (float)GD.RandRange(-spreadRadians * 0.1, spreadRadians * 0.1);
-            }
-            else
-            {
-                // Single pellet goes straight
-                baseAngle = 0;
-            }
-
-            Vector2 pelletDirection = fireDirection.Rotated(baseAngle);
-            SpawnBullet(pelletDirection);
-        }
+        // Fire pellets with delay for swarm effect
+        FirePelletsWithDelay(fireDirection, pelletCount, spreadRadians, halfSpread, projectileScene);
 
         // Consume ammo (one shell for all pellets)
         CurrentAmmo--;
@@ -239,6 +260,94 @@ public partial class Shotgun : BaseWeapon
         EmitSignal(SignalName.AmmoChanged, CurrentAmmo, ReserveAmmo);
 
         return true;
+    }
+
+    /// <summary>
+    /// Fires pellets with delay between each to create a swarm pattern.
+    /// The delay causes some pellets to be slightly ahead of others,
+    /// creating a more natural spread instead of a flat wall.
+    /// </summary>
+    private async void FirePelletsWithDelay(Vector2 fireDirection, int pelletCount, float spreadRadians, float halfSpread, PackedScene projectileScene)
+    {
+        for (int i = 0; i < pelletCount; i++)
+        {
+            // Distribute pellets evenly across the spread cone with some randomness
+            float baseAngle;
+            if (pelletCount > 1)
+            {
+                // Distribute pellets across the cone
+                float progress = (float)i / (pelletCount - 1);
+                baseAngle = Mathf.Lerp(-halfSpread, halfSpread, progress);
+                // Add small random deviation
+                baseAngle += (float)GD.RandRange(-spreadRadians * 0.1, spreadRadians * 0.1);
+            }
+            else
+            {
+                // Single pellet goes straight
+                baseAngle = 0;
+            }
+
+            Vector2 pelletDirection = fireDirection.Rotated(baseAngle);
+            SpawnPellet(pelletDirection, projectileScene);
+
+            // Wait between pellets (except for the last one)
+            if (i < pelletCount - 1 && PelletSpawnDelay > 0)
+            {
+                await ToSignal(GetTree().CreateTimer(PelletSpawnDelay), "timeout");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Spawns a pellet projectile in the specified direction.
+    /// Uses ShotgunPellet scene which has limited ricochet (35 degrees).
+    /// </summary>
+    private void SpawnPellet(Vector2 direction, PackedScene projectileScene)
+    {
+        if (projectileScene == null || WeaponData == null)
+        {
+            return;
+        }
+
+        // Check if the bullet spawn path is blocked by a wall
+        var (isBlocked, hitPosition, hitNormal) = CheckBulletSpawnPath(direction);
+
+        Vector2 spawnPosition;
+        if (isBlocked)
+        {
+            // Wall detected at point-blank range - spawn at weapon position
+            spawnPosition = GlobalPosition + direction * 2.0f;
+        }
+        else
+        {
+            // Normal case: spawn at offset position
+            spawnPosition = GlobalPosition + direction * BulletSpawnOffset;
+        }
+
+        var pellet = projectileScene.Instantiate<Node2D>();
+        pellet.GlobalPosition = spawnPosition;
+
+        // Set pellet properties
+        if (pellet.HasMethod("SetDirection"))
+        {
+            pellet.Call("SetDirection", direction);
+        }
+        else
+        {
+            pellet.Set("Direction", direction);
+        }
+
+        // Set pellet speed from weapon data
+        pellet.Set("Speed", WeaponData.BulletSpeed);
+
+        // Set shooter ID to prevent self-damage
+        var owner = GetParent();
+        if (owner != null)
+        {
+            pellet.Set("ShooterId", owner.GetInstanceId());
+        }
+
+        GetTree().CurrentScene.AddChild(pellet);
     }
 
     /// <summary>
