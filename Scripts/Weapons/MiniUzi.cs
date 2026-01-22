@@ -29,6 +29,17 @@ public partial class MiniUzi : BaseWeapon
     private Vector2 _aimDirection = Vector2.Right;
 
     /// <summary>
+    /// Current aim angle in radians. Used for sensitivity-based aiming
+    /// where the aim interpolates smoothly toward the target angle.
+    /// </summary>
+    private float _currentAimAngle = 0.0f;
+
+    /// <summary>
+    /// Whether the aim angle has been initialized.
+    /// </summary>
+    private bool _aimAngleInitialized = false;
+
+    /// <summary>
     /// Current recoil offset angle in radians.
     /// Mini UZI has higher recoil than assault rifle.
     /// </summary>
@@ -66,24 +77,24 @@ public partial class MiniUzi : BaseWeapon
     private float _spreadResetTimer = 0.0f;
 
     /// <summary>
-    /// Number of shots before spread starts increasing (lower than rifle - spread starts faster).
+    /// Number of shots before spread starts increasing.
     /// </summary>
-    private const int SpreadThreshold = 2;
+    private const int SpreadThreshold = 0;
 
     /// <summary>
     /// Time in seconds for spread to reset after stopping fire.
     /// </summary>
-    private const float SpreadResetTime = 0.2f;
+    private const float SpreadResetTime = 0.3f;
 
     /// <summary>
-    /// Spread increase per shot after threshold (higher than assault rifle).
+    /// Number of shots to reach maximum spread (user requirement: 10 bullets).
     /// </summary>
-    private const float SpreadIncreasePerShot = 1.0f;
+    private const int ShotsToMaxSpread = 10;
 
     /// <summary>
-    /// Maximum total spread in degrees.
+    /// Maximum total spread in degrees (user requirement: 60 degrees).
     /// </summary>
-    private const float MaxSpread = 12.0f;
+    private const float MaxSpread = 60.0f;
 
     public override void _Ready()
     {
@@ -130,7 +141,7 @@ public partial class MiniUzi : BaseWeapon
 
     /// <summary>
     /// Updates the aim direction based on mouse position.
-    /// Mini UZI has no laser sight - instant aim at cursor.
+    /// Mini UZI uses sensitivity-based aiming for faster rotation than assault rifle.
     /// </summary>
     private void UpdateAimDirection()
     {
@@ -138,10 +149,45 @@ public partial class MiniUzi : BaseWeapon
         Vector2 mousePos = GetGlobalMousePosition();
         Vector2 toMouse = mousePos - GlobalPosition;
 
-        if (toMouse.LengthSquared() > 0.001f)
+        // Calculate target angle from player to mouse
+        float targetAngle = toMouse.Angle();
+
+        // Initialize aim angle on first frame
+        if (!_aimAngleInitialized)
         {
-            _aimDirection = toMouse.Normalized();
+            _currentAimAngle = targetAngle;
+            _aimAngleInitialized = true;
         }
+
+        Vector2 direction;
+
+        // Apply sensitivity "leash" effect when sensitivity is set
+        if (WeaponData != null && WeaponData.Sensitivity > 0)
+        {
+            float angleDiff = Mathf.Wrap(targetAngle - _currentAimAngle, -Mathf.Pi, Mathf.Pi);
+            float rotationSpeed = WeaponData.Sensitivity * 10.0f;
+            float delta = (float)GetProcessDeltaTime();
+            float maxRotation = rotationSpeed * delta;
+            float actualRotation = Mathf.Clamp(angleDiff, -maxRotation, maxRotation);
+            _currentAimAngle += actualRotation;
+            direction = new Vector2(Mathf.Cos(_currentAimAngle), Mathf.Sin(_currentAimAngle));
+        }
+        else
+        {
+            // Automatic mode: direct aim at cursor (instant response)
+            if (toMouse.LengthSquared() > 0.001f)
+            {
+                direction = toMouse.Normalized();
+                _currentAimAngle = targetAngle;
+            }
+            else
+            {
+                direction = _aimDirection;
+            }
+        }
+
+        // Store the aim direction for shooting
+        _aimDirection = direction;
 
         // Update weapon sprite rotation to match aim direction
         UpdateWeaponSpriteRotation(_aimDirection);
@@ -210,7 +256,7 @@ public partial class MiniUzi : BaseWeapon
 
     /// <summary>
     /// Applies recoil offset to the shooting direction and adds new recoil.
-    /// Mini UZI has higher spread increase than assault rifle.
+    /// Mini UZI has progressive spread that reaches max (60°) after 10 bullets.
     /// </summary>
     private Vector2 ApplySpread(Vector2 direction)
     {
@@ -218,15 +264,16 @@ public partial class MiniUzi : BaseWeapon
         Vector2 result = direction.Rotated(_recoilOffset);
 
         // Add recoil for the next shot
-        if (WeaponData != null && WeaponData.SpreadAngle > 0)
+        if (WeaponData != null)
         {
             // Calculate current spread based on shot count
-            float currentSpread = WeaponData.SpreadAngle;
-            if (_shotCount > SpreadThreshold)
-            {
-                currentSpread += (_shotCount - SpreadThreshold) * SpreadIncreasePerShot;
-                currentSpread = Mathf.Min(currentSpread, MaxSpread);
-            }
+            // Progressive spread: starts at base SpreadAngle and increases to MaxSpread over ShotsToMaxSpread bullets
+            float baseSpread = WeaponData.SpreadAngle;
+            float spreadRange = MaxSpread - baseSpread;
+
+            // Calculate spread ratio (0.0 at shot 0, 1.0 at shot ShotsToMaxSpread)
+            float spreadRatio = Mathf.Clamp((float)_shotCount / ShotsToMaxSpread, 0.0f, 1.0f);
+            float currentSpread = baseSpread + spreadRange * spreadRatio;
 
             // Convert spread angle from degrees to radians
             float spreadRadians = Mathf.DegToRad(currentSpread);
@@ -235,9 +282,12 @@ public partial class MiniUzi : BaseWeapon
             float recoilDirection = (float)GD.RandRange(-1.0, 1.0);
             float recoilAmount = spreadRadians * Mathf.Abs(recoilDirection);
 
-            // Add to current recoil, clamped to maximum
+            // Calculate max recoil offset based on current spread
+            float maxRecoilOffset = Mathf.DegToRad(currentSpread * 0.5f);
+
+            // Add to current recoil, clamped to current maximum
             _recoilOffset += recoilDirection * recoilAmount * 0.6f;
-            _recoilOffset = Mathf.Clamp(_recoilOffset, -MaxRecoilOffset, MaxRecoilOffset);
+            _recoilOffset = Mathf.Clamp(_recoilOffset, -maxRecoilOffset, maxRecoilOffset);
         }
 
         // Reset time since last shot for recoil recovery
@@ -326,12 +376,8 @@ public partial class MiniUzi : BaseWeapon
             shakeIntensity = WeaponData.ScreenShakeIntensity;
         }
 
-        // Calculate spread ratio for recovery time
-        float spreadRatio = 0.0f;
-        if (_shotCount > SpreadThreshold)
-        {
-            spreadRatio = Mathf.Clamp((_shotCount - SpreadThreshold) * 0.2f, 0.0f, 1.0f);
-        }
+        // Calculate spread ratio for recovery time (matches progressive spread system)
+        float spreadRatio = Mathf.Clamp((float)_shotCount / ShotsToMaxSpread, 0.0f, 1.0f);
 
         // Calculate recovery time
         float minRecovery = WeaponData.ScreenShakeMinRecoveryTime;

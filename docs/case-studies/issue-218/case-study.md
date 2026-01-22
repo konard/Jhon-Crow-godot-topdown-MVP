@@ -244,3 +244,135 @@ bullet.Set("shooter_position", GlobalPosition);
 - `scripts/autoload/game_manager.gd` - Game manager with weapon scenes
 - `scripts/levels/tutorial_level.gd` - Tutorial level weapon support
 - `scripts/levels/building_level.gd` - Building level weapon support
+
+---
+
+# Phase 3: Weapon Balancing and Improvements (PR #219 - Iteration 3)
+
+## New Issues Reported
+
+User reported several balancing and feature improvements needed for the Mini UZI:
+
+1. **Higher sensitivity (faster rotation)**: "у узи должна быть больше чувствительность (быстрее поворачиваться)"
+2. **Maximum spread 60 degrees**: "максимальный разброс - 60 градусов"
+3. **Progressive spread over 10 bullets**: "разброс доходит до максимального значения за очередь из 10 пуль"
+4. **Faster fire rate**: "увеличь скорострельность (узи должно быть минимум в 2 раза скорострельнее чем m16)"
+5. **Add weapon model/sprite**: "добавь модель узи на основе референсов"
+
+## Analysis
+
+### Comparison with M16 (Assault Rifle)
+
+| Parameter | M16 (AssaultRifle) | Mini UZI (Before) | Mini UZI (After) |
+|-----------|-------------------|-------------------|------------------|
+| Fire Rate | 10.0 shots/sec | 15.0 shots/sec | 25.0 shots/sec (2.5x M16) |
+| Sensitivity | 4.0 | 0.0 (instant) | 8.0 (2x M16) |
+| Base Spread | 2.0° | 8.0° | 6.0° |
+| Max Spread | ~5.0° (hardcoded) | 12.0° | 60.0° |
+| Shots to Max Spread | ~7 shots | ~5 shots | 10 shots |
+
+### Understanding Sensitivity
+
+From `Scripts/Data/WeaponData.cs` (lines 85-93):
+```csharp
+/// <summary>
+/// Aiming sensitivity for the weapon. Controls how fast the weapon rotates toward the cursor.
+/// Works like a "leash" - the virtual cursor distance from player is divided by this value.
+/// Higher sensitivity = faster rotation (cursor feels closer).
+/// When set to 0 (default), uses automatic sensitivity based on actual cursor distance.
+/// Recommended values: 1-10, with 4 being a good middle ground.
+/// </summary>
+```
+
+Mini UZI previously had sensitivity 0.0 (instant aim), which doesn't match the request for "faster rotation". The user wanted a weapon that rotates faster than M16, so setting sensitivity to 8.0 (double M16's 4.0) achieves this.
+
+## Solution
+
+### Changes to MiniUziData.tres
+
+```tres
+[resource]
+...
+FireRate = 25.0          # Was 15.0, now 2.5x faster than M16 (10.0)
+SpreadAngle = 6.0        # Base spread before progressive increase
+Sensitivity = 8.0        # Was 0.0, now 2x faster rotation than M16 (4.0)
+```
+
+### Changes to MiniUzi.cs
+
+1. **Added sensitivity-based aiming** (matching AssaultRifle.cs implementation):
+   - Added `_currentAimAngle` and `_aimAngleInitialized` fields
+   - Updated `UpdateAimDirection()` to use sensitivity-based rotation interpolation
+
+2. **Updated spread constants**:
+   ```csharp
+   private const int SpreadThreshold = 0;           // Spread starts immediately
+   private const float SpreadResetTime = 0.3f;      // Time to reset spread
+   private const int ShotsToMaxSpread = 10;         // Max spread after 10 bullets
+   private const float MaxSpread = 60.0f;           // Maximum 60 degrees
+   ```
+
+3. **Updated `ApplySpread()` method** for progressive spread:
+   - Linear interpolation from base spread (6°) to max spread (60°) over 10 bullets
+   - `spreadRatio = shotCount / 10` (clamped to 1.0)
+   - `currentSpread = baseSpread + (MaxSpread - baseSpread) * spreadRatio`
+
+### Created Mini UZI Sprite
+
+- **File**: `assets/sprites/weapons/mini_uzi_topdown.png`
+- **Dimensions**: 40x10 pixels (compact submachine gun proportions)
+- **Style**: Matches existing weapon sprites (dark gray metallic, top-down view)
+
+### Updated MiniUzi.tscn
+
+- Added texture reference to MiniUziSprite node
+- Sprite displays during gameplay
+
+## Visual References Used
+
+User provided two reference links:
+1. https://www.turbosquid.com/ru/3d-model/uzi - Commercial 3D model reference
+2. https://sketchfab.com/3d-models/imi-mini-uzi-uzm-49e03633068342c5abcb3f925d425e2f - IMI Mini UZI UZM model
+
+Key characteristics of Mini UZI used for sprite design:
+- Compact submachine gun (shorter than M16)
+- Distinctive grip magazine location
+- Folding stock (not visible in top-down view)
+- Short barrel with compact receiver
+
+## Files Modified in Phase 3
+
+- `resources/weapons/MiniUziData.tres` - Updated FireRate, Sensitivity, SpreadAngle
+- `Scripts/Weapons/MiniUzi.cs` - Added sensitivity aiming, progressive spread system
+- `scenes/weapons/csharp/MiniUzi.tscn` - Added sprite texture reference
+- `assets/sprites/weapons/mini_uzi_topdown.png` - New weapon sprite (40x10 px)
+- `docs/case-studies/issue-218/case-study.md` - This documentation
+
+## Lessons Learned (Phase 3)
+
+1. **Weapon Balancing Considerations:**
+   - Fire rate comparisons should be relative to existing weapons
+   - Sensitivity affects perceived responsiveness (higher = faster rotation)
+   - Progressive spread systems need clear parameters (start, end, shots to reach end)
+
+2. **Sprite Creation for Top-Down Games:**
+   - Match existing sprite dimensions and style
+   - Keep proportions realistic (UZI is shorter than assault rifle)
+   - Use similar color palette (grays, blacks for weapons)
+
+## Final Mini UZI Specifications
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| Fire Rate | 25.0 shots/sec | 2.5x faster than M16 |
+| Damage | 0.5 | Unchanged |
+| Magazine Size | 32 | Unchanged |
+| Bullet Speed | 1200 px/s | Unchanged |
+| Sensitivity | 8.0 | 2x faster rotation than M16 |
+| Base Spread | 6.0° | Starting accuracy |
+| Max Spread | 60.0° | Maximum inaccuracy |
+| Shots to Max Spread | 10 | Progressive spread |
+| Screen Shake | 15.0 | Unchanged |
+| Loudness | 1469 | Same as M16 |
+| Ricochet Angle | ≤20° | Via caliber_9x19.tres |
+| Wall Penetration | No | Via caliber_9x19.tres |
