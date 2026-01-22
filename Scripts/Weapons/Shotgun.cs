@@ -774,90 +774,100 @@ public partial class Shotgun : BaseWeapon
     #region Audio
 
     /// <summary>
-    /// Plays the empty gun click sound.
+    /// Plays the shotgun empty click sound.
+    /// Uses shotgun-specific empty click for authentic pump-action sound.
     /// </summary>
     private void PlayEmptyClickSound()
     {
         var audioManager = GetNodeOrNull("/root/AudioManager");
-        if (audioManager != null && audioManager.HasMethod("play_empty_click"))
+        if (audioManager != null && audioManager.HasMethod("play_shotgun_empty_click"))
         {
-            audioManager.Call("play_empty_click", GlobalPosition);
+            audioManager.Call("play_shotgun_empty_click", GlobalPosition);
         }
     }
 
     /// <summary>
     /// Plays the shotgun firing sound.
+    /// Randomly selects from 4 shotgun shot variants for variety.
     /// </summary>
     private void PlayShotgunSound()
     {
         var audioManager = GetNodeOrNull("/root/AudioManager");
-        // Use M16 shot as placeholder until shotgun-specific sound is added
-        if (audioManager != null && audioManager.HasMethod("play_m16_shot"))
+        if (audioManager != null && audioManager.HasMethod("play_shotgun_shot"))
         {
-            audioManager.Call("play_m16_shot", GlobalPosition);
+            audioManager.Call("play_shotgun_shot", GlobalPosition);
         }
     }
 
     /// <summary>
     /// Plays the pump up sound (ejecting shell).
+    /// Opens the action to eject the spent shell casing.
     /// </summary>
-    private void PlayPumpUpSound()
+    private async void PlayPumpUpSound()
     {
         var audioManager = GetNodeOrNull("/root/AudioManager");
-        // Use reload mag out sound as placeholder for pump up
-        if (audioManager != null && audioManager.HasMethod("play_reload_mag_out"))
+        if (audioManager != null && audioManager.HasMethod("play_shotgun_action_open"))
         {
-            audioManager.Call("play_reload_mag_out", GlobalPosition);
+            audioManager.Call("play_shotgun_action_open", GlobalPosition);
+        }
+
+        // Shell ejects shortly after action opens
+        await ToSignal(GetTree().CreateTimer(0.15), "timeout");
+        if (audioManager != null && audioManager.HasMethod("play_shell_shotgun"))
+        {
+            audioManager.Call("play_shell_shotgun", GlobalPosition);
         }
     }
 
     /// <summary>
     /// Plays the pump down sound (chambering round).
+    /// Closes the action to chamber the next shell.
     /// </summary>
     private void PlayPumpDownSound()
     {
         var audioManager = GetNodeOrNull("/root/AudioManager");
-        // Use M16 bolt sound as placeholder for pump down/chambering
-        if (audioManager != null && audioManager.HasMethod("play_m16_bolt"))
+        if (audioManager != null && audioManager.HasMethod("play_shotgun_action_close"))
         {
-            audioManager.Call("play_m16_bolt", GlobalPosition);
+            audioManager.Call("play_shotgun_action_close", GlobalPosition);
         }
     }
 
     /// <summary>
     /// Plays the action open sound (for reload).
+    /// Opens the bolt to begin shell loading sequence.
     /// </summary>
     private void PlayActionOpenSound()
     {
         var audioManager = GetNodeOrNull("/root/AudioManager");
-        if (audioManager != null && audioManager.HasMethod("play_reload_mag_out"))
+        if (audioManager != null && audioManager.HasMethod("play_shotgun_action_open"))
         {
-            audioManager.Call("play_reload_mag_out", GlobalPosition);
+            audioManager.Call("play_shotgun_action_open", GlobalPosition);
         }
     }
 
     /// <summary>
     /// Plays the action close sound (after reload).
+    /// Closes the bolt to complete reload sequence and chamber a round.
     /// </summary>
     private void PlayActionCloseSound()
     {
         var audioManager = GetNodeOrNull("/root/AudioManager");
-        if (audioManager != null && audioManager.HasMethod("play_m16_bolt"))
+        if (audioManager != null && audioManager.HasMethod("play_shotgun_action_close"))
         {
-            audioManager.Call("play_m16_bolt", GlobalPosition);
+            audioManager.Call("play_shotgun_action_close", GlobalPosition);
         }
     }
 
     /// <summary>
     /// Plays the shell load sound.
+    /// Sound of inserting a shell into the tube magazine.
     /// </summary>
     private void PlayShellLoadSound()
     {
         var audioManager = GetNodeOrNull("/root/AudioManager");
-        // Use mag in sound as placeholder for shell loading
-        if (audioManager != null && audioManager.HasMethod("play_reload_mag_in"))
+        if (audioManager != null && audioManager.HasMethod("play_shotgun_load_shell"))
         {
-            audioManager.Call("play_reload_mag_in", GlobalPosition);
+            audioManager.Call("play_shotgun_load_shell", GlobalPosition);
         }
     }
 
