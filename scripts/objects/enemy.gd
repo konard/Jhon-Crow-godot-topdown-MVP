@@ -2249,7 +2249,9 @@ func _shoot_with_inaccuracy() -> void:
 	if not _should_shoot_at_target(target_position):
 		return
 
-	var direction := (target_position - global_position).normalized()
+	# Get the weapon's actual forward direction (where the barrel is pointing)
+	# This ensures bullets fly in the direction the weapon visually points
+	var direction := _get_weapon_forward_direction()
 
 	# Add inaccuracy spread
 	var inaccuracy_angle := randf_range(-RETREAT_INACCURACY_SPREAD, RETREAT_INACCURACY_SPREAD)
@@ -2300,7 +2302,9 @@ func _shoot_burst_shot() -> void:
 		return
 
 	var target_position := _player.global_position
-	var direction := (target_position - global_position).normalized()
+	# Get the weapon's actual forward direction (where the barrel is pointing)
+	# This ensures bullets fly in the direction the weapon visually points
+	var direction := _get_weapon_forward_direction()
 
 	# Apply arc offset for burst spread
 	direction = direction.rotated(_retreat_burst_angle_offset)
@@ -2881,8 +2885,9 @@ func _find_sidestep_direction_for_clear_shot(direction_to_player: Vector2) -> Ve
 func _should_shoot_at_target(target_position: Vector2) -> bool:
 	# Check if the immediate path to bullet spawn is clear
 	# This prevents shooting into walls the enemy is flush against
-	var direction := (target_position - global_position).normalized()
-	if not _is_bullet_spawn_clear(direction):
+	# Use weapon forward direction since that's where bullets actually spawn and travel
+	var weapon_direction := _get_weapon_forward_direction()
+	if not _is_bullet_spawn_clear(weapon_direction):
 		return false
 
 	# Check if friendlies are in the way
@@ -3553,7 +3558,9 @@ func _shoot() -> void:
 	if not _should_shoot_at_target(target_position):
 		return
 
-	var direction := (target_position - global_position).normalized()
+	# Get the weapon's actual forward direction (where the barrel is pointing)
+	# This ensures bullets fly in the direction the weapon visually points
+	var direction := _get_weapon_forward_direction()
 
 	# Create bullet instance
 	var bullet := bullet_scene.instantiate()
@@ -3562,7 +3569,7 @@ func _shoot() -> void:
 	var bullet_spawn_pos := _get_bullet_spawn_position(direction)
 	bullet.global_position = bullet_spawn_pos
 
-	# Set bullet direction
+	# Set bullet direction to match weapon barrel direction
 	bullet.direction = direction
 
 	# Set shooter ID to identify this enemy as the source
@@ -3859,6 +3866,24 @@ func _get_bullet_spawn_position(_direction: Vector2) -> Vector2:
 	else:
 		# Fallback to old behavior if weapon sprite or enemy model not found
 		return global_position + _direction * bullet_spawn_offset
+
+
+## Returns the weapon's forward direction in world coordinates.
+## This is the direction the weapon barrel is actually pointing.
+## Uses the weapon sprite's global transform to account for rotation and scale (including Y flip).
+## @returns: Normalized direction vector the weapon is pointing.
+func _get_weapon_forward_direction() -> Vector2:
+	if _weapon_sprite and _enemy_model:
+		# Use the weapon sprite's global transform to get its actual forward direction.
+		# The weapon sprite points RIGHT (+X) in its local space.
+		# global_transform.x gives us the weapon's local +X axis in world coordinates,
+		# accounting for both rotation AND scale (including Y flip).
+		return _weapon_sprite.global_transform.x.normalized()
+	else:
+		# Fallback: calculate direction to player
+		if _player and is_instance_valid(_player):
+			return (_player.global_position - global_position).normalized()
+		return Vector2.RIGHT  # Default fallback
 
 
 ## Updates the weapon sprite rotation to match the direction the enemy will shoot.

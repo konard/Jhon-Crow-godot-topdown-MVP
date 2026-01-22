@@ -684,3 +684,145 @@ The muzzle is at the RIGHT side of the sprite (+X direction), not the left.
 21. **Verify Assumptions About Sprite Orientation:** Before writing transformation code, view the actual sprite asset to confirm its orientation. Comments saying "sprites face LEFT" should be verified against the actual sprite file.
 
 22. **Test Edge Cases:** The bullet spawn issue was most visible when enemies faced certain directions (particularly when Y-flip was active). Testing with enemies facing all directions would have revealed the issue sooner.
+
+### Phase 15: Seventh User Feedback (2026-01-22T09:37:13Z)
+
+User @Jhon-Crow tested the solution again and reported two issues:
+
+1. **"когда игрок стреляет вверх он наносит себе урон"**
+   - Translation: When the player shoots upward they damage themselves
+   - Player bullets hitting the player's own hitbox
+
+2. **"пули из оружия врагов должны вылетать по направлению ствола"**
+   - Translation: Bullets from enemy weapons should fly in the direction of the barrel
+   - Enemy bullets fly from the muzzle but in any direction, not aligned with the weapon barrel
+
+Attached game logs:
+- `game_log_20260122_123430.txt`
+- `game_log_20260122_123547.txt`
+
+### Phase 16: Root Cause Analysis and Fix (2026-01-22)
+
+## Root Cause Analysis (Phase 15-16)
+
+### Issue 11: Player Self-Damage When Shooting Upward
+
+**Root Cause:** The C# `Bullet.cs` class had properties that couldn't be properly set via Godot's `Node.Set()` method from the C# `BaseWeapon.cs` shooter.
+
+The property binding chain:
+1. `BaseWeapon.cs` calls `bullet.Set("shooter_id", owner.GetInstanceId())`
+2. Godot tries to find a property named `shooter_id` (snake_case)
+3. C# `Bullet.cs` has `public ulong ShooterId { get; set; }` (PascalCase)
+4. Without the `[Export]` attribute, Godot cannot find the property via snake_case name
+5. `ShooterId` remains at default value `0`
+6. Self-damage check fails: `if (ShooterId == body.GetInstanceId())` never matches
+
+**Evidence from logs:** The game logs showed bullets with `shooter_id=0` and `shooter_position=(0, 0)`, which should have been set to the player's instance ID and position.
+
+**Fix Applied:**
+Added `[Export]` attribute to three properties in `Scripts/Projectiles/Bullet.cs`:
+
+```csharp
+// Before:
+public Vector2 Direction { get; set; } = Vector2.Right;
+public ulong ShooterId { get; set; } = 0;
+public Vector2 ShooterPosition { get; set; } = Vector2.Zero;
+
+// After:
+[Export]
+public Vector2 Direction { get; set; } = Vector2.Right;
+
+[Export]
+public ulong ShooterId { get; set; } = 0;
+
+[Export]
+public Vector2 ShooterPosition { get; set; } = Vector2.Zero;
+```
+
+The `[Export]` attribute in Godot's C# API:
+- Exposes the property to the Godot editor
+- Makes the property accessible via `Node.Set()` and `Node.Get()` with snake_case naming
+- Enables cross-language property setting between GDScript and C#
+
+### Issue 12: Enemy Bullets Not Flying in Barrel Direction
+
+**Root Cause:** The bullet spawn position was correctly calculated from the weapon muzzle (using `global_transform.x`), but the bullet's **direction** was still calculated as the direction from enemy center to player.
+
+In `enemy.gd` `_shoot()` function:
+```gdscript
+# Bullet spawns from correct muzzle position
+var bullet_spawn_pos := _get_bullet_spawn_position(direction)
+
+# BUT direction was calculated to point at player, not barrel forward
+var direction := (target_position - global_position).normalized()
+bullet.direction = direction  # Wrong! Uses direction to player, not barrel direction
+```
+
+This caused a visual mismatch:
+- Weapon sprite points at the player (correct visual)
+- Bullet spawns from muzzle (correct position)
+- Bullet flies toward player center (but muzzle may not point exactly at player center due to position offset)
+
+**Fix Applied:**
+1. Added new helper function `_get_weapon_forward_direction()`:
+```gdscript
+## Returns the weapon's forward direction in world coordinates.
+## This is the direction the weapon barrel is actually pointing.
+## Uses the weapon sprite's global transform to account for rotation and scale (including Y flip).
+## @returns: Normalized direction vector the weapon is pointing.
+func _get_weapon_forward_direction() -> Vector2:
+    if _weapon_sprite and _enemy_model:
+        # Use the weapon sprite's global transform to get its actual forward direction.
+        # The weapon sprite points RIGHT (+X) in its local space.
+        # global_transform.x gives us the weapon's local +X axis in world coordinates,
+        # accounting for both rotation AND scale (including Y flip).
+        return _weapon_sprite.global_transform.x.normalized()
+    else:
+        # Fallback: calculate direction to player
+        if _player and is_instance_valid(_player):
+            return (_player.global_position - global_position).normalized()
+        return Vector2.RIGHT  # Default fallback
+```
+
+2. Updated all shooting functions to use weapon forward direction:
+   - `_shoot()` - main shooting function
+   - `_shoot_with_inaccuracy()` - shooting during retreat with spread
+   - `_shoot_burst_shot()` - burst fire with arc spread
+
+3. Updated `_should_shoot_at_target()` to check bullet spawn clearance using weapon direction:
+```gdscript
+# Before:
+var direction := (target_position - global_position).normalized()
+if not _is_bullet_spawn_clear(direction):
+
+# After:
+var weapon_direction := _get_weapon_forward_direction()
+if not _is_bullet_spawn_clear(weapon_direction):
+```
+
+## Updated Summary of All Issues and Fixes
+
+| Issue | Root Cause | Fix |
+|-------|-----------|-----|
+| 1. Enemy smaller than player | Missing 1.3x scale multiplier | Added `enemy_model_scale` export and scale in `_ready()` |
+| 2. No walking animation | Old script references + missing animation code | Updated references, added `_update_walk_animation()` |
+| 3. Weapon at 90° angle | Competing rotation systems | Removed `_update_weapon_sprite_rotation()` call |
+| 4. Bullets from center | Spawning from enemy position | Added `_get_bullet_spawn_position()` using weapon mount |
+| 5. Walking backwards | Enemy sprites face opposite direction (PI offset) | Added PI to rotation angle |
+| 6. M16 too large | Using 64px sprite vs player's integrated smaller rifle | Changed to `m16_topdown_small.png` (32px) |
+| 7. Weapon not visible | Smaller sprite obscured by body parts | Reverted to original larger sprite `m16_rifle_topdown.png` |
+| 8. Last Chance not freezing bullets | Branch missing pellet detection fix from main | Merged main branch with latest fixes |
+| 9. Bullets not from weapon muzzle | Direction mismatch and execution order issue | Use weapon's actual rotation for muzzle direction; moved rotation update before shooting |
+| 10. Bullets STILL not from muzzle | Wrong local forward direction (used -X instead of +X) and Y-flip not handled | Use `global_transform.x` for correct world-space forward direction |
+| 11. Player self-damage when shooting upward | C# Bullet properties missing [Export] attribute, preventing cross-language property binding | Added [Export] to Direction, ShooterId, ShooterPosition in Bullet.cs |
+| 12. Enemy bullets not flying in barrel direction | Bullet direction calculated to player, not weapon forward | Added `_get_weapon_forward_direction()` and updated all shooting functions |
+
+## Additional Lessons Learned (Phase 15-16)
+
+23. **Cross-Language Property Binding in Godot:** When using C# with Godot, properties must have the `[Export]` attribute to be accessible via `Node.Set()` and `Node.Get()` with snake_case names. Without it, cross-language property setting silently fails.
+
+24. **Bullet Direction vs Spawn Position:** The spawn position and travel direction are independent calculations. Even with correct spawn position, the travel direction must also be correct for visual consistency.
+
+25. **Consistency Across All Shooting Functions:** When fixing shooting behavior, ensure ALL shooting functions are updated (main shoot, inaccurate shoot, burst shoot, etc.), not just the primary one.
+
+26. **Use Same Logic for Validation and Execution:** The bullet spawn clearance check (`_should_shoot_at_target`) should use the same direction calculation as the actual shooting, otherwise the validation may pass but the shot may still visually look wrong.
