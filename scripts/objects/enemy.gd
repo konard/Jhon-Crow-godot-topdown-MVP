@@ -1112,15 +1112,15 @@ func _process_ai_state(delta: float) -> void:
 		var direction_to_player := (_player.global_position - global_position).normalized()
 		var has_clear_shot := _is_bullet_spawn_clear(direction_to_player)
 
-		if has_clear_shot and _can_shoot():
+		if has_clear_shot and _can_shoot() and _shoot_timer >= shoot_cooldown:
 			# Log the distraction attack
 			_log_to_file("Player distracted - priority attack triggered")
 
 			# Aim at player immediately
 			rotation = direction_to_player.angle()
 
-			# Shoot immediately - bypassing ALL timers and state restrictions
-			# This is the highest priority action in the game
+			# Shoot with priority - still respects weapon fire rate cooldown
+			# This is a high priority action but the weapon cannot physically fire faster
 			_shoot()
 			_shoot_timer = 0.0  # Reset shoot timer after distraction shot
 
@@ -1168,7 +1168,7 @@ func _process_ai_state(delta: float) -> void:
 		var direction_to_player := (_player.global_position - global_position).normalized()
 		var has_clear_shot := _is_bullet_spawn_clear(direction_to_player)
 
-		if has_clear_shot and _can_shoot():
+		if has_clear_shot and _can_shoot() and _shoot_timer >= shoot_cooldown:
 			# Log the vulnerability attack
 			var reason: String = "reloading" if player_reloading else "empty ammo"
 			_log_to_file("Player %s - priority attack triggered" % reason)
@@ -1176,7 +1176,8 @@ func _process_ai_state(delta: float) -> void:
 			# Aim at player immediately
 			rotation = direction_to_player.angle()
 
-			# Shoot immediately - bypassing ALL timers and state restrictions
+			# Shoot with priority - still respects weapon fire rate cooldown
+			# The weapon cannot physically fire faster than its fire rate
 			_shoot()
 			_shoot_timer = 0.0  # Reset shoot timer after vulnerability shot
 
