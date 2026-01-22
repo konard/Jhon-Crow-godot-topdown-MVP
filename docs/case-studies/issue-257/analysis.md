@@ -21,11 +21,26 @@ Reference: [Reddit blood effect demo](https://www.reddit.com/r/godot/comments/ff
    - Log analysis revealed NO `[ImpactEffects]` entries at all
    - This indicated either the autoload wasn't loading or the logging wasn't working
 
-5. **Investigation Round 2** (current):
+5. **Investigation Round 2** (commit `1b38ffe`):
    - Found that `_log_info()` only wrote to FileLogger, not console
    - If FileLogger was null for any reason, NO logging occurred
    - Added always-print logging for diagnostics
    - Added diagnostic logging in enemy.gd to track ImpactEffectsManager lookups
+
+6. **User Testing Round 3** (game_log_20260122_221039.txt):
+   - User reported "не вижу изменений" (I don't see changes)
+   - **CRITICAL FINDING**: Log shows `[ENEMY] WARNING: ImpactEffectsManager not found at /root/ImpactEffectsManager`
+   - This means our enemy.gd diagnostic code IS running
+   - But ImpactEffectsManager autoload is NOT being instantiated at all
+
+7. **Investigation Round 3** (current):
+   - Confirmed enemy.gd has our diagnostic changes (shows [ENEMY] warnings)
+   - Confirmed ImpactEffectsManager._ready() is NEVER called (no [ImpactEffects] messages)
+   - Comparing autoload initialization sequence:
+     - `[SoundPropagation] autoload initialized` ✓ (autoload #7)
+     - `[ImpactEffects] ImpactEffectsManager ready` ✗ MISSING (autoload #10)
+     - `[PenultimateHit] ready` ✓ (autoload #11)
+   - ImpactEffectsManager is specifically failing to load while others succeed
 
 ## Root Cause Analysis
 
@@ -46,7 +61,16 @@ Reference: [Reddit blood effect demo](https://www.reddit.com/r/godot/comments/ff
 
 ### Issues Identified
 
-1. **Incorrect Wall Collision Layer** (Bug):
+1. **ImpactEffectsManager Autoload Not Loading** (CRITICAL):
+   - The autoload is registered in `project.godot` at `*res://scripts/autoload/impact_effects_manager.gd`
+   - But `get_node_or_null("/root/ImpactEffectsManager")` returns `null`
+   - This indicates a **silent script load failure**
+   - According to [Godot Issue #78230](https://github.com/godotengine/godot/issues/78230):
+     - "Autoload scripts compile error are not reported"
+     - They fail with confusing "Script does not inherit from Node" message
+   - The script may have a parse-time error that prevents loading
+
+2. **Incorrect Wall Collision Layer** (Bug):
    - `WALL_COLLISION_LAYER` was set to `1` (player layer)
    - Should be `4` (bitmask for layer 3 = obstacles)
    - Layer mapping from project.godot:
@@ -121,6 +145,28 @@ else:
 - Log when wall splatters are found
 - Log when ImpactEffectsManager is (or isn't) found by enemy.gd
 
+### 5. Added First-Line Diagnostic (Investigation Round 3)
+
+```gdscript
+func _ready() -> void:
+    # CRITICAL: First line diagnostic - if this doesn't appear, script failed to load
+    print("[ImpactEffectsManager] _ready() STARTING...")
+    ...
+```
+
+### 6. Added Autoload List Diagnostic (Investigation Round 3)
+
+```gdscript
+# In enemy.gd when ImpactEffectsManager not found:
+var root_node := get_node_or_null("/root")
+if root_node:
+    var autoload_names: Array = []
+    for child in root_node.get_children():
+        if child.name != get_tree().current_scene.name:
+            autoload_names.append(child.name)
+    _log_to_file("Available autoloads: " + ", ".join(autoload_names))
+```
+
 ## Verification
 
 ### Expected Log Output After Fix
@@ -160,6 +206,8 @@ If ImpactEffectsManager is not loading, you would see:
 2. **Add diagnostic logging** for autoload managers to aid debugging
 3. **Use FileLogger** for persistent logging visible in game log files
 4. **Document layer mappings** in comments near collision layer constants
+5. **Godot autoloads can fail silently** - always add first-line diagnostics
+6. **When an autoload isn't found, list available autoloads** to help diagnose which are loading
 
 ## Related Files
 
@@ -175,4 +223,12 @@ If ImpactEffectsManager is not loading, you would see:
 
 - [Godot Issue #84072](https://github.com/godotengine/godot/issues/84072) - GPU Particles in compatibility mode
 - [Godot Issue #85945](https://github.com/godotengine/godot/issues/85945) - GPUParticles2D not rendering in compatibility mode
+- [Godot Issue #78230](https://github.com/godotengine/godot/issues/78230) - Autoload scripts compile error are not reported
+- [Godot Issue #83119](https://github.com/godotengine/godot/issues/83119) - AutoLoad fails to load in an unintuitive way
 - [Reddit Reference](https://www.reddit.com/r/godot/comments/ffvamw/made_a_blood_effect_using_render_textures_as_a/?tl=ru) - Blood effect using render textures
+
+## User Logs
+
+- `game_log_20260122_194241.txt` - First test, no [ImpactEffects] entries
+- `game_log_20260122_201222.txt` - Second test, still no [ImpactEffects] entries
+- `game_log_20260122_221039.txt` - Third test, [ENEMY] WARNING confirms autoload not found
