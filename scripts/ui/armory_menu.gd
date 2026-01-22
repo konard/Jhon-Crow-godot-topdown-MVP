@@ -64,20 +64,31 @@ var _grenade_buttons: Dictionary = {}
 
 
 func _ready() -> void:
+	FileLogger.info("[ArmoryMenu] _ready() called")
+
 	# Connect button signals
 	back_button.pressed.connect(_on_back_pressed)
 
 	# Get grenade manager reference
 	_grenade_manager = get_node_or_null("/root/GrenadeManager")
+	FileLogger.info("[ArmoryMenu] GrenadeManager found: %s" % (_grenade_manager != null))
 
 	# Populate weapon grid (includes grenades now)
 	_populate_weapon_grid()
 
 	# Set process mode to allow input while paused
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	FileLogger.info("[ArmoryMenu] _ready() complete")
 
 
 func _populate_weapon_grid() -> void:
+	FileLogger.info("[ArmoryMenu] _populate_weapon_grid() called")
+
+	# Verify weapon_grid is valid
+	if weapon_grid == null:
+		FileLogger.info("[ArmoryMenu] ERROR: weapon_grid is null!")
+		return
+
 	# Clear existing children
 	for child in weapon_grid.get_children():
 		child.queue_free()
@@ -86,6 +97,8 @@ func _populate_weapon_grid() -> void:
 	# Count unlocked weapons for status
 	var unlocked_count: int = 0
 	var total_count: int = WEAPONS.size()
+
+	FileLogger.info("[ArmoryMenu] Creating weapon slots, count: %d" % WEAPONS.size())
 
 	# Create a slot for each weapon
 	for weapon_id in WEAPONS:
@@ -96,9 +109,12 @@ func _populate_weapon_grid() -> void:
 		if weapon_data["unlocked"]:
 			unlocked_count += 1
 
+	FileLogger.info("[ArmoryMenu] Weapon slots created: %d" % WEAPONS.size())
+
 	# Add grenade selection slots
 	if _grenade_manager:
 		var grenade_types := _grenade_manager.get_all_grenade_types()
+		FileLogger.info("[ArmoryMenu] Creating grenade slots, count: %d" % grenade_types.size())
 		for grenade_type in grenade_types:
 			var grenade_data := _grenade_manager.get_grenade_data(grenade_type)
 			var is_selected := _grenade_manager.is_selected(grenade_type)
@@ -106,9 +122,13 @@ func _populate_weapon_grid() -> void:
 			weapon_grid.add_child(slot)
 			unlocked_count += 1  # All grenades are unlocked
 			total_count += 1
+		FileLogger.info("[ArmoryMenu] Grenade slots created")
+	else:
+		FileLogger.info("[ArmoryMenu] WARNING: GrenadeManager not found, skipping grenade slots")
 
 	# Update status label
 	status_label.text = "Unlocked: %d / %d" % [unlocked_count, total_count]
+	FileLogger.info("[ArmoryMenu] Grid populated: %d items, unlocked: %d" % [total_count, unlocked_count])
 
 
 func _create_weapon_slot(weapon_id: String, weapon_data: Dictionary, _is_selectable: bool) -> PanelContainer:
@@ -162,7 +182,9 @@ func _create_weapon_slot(weapon_id: String, weapon_data: Dictionary, _is_selecta
 
 func _create_grenade_slot(grenade_type: int, grenade_data: Dictionary, is_selected: bool) -> PanelContainer:
 	var slot := PanelContainer.new()
-	slot.name = grenade_data.get("name", "grenade") + "_slot"
+	# Use sanitized name for node (no spaces allowed in Godot node names)
+	var grenade_name: String = grenade_data.get("name", "grenade")
+	slot.name = grenade_name.replace(" ", "_") + "_slot"
 	slot.custom_minimum_size = Vector2(100, 120)
 
 	# Add style override for selected state
