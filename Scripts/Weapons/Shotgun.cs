@@ -417,7 +417,7 @@ public partial class Shotgun : BaseWeapon
 
                 if (VerboseInputLogging)
                 {
-                    GD.Print($"[Shotgun.FIX#243] RMB drag started - initial MMB state: {_isMiddleMouseHeld}");
+                    LogToFile($"[Shotgun.FIX#243] RMB drag started - initial MMB state: {_isMiddleMouseHeld}");
                 }
             }
             else
@@ -453,7 +453,7 @@ public partial class Shotgun : BaseWeapon
 
             if (VerboseInputLogging)
             {
-                GD.Print($"[Shotgun.FIX#243] RMB released - processing drag gesture (wasMMBDuringDrag={_wasMiddleMouseHeldDuringDrag})");
+                LogToFile($"[Shotgun.FIX#243] RMB released - processing drag gesture (wasMMBDuringDrag={_wasMiddleMouseHeldDuringDrag})");
             }
 
             ProcessDragGesture(dragVector);
@@ -622,7 +622,7 @@ public partial class Shotgun : BaseWeapon
                         if (VerboseInputLogging)
                         {
                             bool shouldLoadShell = _wasMiddleMouseHeldDuringDrag || _isMiddleMouseHeld;
-                            GD.Print($"[Shotgun.FIX#243] Mid-drag DOWN in Loading state: shouldLoad={shouldLoadShell} - NOT processing mid-drag, waiting for RMB release");
+                            LogToFile($"[Shotgun.FIX#243] Mid-drag DOWN in Loading state: shouldLoad={shouldLoadShell} - NOT processing mid-drag, waiting for RMB release");
                         }
                         return false;
                     }
@@ -783,19 +783,19 @@ public partial class Shotgun : BaseWeapon
 
                     if (VerboseInputLogging)
                     {
-                        GD.Print($"[Shotgun.FIX#243] RMB release in Loading state: wasMMBDuringDrag={_wasMiddleMouseHeldDuringDrag}, isMMBHeld={_isMiddleMouseHeld} => shouldLoadShell={shouldLoadShell}");
+                        LogToFile($"[Shotgun.FIX#243] RMB release in Loading state: wasMMBDuringDrag={_wasMiddleMouseHeldDuringDrag}, isMMBHeld={_isMiddleMouseHeld} => shouldLoadShell={shouldLoadShell}");
                     }
 
                     if (shouldLoadShell)
                     {
                         // Load a shell (MMB + RMB drag down)
-                        GD.Print("[Shotgun.FIX#243] Loading shell (MMB was held during drag)");
+                        LogToFile("[Shotgun.FIX#243] Loading shell (MMB was held during drag)");
                         LoadShell();
                     }
                     else
                     {
                         // Close bolt without MMB - finish reload
-                        GD.Print("[Shotgun.FIX#243] Closing bolt (MMB was not held)");
+                        LogToFile("[Shotgun.FIX#243] Closing bolt (MMB was not held)");
                         CompleteReload();
                     }
                 }
@@ -1360,6 +1360,28 @@ public partial class Shotgun : BaseWeapon
                 ShotgunActionState.Ready => "Ready",
                 _ => "Unknown"
             };
+        }
+    }
+
+    #endregion
+
+    #region Logging
+
+    /// <summary>
+    /// Logs a message to the FileLogger (GDScript autoload) for debugging.
+    /// This ensures diagnostic messages appear in the user's log file.
+    /// </summary>
+    /// <param name="message">The message to log.</param>
+    private void LogToFile(string message)
+    {
+        // Print to console
+        GD.Print(message);
+
+        // Also log to FileLogger if available
+        var fileLogger = GetNodeOrNull("/root/FileLogger");
+        if (fileLogger != null && fileLogger.HasMethod("log_info"))
+        {
+            fileLogger.Call("log_info", message);
         }
     }
 
