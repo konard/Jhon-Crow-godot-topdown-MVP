@@ -5,14 +5,13 @@ extends CanvasLayer
 ## which are locked (coming in future updates). Also allows selection of
 ## grenade type (Flashbang or Frag Grenade).
 ##
-## Note: Changing grenade type will restart the current level.
-
-# Top-level code to verify script is being parsed and loaded
-# This runs when the script is first loaded/compiled
-var _script_load_marker: bool = true
+## Note: Changing grenade type or weapon will restart the current level.
 
 ## Signal emitted when the back button is pressed.
 signal back_pressed
+
+## Signal emitted when a weapon is selected.
+signal weapon_selected(weapon_id: String)
 
 ## Dictionary of all weapons with their data.
 ## Keys: weapon_id, Values: dictionary with name, icon_path, unlocked status
@@ -30,10 +29,10 @@ const WEAPONS: Dictionary = {
 		"description": "Coming soon"
 	},
 	"shotgun": {
-		"name": "???",
-		"icon_path": "",
-		"unlocked": false,
-		"description": "Coming soon"
+		"name": "Shotgun",
+		"icon_path": "res://assets/sprites/weapons/shotgun_icon.png",
+		"unlocked": true,
+		"description": "Pump-action shotgun - 6-12 pellets per shot, 15° spread, no wall penetration. Press LMB to fire."
 	},
 	"smg": {
 		"name": "???",
@@ -60,121 +59,84 @@ const WEAPONS: Dictionary = {
 @onready var back_button: Button = $MenuContainer/PanelContainer/MarginContainer/VBoxContainer/BackButton
 @onready var status_label: Label = $MenuContainer/PanelContainer/MarginContainer/VBoxContainer/StatusLabel
 
+## Currently selected weapon slot (for visual highlighting).
+var _selected_slot: PanelContainer = null
+
+## Map of weapon slots by weapon ID.
+var _weapon_slots: Dictionary = {}
+
 ## Reference to grenade manager.
 var _grenade_manager: Node = null
 
-## Dictionary to track grenade selection buttons.
-var _grenade_buttons: Dictionary = {}
-
-
-func _init() -> void:
-	# _init runs when the object is created, before _enter_tree and _ready
-	# Using print() in case FileLogger isn't available yet
-	print("[ArmoryMenu] _init() called - object created")
-	if FileLogger:
-		FileLogger.info("[ArmoryMenu] _init() called - object created")
-
-
-func _enter_tree() -> void:
-	print("[ArmoryMenu] _enter_tree() called - node added to tree")
-	FileLogger.info("[ArmoryMenu] _enter_tree() called - node added to tree")
+## Dictionary to track grenade selection slots.
+var _grenade_slots: Dictionary = {}
 
 
 func _ready() -> void:
-	print("[ArmoryMenu] _ready() called")
-	FileLogger.info("[ArmoryMenu] _ready() called")
-
-	# Verify UI elements
-	if back_button == null:
-		FileLogger.info("[ArmoryMenu] ERROR: back_button is null!")
-	else:
+	# Connect button signals
+	if back_button:
 		back_button.pressed.connect(_on_back_pressed)
-
-	if status_label == null:
-		FileLogger.info("[ArmoryMenu] ERROR: status_label is null!")
 
 	# Get grenade manager reference
 	_grenade_manager = get_node_or_null("/root/GrenadeManager")
-	FileLogger.info("[ArmoryMenu] GrenadeManager found: %s" % (_grenade_manager != null))
 
-	# Populate weapon grid (includes grenades now)
+	# Populate weapon grid
 	_populate_weapon_grid()
 
 	# Set process mode to allow input while paused
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	FileLogger.info("[ArmoryMenu] _ready() complete, visible: %s" % visible)
 
 
 func _populate_weapon_grid() -> void:
-	FileLogger.info("[ArmoryMenu] _populate_weapon_grid() called")
-
-	# Verify weapon_grid is valid
-	if weapon_grid == null:
-		FileLogger.info("[ArmoryMenu] ERROR: weapon_grid is null! Node path may be incorrect.")
-		return
-
-	# Clear existing children - wait for next frame if items exist
-	var existing_children := weapon_grid.get_children()
-	FileLogger.info("[ArmoryMenu] Clearing %d existing children" % existing_children.size())
-	for child in existing_children:
+	# Clear existing children and slot tracking
+	for child in weapon_grid.get_children():
 		child.queue_free()
-	_grenade_buttons.clear()
+	_weapon_slots.clear()
+	_grenade_slots.clear()
+	_selected_slot = null
 
-	# Count unlocked weapons for status
+	# Count unlocked items for status
 	var unlocked_count: int = 0
 	var total_count: int = WEAPONS.size()
 
-	FileLogger.info("[ArmoryMenu] Creating weapon slots, count: %d" % WEAPONS.size())
-
 	# Create a slot for each weapon
-	var weapons_added: int = 0
 	for weapon_id in WEAPONS:
 		var weapon_data: Dictionary = WEAPONS[weapon_id]
-		var slot := _create_weapon_slot(weapon_id, weapon_data, false)
-		if slot:
-			weapon_grid.add_child(slot)
-			weapons_added += 1
-			FileLogger.info("[ArmoryMenu] Added weapon slot: %s" % weapon_id)
+		var slot := _create_weapon_slot(weapon_id, weapon_data)
+		weapon_grid.add_child(slot)
+		_weapon_slots[weapon_id] = slot
 
 		if weapon_data["unlocked"]:
 			unlocked_count += 1
 
-	FileLogger.info("[ArmoryMenu] Weapon slots created: %d/%d" % [weapons_added, WEAPONS.size()])
-
-	# Add grenade selection slots
+	# Add grenade selection slots if GrenadeManager is available
 	if _grenade_manager:
 		var grenade_types := _grenade_manager.get_all_grenade_types()
-		FileLogger.info("[ArmoryMenu] Creating grenade slots, count: %d" % grenade_types.size())
-		var grenades_added: int = 0
 		for grenade_type in grenade_types:
 			var grenade_data := _grenade_manager.get_grenade_data(grenade_type)
 			var is_selected := _grenade_manager.is_selected(grenade_type)
-			FileLogger.info("[ArmoryMenu] Creating grenade slot: type=%d, name=%s, selected=%s" % [grenade_type, grenade_data.get("name", "unknown"), is_selected])
 			var slot := _create_grenade_slot(grenade_type, grenade_data, is_selected)
 			if slot:
 				weapon_grid.add_child(slot)
-				grenades_added += 1
+				_grenade_slots[grenade_type] = slot
 				unlocked_count += 1
 				total_count += 1
-		FileLogger.info("[ArmoryMenu] Grenade slots created: %d" % grenades_added)
-	else:
-		FileLogger.info("[ArmoryMenu] WARNING: GrenadeManager not found, skipping grenade slots")
 
 	# Update status label
 	if status_label:
 		status_label.text = "Unlocked: %d / %d" % [unlocked_count, total_count]
-	else:
-		FileLogger.info("[ArmoryMenu] WARNING: status_label is null, cannot update text")
 
-	# Final count
-	var final_child_count := weapon_grid.get_child_count()
-	FileLogger.info("[ArmoryMenu] Grid populated complete: %d items visible, unlocked: %d, weapon_grid children: %d" % [total_count, unlocked_count, final_child_count])
+	# Highlight currently selected weapon from GameManager
+	_highlight_selected_weapon()
 
 
-func _create_weapon_slot(weapon_id: String, weapon_data: Dictionary, _is_selectable: bool) -> PanelContainer:
+func _create_weapon_slot(weapon_id: String, weapon_data: Dictionary) -> PanelContainer:
 	var slot := PanelContainer.new()
 	slot.name = weapon_id + "_slot"
 	slot.custom_minimum_size = Vector2(100, 100)
+
+	# Store weapon_id in slot's metadata for click handling
+	slot.set_meta("weapon_id", weapon_id)
 
 	var vbox := VBoxContainer.new()
 	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -217,6 +179,15 @@ func _create_weapon_slot(weapon_id: String, weapon_data: Dictionary, _is_selecta
 	# Add tooltip
 	slot.tooltip_text = weapon_data["description"]
 
+	# Make unlocked weapons clickable
+	if weapon_data["unlocked"]:
+		slot.mouse_filter = Control.MOUSE_FILTER_STOP
+		slot.gui_input.connect(_on_slot_gui_input.bind(slot, weapon_id))
+		# Change cursor on hover for clickable slots
+		slot.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	else:
+		slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
 	return slot
 
 
@@ -227,14 +198,26 @@ func _create_grenade_slot(grenade_type: int, grenade_data: Dictionary, is_select
 	slot.name = grenade_name.replace(" ", "_") + "_slot"
 	slot.custom_minimum_size = Vector2(100, 120)
 
-	# Add style override for selected state
+	# Store grenade_type in slot's metadata
+	slot.set_meta("grenade_type", grenade_type)
+	slot.set_meta("is_grenade", true)
+
+	# Add style based on selection state
+	var style := StyleBoxFlat.new()
 	if is_selected:
-		var style := StyleBoxFlat.new()
-		style.bg_color = Color(0.2, 0.5, 0.3, 0.5)  # Green tint for selected
-		style.set_border_width_all(2)
-		style.border_color = Color(0.3, 0.8, 0.4, 1.0)
-		style.set_corner_radius_all(5)
-		slot.add_theme_stylebox_override("panel", style)
+		style.bg_color = Color(0.3, 0.5, 0.3, 0.8)  # Green highlight for selected
+		style.border_color = Color(0.4, 0.8, 0.4, 1.0)
+		style.border_width_left = 2
+		style.border_width_right = 2
+		style.border_width_top = 2
+		style.border_width_bottom = 2
+	else:
+		style.bg_color = Color(0.2, 0.2, 0.2, 0.5)
+	style.corner_radius_top_left = 4
+	style.corner_radius_top_right = 4
+	style.corner_radius_bottom_left = 4
+	style.corner_radius_bottom_right = 4
+	slot.add_theme_stylebox_override("panel", style)
 
 	var vbox := VBoxContainer.new()
 	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -271,38 +254,97 @@ func _create_grenade_slot(grenade_type: int, grenade_data: Dictionary, is_select
 	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	vbox.add_child(name_label)
 
-	# Selection button
-	var select_button := Button.new()
-	select_button.custom_minimum_size = Vector2(80, 25)
-
-	if is_selected:
-		select_button.text = "Selected"
-		select_button.disabled = true
-	else:
-		select_button.text = "Select"
-		select_button.pressed.connect(_on_grenade_selected.bind(grenade_type))
-
-	vbox.add_child(select_button)
-	_grenade_buttons[grenade_type] = select_button
-
 	# Add tooltip
 	slot.tooltip_text = grenade_data.get("description", "")
+
+	# Make clickable for selection
+	slot.mouse_filter = Control.MOUSE_FILTER_STOP
+	slot.gui_input.connect(_on_grenade_slot_gui_input.bind(slot, grenade_type))
+	slot.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 
 	return slot
 
 
-func _on_grenade_selected(grenade_type: int) -> void:
+## Handle click on weapon slot.
+func _on_slot_gui_input(event: InputEvent, slot: PanelContainer, weapon_id: String) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		_select_weapon(weapon_id)
+		# Play click sound via AudioManager
+		var audio_manager = get_node_or_null("/root/AudioManager")
+		if audio_manager and audio_manager.has_method("play_ui_click"):
+			audio_manager.play_ui_click()
+
+
+## Handle click on grenade slot.
+func _on_grenade_slot_gui_input(event: InputEvent, slot: PanelContainer, grenade_type: int) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		_select_grenade(grenade_type)
+		# Play click sound via AudioManager
+		var audio_manager = get_node_or_null("/root/AudioManager")
+		if audio_manager and audio_manager.has_method("play_ui_click"):
+			audio_manager.play_ui_click()
+
+
+## Select a weapon and update GameManager.
+func _select_weapon(weapon_id: String) -> void:
+	# Update selection in GameManager
+	if GameManager:
+		GameManager.set_selected_weapon(weapon_id)
+
+	# Emit signal for external listeners
+	weapon_selected.emit(weapon_id)
+
+	# Update visual highlighting
+	_highlight_selected_weapon()
+
+
+## Select a grenade type and update GrenadeManager.
+func _select_grenade(grenade_type: int) -> void:
 	if _grenade_manager == null:
 		return
 
-	# Get grenade name for confirmation
-	var grenade_name := _grenade_manager.get_grenade_name(grenade_type)
-
-	# Show confirmation that level will restart
-	FileLogger.info("[ArmoryMenu] Player selected grenade: %s - level will restart" % grenade_name)
+	# Check if this grenade is already selected
+	if _grenade_manager.is_selected(grenade_type):
+		return
 
 	# Set the new grenade type (this will restart the level)
 	_grenade_manager.set_grenade_type(grenade_type, true)
+
+
+## Highlight the currently selected weapon slot.
+func _highlight_selected_weapon() -> void:
+	var current_weapon_id: String = "m16"  # Default
+	if GameManager:
+		current_weapon_id = GameManager.get_selected_weapon()
+
+	# Reset all weapon slots to default style
+	for wid in _weapon_slots:
+		var slot: PanelContainer = _weapon_slots[wid]
+		# Create default style (transparent/subtle background)
+		var default_style := StyleBoxFlat.new()
+		default_style.bg_color = Color(0.2, 0.2, 0.2, 0.5)
+		default_style.corner_radius_top_left = 4
+		default_style.corner_radius_top_right = 4
+		default_style.corner_radius_bottom_left = 4
+		default_style.corner_radius_bottom_right = 4
+		slot.add_theme_stylebox_override("panel", default_style)
+
+	# Highlight selected weapon slot
+	if current_weapon_id in _weapon_slots:
+		var selected_slot: PanelContainer = _weapon_slots[current_weapon_id]
+		var selected_style := StyleBoxFlat.new()
+		selected_style.bg_color = Color(0.3, 0.5, 0.3, 0.8)  # Green highlight
+		selected_style.border_color = Color(0.4, 0.8, 0.4, 1.0)
+		selected_style.border_width_left = 2
+		selected_style.border_width_right = 2
+		selected_style.border_width_top = 2
+		selected_style.border_width_bottom = 2
+		selected_style.corner_radius_top_left = 4
+		selected_style.corner_radius_top_right = 4
+		selected_style.corner_radius_bottom_left = 4
+		selected_style.corner_radius_bottom_right = 4
+		selected_slot.add_theme_stylebox_override("panel", selected_style)
+		_selected_slot = selected_slot
 
 
 func _on_back_pressed() -> void:
