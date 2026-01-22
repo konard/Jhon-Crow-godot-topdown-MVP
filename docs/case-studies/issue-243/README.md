@@ -182,8 +182,76 @@ None of the user logs contained `[Shotgun.FIX#243]` diagnostic messages. Root ca
 1. **GD.Print() vs FileLogger**: The diagnostic messages used `GD.Print()` which only writes to Godot console, NOT to FileLogger's `game_log_*.txt` files
 2. **Build timing**: User's latest test (game_log_20260122_152159.txt) was from 12:21:59 UTC, but the LogToFile fix was committed at 12:48:24 UTC
 
-### Verification Pending
-User needs to download the build from 12:49:49 UTC or later to test the LogToFile fix.
+### Verification Complete ✅
+User tested with the new build (game_log_20260122_165024.txt at ~13:50 UTC, after build at 12:56 UTC).
+
+---
+
+## Latest Log Analysis (2026-01-22 16:50)
+
+### User Feedback
+User reported: "я пользуюсь только последними билдами. проблема не решена." (I'm only using the latest builds. The problem is not solved.)
+
+### Log Files Analyzed
+- `logs/game_log_20260122_164842.txt` - Short session (3 seconds), no shotgun activity
+- `logs/game_log_20260122_165024.txt` - Full test session with diagnostic messages
+
+### Key Findings from `game_log_20260122_165024.txt`
+
+**1. Diagnostic logging is NOW working:** `[Shotgun.FIX#243]` messages appear in the log, confirming user is using the fixed build.
+
+**2. Shell loading works correctly:** When user holds MMB during drag DOWN:
+- Lines 204-205: `shouldLoadShell=True` → "Loading shell" ✅
+- Lines 218-219: `shouldLoadShell=True` → "Loading shell" ✅
+- Lines 232-233: `shouldLoadShell=True` → "Loading shell" ✅
+- ... (8 shells loaded successfully in one sequence)
+
+**3. Bolt closing works correctly:** When user does NOT hold MMB:
+- Lines 180-181: `shouldLoadShell=False` → "Closing bolt" ✅
+- Lines 328-329: `shouldLoadShell=False` → "Closing bolt" ✅
+
+**4. Detailed analysis of "first attempt" issue:**
+
+Looking at lines 168-181 (first reload attempt):
+```
+[16:50:44] RMB drag started - initial MMB state: False  ← User NOT holding MMB
+[16:50:44] Mid-drag DOWN in Loading state: shouldLoad=False
+...
+[16:50:44] RMB release in Loading state: wasMMBDuringDrag=False, isMMBHeld=False => shouldLoadShell=False
+[16:50:44] Closing bolt (MMB was not held)
+```
+
+The log clearly shows MMB was NOT held during this drag. The bolt closed as expected.
+
+Immediately after (lines 194-205), when user holds MMB:
+```
+[16:50:51] RMB drag started - initial MMB state: True  ← User IS holding MMB
+...
+[16:50:51] RMB release in Loading state: wasMMBDuringDrag=True, isMMBHeld=True => shouldLoadShell=True
+[16:50:51] Loading shell (MMB was held during drag)
+```
+
+**5. Summary statistics:**
+- Total shell load attempts with MMB=True: 11 (all succeeded ✅)
+- Total shell load attempts with MMB=False: 2 (bolt closed as expected ✅)
+
+### Conclusion
+
+**The fix IS working correctly.** The diagnostic logs prove that:
+1. When MMB is held during RMB drag DOWN in Loading state → shell loads
+2. When MMB is NOT held during RMB drag DOWN in Loading state → bolt closes
+
+The user's perception of "doesn't work on first attempt" may be caused by:
+1. User not actually holding MMB on the first attempt (log shows MMB=False)
+2. User expectation mismatch about when to press MMB
+3. Possible input device issue (MMB not registering reliably)
+
+### Recommendation
+
+Ask user to clarify:
+1. What specific behavior are they experiencing that they consider a bug?
+2. Are they seeing the `[Shotgun.FIX#243]` diagnostic messages in their logs?
+3. When the log shows "initial MMB state: False" and bolt closes, do they believe they had MMB held?
 
 ---
 
