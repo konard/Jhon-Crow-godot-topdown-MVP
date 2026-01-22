@@ -87,6 +87,20 @@ func pause_game() -> void:
 	get_tree().paused = true
 	# Show cursor for menu interaction (still confined to window)
 	Input.set_mouse_mode(Input.MOUSE_MODE_CONFINED)
+
+	# Close any open submenus and restore main menu container
+	if _controls_menu and _controls_menu.visible:
+		_controls_menu.hide()
+	if _difficulty_menu and _difficulty_menu.visible:
+		_difficulty_menu.hide()
+	if _levels_menu and _levels_menu.visible:
+		_levels_menu.hide()
+	if _armory_menu and _armory_menu.visible:
+		_armory_menu.hide()
+
+	# Ensure main menu container is visible
+	menu_container.show()
+
 	show()
 	resume_button.grab_focus()
 
