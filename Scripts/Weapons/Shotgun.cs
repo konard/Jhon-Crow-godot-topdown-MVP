@@ -333,6 +333,9 @@ public partial class Shotgun : BaseWeapon
     /// Handles RMB drag gestures for pump-action cycling and reload.
     /// Pump: Drag UP = eject shell, Drag DOWN = chamber round
     /// Reload: Drag UP = open bolt, Drag DOWN = load shell (with MMB) or close bolt
+    ///
+    /// Supports continuous gestures: hold RMB, drag UP (open bolt), then without
+    /// releasing RMB, drag DOWN (close bolt) - all in one continuous movement.
     /// </summary>
     private void HandleDragGestures()
     {
@@ -347,6 +350,22 @@ public partial class Shotgun : BaseWeapon
                 // This fixes the issue where MMB pressed at the exact same frame as RMB drag start
                 // would be missed because we used to reset to false unconditionally
                 _wasMiddleMouseHeldDuringDrag = _isMiddleMouseHeld;
+            }
+            else
+            {
+                // Already dragging - check for mid-drag gesture completion
+                // This enables continuous gestures without releasing RMB
+                Vector2 currentPosition = GetGlobalMousePosition();
+                Vector2 dragVector = currentPosition - _dragStartPosition;
+
+                // Check if a vertical gesture has been completed mid-drag
+                if (TryProcessMidDragGesture(dragVector))
+                {
+                    // Gesture processed - reset drag start for next gesture
+                    _dragStartPosition = currentPosition;
+                    // Reset MMB tracking for the new gesture segment
+                    _wasMiddleMouseHeldDuringDrag = _isMiddleMouseHeld;
+                }
             }
 
             // Track if MMB is held at any point during the drag
@@ -368,6 +387,138 @@ public partial class Shotgun : BaseWeapon
             // Reset the flag after processing
             _wasMiddleMouseHeldDuringDrag = false;
         }
+    }
+
+    /// <summary>
+    /// Attempts to process a gesture while RMB is still held (mid-drag).
+    /// This enables continuous drag-and-drop: hold RMB, drag up, then drag down
+    /// all in one fluid motion without releasing RMB.
+    /// </summary>
+    /// <param name="dragVector">Current drag vector from start position.</param>
+    /// <returns>True if a gesture was processed, false otherwise.</returns>
+    private bool TryProcessMidDragGesture(Vector2 dragVector)
+    {
+        // Check if drag is long enough for a gesture
+        if (dragVector.Length() < MinDragDistance)
+        {
+            return false;
+        }
+
+        // Determine if drag is primarily vertical
+        bool isVerticalDrag = Mathf.Abs(dragVector.Y) > Mathf.Abs(dragVector.X);
+        if (!isVerticalDrag)
+        {
+            return false; // Only vertical drags are used for shotgun
+        }
+
+        bool isDragUp = dragVector.Y < 0;
+        bool isDragDown = dragVector.Y > 0;
+
+        // Determine which gesture would be valid based on current state
+        bool gestureProcessed = false;
+
+        // For pump-action cycling
+        if (ReloadState == ShotgunReloadState.NotReloading)
+        {
+            switch (ActionState)
+            {
+                case ShotgunActionState.NeedsPumpUp:
+                    if (isDragUp)
+                    {
+                        // Mid-drag pump up - eject shell
+                        ActionState = ShotgunActionState.NeedsPumpDown;
+                        PlayPumpUpSound();
+                        EmitSignal(SignalName.ActionStateChanged, (int)ActionState);
+                        EmitSignal(SignalName.PumpActionCycled, "up");
+                        GD.Print("[Shotgun] Mid-drag pump UP - shell ejected, continue dragging DOWN to chamber");
+                        gestureProcessed = true;
+                    }
+                    break;
+
+                case ShotgunActionState.NeedsPumpDown:
+                    if (isDragDown)
+                    {
+                        // Mid-drag pump down - chamber round
+                        if (ShellsInTube > 0)
+                        {
+                            ActionState = ShotgunActionState.Ready;
+                            PlayPumpDownSound();
+                            EmitSignal(SignalName.ActionStateChanged, (int)ActionState);
+                            EmitSignal(SignalName.PumpActionCycled, "down");
+                            GD.Print("[Shotgun] Mid-drag pump DOWN - chambered, ready to fire");
+                        }
+                        else
+                        {
+                            ActionState = ShotgunActionState.Ready;
+                            PlayPumpDownSound();
+                            EmitSignal(SignalName.ActionStateChanged, (int)ActionState);
+                            GD.Print("[Shotgun] Mid-drag pump DOWN - tube empty, need to reload");
+                        }
+                        gestureProcessed = true;
+                    }
+                    break;
+
+                case ShotgunActionState.Ready:
+                    if (isDragUp && ShellsInTube < TubeMagazineCapacity)
+                    {
+                        // Mid-drag start reload
+                        StartReload();
+                        gestureProcessed = true;
+                    }
+                    break;
+            }
+        }
+        else
+        {
+            // For reload sequence
+            switch (ReloadState)
+            {
+                case ShotgunReloadState.WaitingToOpen:
+                    if (isDragUp)
+                    {
+                        // Mid-drag open bolt
+                        ReloadState = ShotgunReloadState.Loading;
+                        PlayActionOpenSound();
+                        EmitSignal(SignalName.ReloadStateChanged, (int)ReloadState);
+                        GD.Print("[Shotgun] Mid-drag bolt opened - continue dragging DOWN to close (or use MMB to load)");
+                        gestureProcessed = true;
+                    }
+                    break;
+
+                case ShotgunReloadState.Loading:
+                    if (isDragDown)
+                    {
+                        // Mid-drag in loading state
+                        bool shouldLoadShell = _wasMiddleMouseHeldDuringDrag || _isMiddleMouseHeld;
+
+                        if (VerboseInputLogging)
+                        {
+                            GD.Print($"[Shotgun.Input] Mid-drag DOWN in Loading state: shouldLoad={shouldLoadShell}");
+                        }
+
+                        if (shouldLoadShell)
+                        {
+                            LoadShell();
+                        }
+                        else
+                        {
+                            CompleteReload();
+                        }
+                        gestureProcessed = true;
+                    }
+                    break;
+
+                case ShotgunReloadState.WaitingToClose:
+                    if (isDragDown)
+                    {
+                        CompleteReload();
+                        gestureProcessed = true;
+                    }
+                    break;
+            }
+        }
+
+        return gestureProcessed;
     }
 
     /// <summary>
