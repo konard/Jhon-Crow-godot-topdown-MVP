@@ -178,6 +178,47 @@ public partial class Player : BaseCharacter
     /// </summary>
     private const float ThrowRotationDuration = 0.15f;
 
+    #region Walking Animation
+
+    /// <summary>
+    /// Walking animation speed multiplier - higher = faster leg cycle.
+    /// </summary>
+    [Export]
+    public float WalkAnimSpeed { get; set; } = 12.0f;
+
+    /// <summary>
+    /// Scale multiplier for the player model (body, head, arms).
+    /// Default is 1.3 to make the player slightly larger.
+    /// </summary>
+    [Export]
+    public float PlayerModelScale { get; set; } = 1.3f;
+
+    /// <summary>
+    /// Walking animation intensity - higher = more pronounced movement.
+    /// </summary>
+    [Export]
+    public float WalkAnimIntensity { get; set; } = 1.0f;
+
+    /// <summary>
+    /// Current walk animation time (accumulator for sine wave).
+    /// </summary>
+    private float _walkAnimTime = 0.0f;
+
+    /// <summary>
+    /// Whether the player is currently walking (for animation state).
+    /// </summary>
+    private bool _isWalking = false;
+
+    /// <summary>
+    /// Base positions for body parts (stored on ready for animation offsets).
+    /// </summary>
+    private Vector2 _baseBodyPos = Vector2.Zero;
+    private Vector2 _baseHeadPos = Vector2.Zero;
+    private Vector2 _baseLeftArmPos = Vector2.Zero;
+    private Vector2 _baseRightArmPos = Vector2.Zero;
+
+    #endregion
+
     /// <summary>
     /// Signal emitted when reload sequence progresses.
     /// </summary>
@@ -326,6 +367,49 @@ public partial class Player : BaseCharacter
             }
         }
 
+        // Store base positions for walking animation
+        if (_bodySprite != null)
+        {
+            _baseBodyPos = _bodySprite.Position;
+        }
+        if (_headSprite != null)
+        {
+            _baseHeadPos = _headSprite.Position;
+        }
+        if (_leftArmSprite != null)
+        {
+            _baseLeftArmPos = _leftArmSprite.Position;
+        }
+        if (_rightArmSprite != null)
+        {
+            _baseRightArmPos = _rightArmSprite.Position;
+        }
+
+        // Apply scale to player model for larger appearance
+        if (_playerModel != null)
+        {
+            _playerModel.Scale = new Vector2(PlayerModelScale, PlayerModelScale);
+        }
+
+        // Set z-index for proper layering: head should be above weapon
+        // The weapon has z_index = 1, so head should be 2 or higher
+        if (_headSprite != null)
+        {
+            _headSprite.ZIndex = 3;  // Head on top (above weapon)
+        }
+        if (_bodySprite != null)
+        {
+            _bodySprite.ZIndex = 1;  // Body same level as weapon
+        }
+        if (_leftArmSprite != null)
+        {
+            _leftArmSprite.ZIndex = 2;  // Arms between body and head
+        }
+        if (_rightArmSprite != null)
+        {
+            _rightArmSprite.ZIndex = 2;  // Arms between body and head
+        }
+
         LogToFile($"[Player] Ready! Grenades: {_currentGrenades}/{MaxGrenades}");
     }
 
@@ -387,6 +471,12 @@ public partial class Player : BaseCharacter
     {
         Vector2 inputDirection = GetInputDirection();
         ApplyMovement(inputDirection, (float)delta);
+
+        // Update player model rotation to face the aim direction (rifle direction)
+        UpdatePlayerModelRotation();
+
+        // Update walking animation based on movement
+        UpdateWalkAnimation((float)delta, inputDirection);
 
         // Handle throw rotation animation (restore player rotation after throw)
         HandleThrowRotationAnimation((float)delta);
@@ -533,6 +623,60 @@ public partial class Player : BaseCharacter
     }
 
     /// <summary>
+    /// Updates the player model rotation to face the aim direction.
+    /// The player model (body, head, arms) rotates to follow the rifle's aim direction.
+    /// This creates the appearance of the player rotating their whole body toward the target.
+    /// </summary>
+    private void UpdatePlayerModelRotation()
+    {
+        if (_playerModel == null)
+        {
+            return;
+        }
+
+        // Get the aim direction from the weapon if available
+        Vector2 aimDirection;
+        if (CurrentWeapon is AssaultRifle assaultRifle)
+        {
+            aimDirection = assaultRifle.AimDirection;
+        }
+        else
+        {
+            // Fallback: calculate direction to mouse cursor
+            Vector2 mousePos = GetGlobalMousePosition();
+            Vector2 toMouse = mousePos - GlobalPosition;
+            if (toMouse.LengthSquared() > 0.001f)
+            {
+                aimDirection = toMouse.Normalized();
+            }
+            else
+            {
+                return; // No valid direction
+            }
+        }
+
+        // Calculate target rotation angle
+        float targetAngle = aimDirection.Angle();
+
+        // Apply rotation to the player model
+        _playerModel.Rotation = targetAngle;
+
+        // Handle sprite flipping for left/right aim
+        // When aiming left (angle > 90° or < -90°), flip vertically to avoid upside-down appearance
+        bool aimingLeft = Mathf.Abs(targetAngle) > Mathf.Pi / 2;
+
+        // Flip the player model vertically when aiming left
+        if (aimingLeft)
+        {
+            _playerModel.Scale = new Vector2(PlayerModelScale, -PlayerModelScale);
+        }
+        else
+        {
+            _playerModel.Scale = new Vector2(PlayerModelScale, PlayerModelScale);
+        }
+    }
+
+    /// <summary>
     /// Gets the normalized input direction from player input.
     /// </summary>
     /// <returns>Normalized direction vector.</returns>
@@ -549,6 +693,86 @@ public partial class Player : BaseCharacter
         }
 
         return direction;
+    }
+
+    /// <summary>
+    /// Updates the walking animation based on player movement state.
+    /// Creates a natural bobbing motion for body parts during movement.
+    /// </summary>
+    /// <param name="delta">Time since last frame.</param>
+    /// <param name="inputDirection">Current movement input direction.</param>
+    private void UpdateWalkAnimation(float delta, Vector2 inputDirection)
+    {
+        bool isMoving = inputDirection != Vector2.Zero || Velocity.Length() > 10.0f;
+
+        if (isMoving)
+        {
+            // Accumulate animation time based on movement speed
+            float speedFactor = Velocity.Length() / MaxSpeed;
+            _walkAnimTime += delta * WalkAnimSpeed * speedFactor;
+            _isWalking = true;
+
+            // Calculate animation offsets using sine waves
+            // Body bobs up and down (frequency = 2x for double step)
+            float bodyBob = Mathf.Sin(_walkAnimTime * 2.0f) * 1.5f * WalkAnimIntensity;
+
+            // Head bobs slightly less than body (dampened)
+            float headBob = Mathf.Sin(_walkAnimTime * 2.0f) * 0.8f * WalkAnimIntensity;
+
+            // Arms swing opposite to each other (alternating)
+            float armSwing = Mathf.Sin(_walkAnimTime) * 3.0f * WalkAnimIntensity;
+
+            // Apply offsets to sprites
+            if (_bodySprite != null)
+            {
+                _bodySprite.Position = _baseBodyPos + new Vector2(0, bodyBob);
+            }
+
+            if (_headSprite != null)
+            {
+                _headSprite.Position = _baseHeadPos + new Vector2(0, headBob);
+            }
+
+            if (_leftArmSprite != null)
+            {
+                // Left arm swings forward/back (y-axis in top-down)
+                _leftArmSprite.Position = _baseLeftArmPos + new Vector2(armSwing, 0);
+            }
+
+            if (_rightArmSprite != null)
+            {
+                // Right arm swings opposite to left arm
+                _rightArmSprite.Position = _baseRightArmPos + new Vector2(-armSwing, 0);
+            }
+        }
+        else
+        {
+            // Return to idle pose smoothly
+            if (_isWalking)
+            {
+                _isWalking = false;
+                _walkAnimTime = 0.0f;
+            }
+
+            // Interpolate back to base positions
+            float lerpSpeed = 10.0f * delta;
+            if (_bodySprite != null)
+            {
+                _bodySprite.Position = _bodySprite.Position.Lerp(_baseBodyPos, lerpSpeed);
+            }
+            if (_headSprite != null)
+            {
+                _headSprite.Position = _headSprite.Position.Lerp(_baseHeadPos, lerpSpeed);
+            }
+            if (_leftArmSprite != null)
+            {
+                _leftArmSprite.Position = _leftArmSprite.Position.Lerp(_baseLeftArmPos, lerpSpeed);
+            }
+            if (_rightArmSprite != null)
+            {
+                _rightArmSprite.Position = _rightArmSprite.Position.Lerp(_baseRightArmPos, lerpSpeed);
+            }
+        }
     }
 
     /// <summary>
