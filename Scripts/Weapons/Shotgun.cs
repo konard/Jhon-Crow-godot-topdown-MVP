@@ -173,8 +173,9 @@ public partial class Shotgun : BaseWeapon
     /// <summary>
     /// Cooldown time (in seconds) after closing bolt before it can be opened again.
     /// This prevents accidental bolt reopening due to mouse movement.
+    /// Increased from 250ms to 400ms based on user feedback that accidental opens still occurred.
     /// </summary>
-    private const float BoltCloseCooldownSeconds = 0.25f;
+    private const float BoltCloseCooldownSeconds = 0.4f;
 
     /// <summary>
     /// Timestamp when the bolt was last closed (for cooldown protection).
@@ -477,11 +478,19 @@ public partial class Shotgun : BaseWeapon
                     break;
 
                 case ShotgunActionState.Ready:
-                    if (isDragUp && ShellsInTube < TubeMagazineCapacity && !IsInBoltCloseCooldown())
+                    // Check if we should start reload (only if cooldown expired)
+                    if (isDragUp && ShellsInTube < TubeMagazineCapacity)
                     {
-                        // Mid-drag start reload
-                        StartReload();
-                        gestureProcessed = true;
+                        if (!IsInBoltCloseCooldown())
+                        {
+                            // Mid-drag start reload
+                            StartReload();
+                            gestureProcessed = true;
+                        }
+                        else if (VerboseInputLogging)
+                        {
+                            GD.Print("[Shotgun.Input] Mid-drag bolt open BLOCKED by cooldown");
+                        }
                     }
                     break;
             }
@@ -624,9 +633,16 @@ public partial class Shotgun : BaseWeapon
             case ShotgunActionState.Ready:
                 // If ready and drag UP, might be starting reload (open bolt)
                 // Check cooldown to prevent accidental bolt reopening after close
-                if (isDragUp && ShellsInTube < TubeMagazineCapacity && !IsInBoltCloseCooldown())
+                if (isDragUp && ShellsInTube < TubeMagazineCapacity)
                 {
-                    StartReload();
+                    if (!IsInBoltCloseCooldown())
+                    {
+                        StartReload();
+                    }
+                    else if (VerboseInputLogging)
+                    {
+                        GD.Print("[Shotgun.Input] Release-based bolt open BLOCKED by cooldown");
+                    }
                 }
                 break;
         }
