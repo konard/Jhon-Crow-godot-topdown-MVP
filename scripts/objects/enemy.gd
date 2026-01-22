@@ -1052,8 +1052,7 @@ func _update_goap_state() -> void:
 
 ## Updates the enemy model rotation to face the aim/movement direction.
 ## The enemy model (body, head, arms) rotates to follow the direction of movement or aim.
-## Note: Enemy sprites are drawn facing LEFT (PI radians), while player sprites face RIGHT (0 radians).
-## We add PI to the target angle to compensate for this difference.
+## Note: Enemy sprites face RIGHT (0 radians), same as player sprites.
 func _update_enemy_model_rotation() -> void:
 	if not _enemy_model:
 		return
@@ -1074,19 +1073,15 @@ func _update_enemy_model_rotation() -> void:
 		return
 
 	# Calculate target rotation angle
-	# Enemy sprites face LEFT (PI radians offset from player sprites which face RIGHT)
-	# So we add PI to make the enemy face toward the calculated direction
-	var target_angle := face_direction.angle() + PI
+	# Enemy sprites face RIGHT (same as player sprites, 0 radians)
+	var target_angle := face_direction.angle()
 
 	# Apply rotation to the enemy model
 	_enemy_model.rotation = target_angle
 
 	# Handle sprite flipping for left/right aim
-	# Since we added PI, the "aiming left" condition is also shifted by PI
-	# Original: aiming left when abs(angle) > PI/2 (pointing into quadrants 2 or 3)
-	# With PI offset: we check the face_direction angle directly
-	var face_angle := face_direction.angle()
-	var aiming_left := absf(face_angle) > PI / 2
+	# When aiming left (angle > 90 or < -90), flip vertically to avoid upside-down appearance
+	var aiming_left := absf(target_angle) > PI / 2
 
 	# Flip the enemy model vertically when aiming left
 	if aiming_left:
