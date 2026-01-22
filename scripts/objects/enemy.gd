@@ -47,8 +47,9 @@ enum BehaviorMode {
 @export var combat_move_speed: float = 320.0
 
 ## Rotation speed in radians per second for gradual turning.
-## Default is 15 rad/sec for challenging but fair combat.
-@export var rotation_speed: float = 15.0
+## Default is 25 rad/sec to ensure enemies aim before shooting (realistic barrel direction).
+## Increased from 15 to compensate for aim-before-shoot requirement (see issue #254).
+@export var rotation_speed: float = 25.0
 
 ## Detection range for spotting the player.
 ## Set to 0 or negative to allow unlimited detection range (line-of-sight only).
@@ -203,6 +204,12 @@ signal ammo_depleted
 ## If the player's aim is more than this angle away from the enemy, they are distracted.
 ## 23 degrees ≈ 0.4014 radians.
 const PLAYER_DISTRACTION_ANGLE: float = 0.4014
+
+## Minimum dot product between weapon direction and target direction for shooting.
+## Bullets only fire when weapon is aimed within this tolerance of the target.
+## 0.95 ≈ cos(18°), meaning weapon must be within ~18° of target.
+## This ensures bullets fly realistically in the barrel direction (see issue #254).
+const AIM_TOLERANCE_DOT: float = 0.95
 
 ## Reference to the enemy model node containing all sprites.
 @onready var _enemy_model: Node2D = $EnemyModel
@@ -2317,6 +2324,8 @@ func _process_assault_state(_delta: float) -> void:
 
 
 ## Shoot with reduced accuracy for retreat mode.
+## Bullets fly in barrel direction with added inaccuracy spread.
+## Enemy must be properly aimed before shooting (within AIM_TOLERANCE_DOT).
 func _shoot_with_inaccuracy() -> void:
 	if bullet_scene == null or _player == null:
 		return
@@ -2334,10 +2343,23 @@ func _shoot_with_inaccuracy() -> void:
 	var weapon_forward := _get_weapon_forward_direction()
 	var bullet_spawn_pos := _get_bullet_spawn_position(weapon_forward)
 
-	# Calculate base direction FROM MUZZLE TO TARGET
-	var direction := (target_position - bullet_spawn_pos).normalized()
+	# Calculate direction to target for aim check
+	var to_target := (target_position - bullet_spawn_pos).normalized()
 
-	# Add inaccuracy spread
+	# Check if weapon is aimed at target (within tolerance)
+	# Bullets fly in barrel direction, so we only shoot when properly aimed (issue #254)
+	var aim_dot := weapon_forward.dot(to_target)
+	if aim_dot < AIM_TOLERANCE_DOT:
+		if debug_logging:
+			var aim_angle_deg := rad_to_deg(acos(clampf(aim_dot, -1.0, 1.0)))
+			_log_debug("INACCURATE SHOOT BLOCKED: Not aimed at target. aim_dot=%.3f (%.1f deg off)" % [aim_dot, aim_angle_deg])
+		return
+
+	# Bullet direction is the weapon's forward direction (realistic barrel direction)
+	# with added inaccuracy spread for retreat shooting
+	var direction := weapon_forward
+
+	# Add inaccuracy spread to barrel direction
 	var inaccuracy_angle := randf_range(-RETREAT_INACCURACY_SPREAD, RETREAT_INACCURACY_SPREAD)
 	direction = direction.rotated(inaccuracy_angle)
 
@@ -2377,6 +2399,8 @@ func _shoot_with_inaccuracy() -> void:
 
 
 ## Shoot a burst shot with arc spread for ONE_HIT retreat.
+## Bullets fly in barrel direction with added arc spread.
+## Enemy must be properly aimed before shooting (within AIM_TOLERANCE_DOT).
 func _shoot_burst_shot() -> void:
 	if bullet_scene == null or _player == null:
 		return
@@ -2390,8 +2414,20 @@ func _shoot_burst_shot() -> void:
 	var weapon_forward := _get_weapon_forward_direction()
 	var bullet_spawn_pos := _get_bullet_spawn_position(weapon_forward)
 
-	# Calculate base direction FROM MUZZLE TO TARGET
-	var direction := (target_position - bullet_spawn_pos).normalized()
+	# Calculate direction to target for aim check
+	var to_target := (target_position - bullet_spawn_pos).normalized()
+
+	# Check if weapon is aimed at target (within tolerance)
+	# Bullets fly in barrel direction, so we only shoot when properly aimed (issue #254)
+	var aim_dot := weapon_forward.dot(to_target)
+	if aim_dot < AIM_TOLERANCE_DOT:
+		if debug_logging:
+			var aim_angle_deg := rad_to_deg(acos(clampf(aim_dot, -1.0, 1.0)))
+			_log_debug("BURST SHOOT BLOCKED: Not aimed at target. aim_dot=%.3f (%.1f deg off)" % [aim_dot, aim_angle_deg])
+		return
+
+	# Bullet direction is the weapon's forward direction (realistic barrel direction)
+	var direction := weapon_forward
 
 	# Apply arc offset for burst spread
 	direction = direction.rotated(_retreat_burst_angle_offset)
@@ -3630,6 +3666,8 @@ func _aim_at_player() -> void:
 
 
 ## Shoot a bullet towards the player.
+## Bullets fly in the direction the barrel is pointing (realistic behavior).
+## Enemy must be properly aimed before shooting (within AIM_TOLERANCE_DOT).
 func _shoot() -> void:
 	if bullet_scene == null or _player == null:
 		return
@@ -3653,10 +3691,21 @@ func _shoot() -> void:
 	var weapon_forward := _get_weapon_forward_direction()
 	var bullet_spawn_pos := _get_bullet_spawn_position(weapon_forward)
 
-	# Calculate bullet direction FROM MUZZLE TO TARGET
-	# This ensures bullets actually fly toward the target, not just in the model's facing direction
-	# The model faces the player (center-to-center), and bullets fly from muzzle to target
-	var direction := (target_position - bullet_spawn_pos).normalized()
+	# Calculate direction to target for aim check
+	var to_target := (target_position - bullet_spawn_pos).normalized()
+
+	# Check if weapon is aimed at target (within tolerance)
+	# Bullets fly in barrel direction, so we only shoot when properly aimed (issue #254)
+	var aim_dot := weapon_forward.dot(to_target)
+	if aim_dot < AIM_TOLERANCE_DOT:
+		if debug_logging:
+			var aim_angle_deg := rad_to_deg(acos(clampf(aim_dot, -1.0, 1.0)))
+			_log_debug("SHOOT BLOCKED: Not aimed at target. aim_dot=%.3f (%.1f deg off)" % [aim_dot, aim_angle_deg])
+		return
+
+	# Bullet direction is the weapon's forward direction (realistic barrel direction)
+	# This ensures bullets fly where the barrel is pointing, not toward the target
+	var direction := weapon_forward
 
 	# Create bullet instance
 	var bullet := bullet_scene.instantiate()
@@ -3670,9 +3719,9 @@ func _shoot() -> void:
 		_log_debug("SHOOT: enemy_pos=%v, target_pos=%v" % [global_position, target_position])
 		_log_debug("  model_rotation=%.2f rad (%.1f deg), model_scale=%v" % [model_rot, rad_to_deg(model_rot), model_scale])
 		_log_debug("  weapon_node_pos=%v, muzzle=%v" % [weapon_visual_pos, bullet_spawn_pos])
-		_log_debug("  direction=%v (angle=%.1f deg) - FROM MUZZLE TO TARGET" % [direction, rad_to_deg(direction.angle())])
+		_log_debug("  direction=%v (angle=%.1f deg) - BARREL DIRECTION (realistic)" % [direction, rad_to_deg(direction.angle())])
 
-	# Set bullet direction (from muzzle to target)
+	# Set bullet direction (barrel direction for realistic behavior)
 	bullet.direction = direction
 
 	# Set shooter ID to identify this enemy as the source
