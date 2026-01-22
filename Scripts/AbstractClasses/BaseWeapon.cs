@@ -338,21 +338,25 @@ public abstract partial class BaseWeapon : Node2D
         var bullet = BulletScene.Instantiate<Node2D>();
         bullet.GlobalPosition = spawnPosition;
 
-        // Set bullet properties - use lowercase property names for GDScript compatibility
-        // GDScript uses snake_case (direction, speed, shooter_id, shooter_position)
+        // Set bullet properties - try both PascalCase (C#) and snake_case (GDScript)
+        // C# bullets use PascalCase (Direction, Speed, ShooterId, ShooterPosition)
+        // GDScript bullets use snake_case (direction, speed, shooter_id, shooter_position)
         if (bullet.HasMethod("SetDirection"))
         {
             bullet.Call("SetDirection", direction);
         }
         else
         {
-            // Try to set direction via property (lowercase for GDScript bullet.gd)
+            // Try PascalCase first (C# Bullet.cs), then snake_case (GDScript bullet.gd)
+            bullet.Set("Direction", direction);
             bullet.Set("direction", direction);
         }
 
-        // Set bullet speed from weapon data (lowercase for GDScript)
+        // Set bullet speed from weapon data
         if (WeaponData != null)
         {
+            // Try both cases for compatibility with C# and GDScript bullets
+            bullet.Set("Speed", WeaponData.BulletSpeed);
             bullet.Set("speed", WeaponData.BulletSpeed);
         }
 
@@ -361,26 +365,15 @@ public abstract partial class BaseWeapon : Node2D
         var owner = GetParent();
         if (owner != null)
         {
-            // Try method call first (for C# bullets), fall back to property set (for GDScript bullets)
-            if (bullet.HasMethod("SetShooterId"))
-            {
-                bullet.Call("SetShooterId", owner.GetInstanceId());
-            }
-            else
-            {
-                bullet.Set("shooter_id", owner.GetInstanceId());
-            }
+            // Try both cases for compatibility with C# and GDScript bullets
+            bullet.Set("ShooterId", owner.GetInstanceId());
+            bullet.Set("shooter_id", owner.GetInstanceId());
         }
 
         // Set shooter position for distance-based penetration calculations
-        if (bullet.HasMethod("SetShooterPosition"))
-        {
-            bullet.Call("SetShooterPosition", GlobalPosition);
-        }
-        else
-        {
-            bullet.Set("shooter_position", GlobalPosition);
-        }
+        // Try both cases for compatibility with C# and GDScript bullets
+        bullet.Set("ShooterPosition", GlobalPosition);
+        bullet.Set("shooter_position", GlobalPosition);
 
         GetTree().CurrentScene.AddChild(bullet);
     }

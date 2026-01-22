@@ -178,6 +178,54 @@ public partial class Player : BaseCharacter
     /// </summary>
     private const float ThrowRotationDuration = 0.15f;
 
+    #region Weapon Pose Detection
+
+    /// <summary>
+    /// Weapon types for arm positioning.
+    /// </summary>
+    private enum WeaponType
+    {
+        Rifle,      // Default - extended grip (e.g., AssaultRifle)
+        SMG,        // Compact grip (e.g., MiniUzi)
+        Shotgun     // Similar to rifle but slightly tighter
+    }
+
+    /// <summary>
+    /// Currently detected weapon type.
+    /// </summary>
+    private WeaponType _currentWeaponType = WeaponType.Rifle;
+
+    /// <summary>
+    /// Whether weapon pose has been detected and applied.
+    /// </summary>
+    private bool _weaponPoseApplied = false;
+
+    /// <summary>
+    /// Frame counter for delayed weapon pose detection.
+    /// Weapons are added by level scripts AFTER player's _Ready() completes.
+    /// </summary>
+    private int _weaponDetectFrameCount = 0;
+
+    /// <summary>
+    /// Number of frames to wait before detecting weapon pose.
+    /// This ensures level scripts have finished adding weapons.
+    /// </summary>
+    private const int WeaponDetectWaitFrames = 3;
+
+    /// <summary>
+    /// Arm position offset for SMG weapons - left arm moves back toward body.
+    /// UZI and similar compact SMGs should have the left arm closer to the body
+    /// for a proper two-handed compact grip.
+    /// </summary>
+    private static readonly Vector2 SmgLeftArmOffset = new Vector2(-10, 0);
+
+    /// <summary>
+    /// Arm position offset for SMG weapons - right arm moves slightly forward.
+    /// </summary>
+    private static readonly Vector2 SmgRightArmOffset = new Vector2(3, 0);
+
+    #endregion
+
     #region Walking Animation
 
     /// <summary>
@@ -216,6 +264,91 @@ public partial class Player : BaseCharacter
     private Vector2 _baseHeadPos = Vector2.Zero;
     private Vector2 _baseLeftArmPos = Vector2.Zero;
     private Vector2 _baseRightArmPos = Vector2.Zero;
+
+    #endregion
+
+    #region Reload Animation System
+
+    /// <summary>
+    /// Animation phases for assault rifle reload sequence.
+    /// Maps to the R-F-R input system for visual feedback.
+    /// Three steps as requested:
+    /// 1. Take magazine with left hand from chest
+    /// 2. Insert magazine into rifle
+    /// 3. Pull the bolt/charging handle
+    /// </summary>
+    private enum ReloadAnimPhase
+    {
+        None,           // Normal arm positions (weapon held)
+        GrabMagazine,   // Step 1: Left hand moves to chest to grab new magazine
+        InsertMagazine, // Step 2: Left hand brings magazine to weapon, inserts it
+        PullBolt,       // Step 3: Character pulls the charging handle
+        ReturnIdle      // Arms return to normal weapon-holding position
+    }
+
+    /// <summary>
+    /// Current reload animation phase.
+    /// </summary>
+    private ReloadAnimPhase _reloadAnimPhase = ReloadAnimPhase.None;
+
+    /// <summary>
+    /// Reload animation phase timer for timed transitions.
+    /// </summary>
+    private float _reloadAnimTimer = 0.0f;
+
+    /// <summary>
+    /// Reload animation phase duration in seconds.
+    /// </summary>
+    private float _reloadAnimDuration = 0.0f;
+
+    // Target positions for reload arm animations (relative offsets from base positions)
+    // These are in local PlayerModel space
+    // Base positions: LeftArm (24, 6), RightArm (-2, 6)
+    // For reload, left arm goes to chest (vest/mag pouch area), then to weapon
+
+    // Step 1: Grab magazine from chest - left arm moves toward body center
+    // Base position: LeftArm (24, 6). We want target around (4, 2) = body/chest area
+    // So offset should be (4-24, 2-6) = (-20, -4)
+    // User feedback: previous -40 was too far (went behind back), -18 was not visible enough
+    private static readonly Vector2 ReloadArmLeftGrab = new Vector2(-20, -4);      // Left hand at chest/vest mag pouch (visible but not behind back)
+    private static readonly Vector2 ReloadArmRightHold = new Vector2(0, 0);        // Right hand stays on weapon grip
+
+    // Step 2: Insert magazine - left arm moves to weapon magwell (at middle of weapon, not at the end)
+    // Weapon length: ~40 pixels from center, magwell at middle
+    // Base (24, 6), want target around (12, 6) = middle of weapon, so offset (-12, 0)
+    private static readonly Vector2 ReloadArmLeftInsert = new Vector2(-12, 0);     // Left hand at weapon magwell (middle of weapon)
+    private static readonly Vector2 ReloadArmRightSteady = new Vector2(0, 2);      // Right hand steadies weapon
+
+    // Step 3: Pull bolt - right arm moves along rifle contour (back and forth motion)
+    // The right hand should trace the rifle's right side: forward, then back to pull bolt, then release
+    // Base RightArm (-2, 6). For dramatic motion: forward (+10, +2), back (-10, -4)
+    private static readonly Vector2 ReloadArmLeftSupport = new Vector2(-10, 0);    // Left hand holds near magwell
+    private static readonly Vector2 ReloadArmRightBoltStart = new Vector2(10, 2);  // Right hand at charging handle (forward on rifle)
+    private static readonly Vector2 ReloadArmRightBoltPull = new Vector2(-12, -4); // Right hand pulls bolt back (toward player)
+    private static readonly Vector2 ReloadArmRightBoltReturn = new Vector2(10, 2); // Right hand returns forward (bolt release)
+
+    // Target rotations for reload arm animations (in degrees)
+    private const float ReloadArmRotLeftGrab = -50.0f;     // Arm rotation when grabbing mag from chest
+    private const float ReloadArmRotRightHold = 0.0f;      // Right arm steady during grab
+    private const float ReloadArmRotLeftInsert = -15.0f;   // Left arm rotation when inserting
+    private const float ReloadArmRotRightSteady = 5.0f;    // Slight tilt while steadying
+    private const float ReloadArmRotLeftSupport = -10.0f;  // Left arm on foregrip/magwell
+    private const float ReloadArmRotRightBoltStart = -10.0f;  // Right arm at bolt handle
+    private const float ReloadArmRotRightBoltPull = -35.0f;   // Right arm rotation when pulling bolt back
+    private const float ReloadArmRotRightBoltReturn = -10.0f; // Right arm rotation when releasing bolt
+
+    // Animation durations for each reload phase (in seconds)
+    // INCREASED bolt durations for visible back-and-forth motion
+    private const float ReloadAnimGrabDuration = 0.25f;    // Time to grab magazine from chest
+    private const float ReloadAnimInsertDuration = 0.3f;   // Time to insert magazine
+    private const float ReloadAnimBoltPullDuration = 0.35f;   // Time to pull bolt back (increased for visibility)
+    private const float ReloadAnimBoltReturnDuration = 0.25f; // Time for bolt to return forward (increased for visibility)
+    private const float ReloadAnimReturnDuration = 0.2f;   // Time to return to idle
+
+    /// <summary>
+    /// Sub-phase for bolt pull animation (0 = pulling, 1 = returning)
+    /// </summary>
+    private int _boltPullSubPhase = 0;
 
     #endregion
 
@@ -507,18 +640,38 @@ public partial class Player : BaseCharacter
         if (_bodySprite != null)
         {
             _baseBodyPos = _bodySprite.Position;
+            LogToFile($"[Player.Init] Body sprite found at position: {_baseBodyPos}");
+        }
+        else
+        {
+            LogToFile("[Player.Init] WARNING: Body sprite NOT found!");
         }
         if (_headSprite != null)
         {
             _baseHeadPos = _headSprite.Position;
+            LogToFile($"[Player.Init] Head sprite found at position: {_baseHeadPos}");
+        }
+        else
+        {
+            LogToFile("[Player.Init] WARNING: Head sprite NOT found!");
         }
         if (_leftArmSprite != null)
         {
             _baseLeftArmPos = _leftArmSprite.Position;
+            LogToFile($"[Player.Init] Left arm sprite found at position: {_baseLeftArmPos}");
+        }
+        else
+        {
+            LogToFile("[Player.Init] WARNING: Left arm sprite NOT found!");
         }
         if (_rightArmSprite != null)
         {
             _baseRightArmPos = _rightArmSprite.Position;
+            LogToFile($"[Player.Init] Right arm sprite found at position: {_baseRightArmPos}");
+        }
+        else
+        {
+            LogToFile("[Player.Init] WARNING: Right arm sprite NOT found!");
         }
 
         // Apply scale to player model for larger appearance
@@ -554,7 +707,12 @@ public partial class Player : BaseCharacter
             _rightArmSprite.ZIndex = 2;  // Arms between body and head
         }
 
-        LogToFile($"[Player] Ready! Grenades: {_currentGrenades}/{MaxGrenades}");
+        // Log ready status with full info
+        int currentAmmo = CurrentWeapon?.CurrentAmmo ?? 0;
+        int maxAmmo = CurrentWeapon?.WeaponData?.MagazineSize ?? 0;
+        int currentHealth = (int)(HealthComponent?.CurrentHealth ?? 0);
+        int maxHealth = (int)(HealthComponent?.MaxHealth ?? 0);
+        LogToFile($"[Player] Ready! Ammo: {currentAmmo}/{maxAmmo}, Grenades: {_currentGrenades}/{MaxGrenades}, Health: {currentHealth}/{maxHealth}");
     }
 
     /// <summary>
@@ -613,20 +771,34 @@ public partial class Player : BaseCharacter
 
     public override void _PhysicsProcess(double delta)
     {
+        // Detect weapon pose after waiting a few frames for level scripts to add weapons
+        if (!_weaponPoseApplied)
+        {
+            _weaponDetectFrameCount++;
+            if (_weaponDetectFrameCount >= WeaponDetectWaitFrames)
+            {
+                DetectAndApplyWeaponPose();
+                _weaponPoseApplied = true;
+            }
+        }
+
         Vector2 inputDirection = GetInputDirection();
         ApplyMovement(inputDirection, (float)delta);
 
         // Update player model rotation to face the aim direction (rifle direction)
         UpdatePlayerModelRotation();
 
-        // Update walking animation based on movement (only if not in grenade animation)
-        if (_grenadeAnimPhase == GrenadeAnimPhase.None)
+        // Update walking animation based on movement (only if not in grenade or reload animation)
+        if (_grenadeAnimPhase == GrenadeAnimPhase.None && _reloadAnimPhase == ReloadAnimPhase.None)
         {
             UpdateWalkAnimation((float)delta, inputDirection);
         }
 
         // Update grenade animation
         UpdateGrenadeAnimation((float)delta);
+
+        // Update reload animation
+        UpdateReloadAnimation((float)delta);
 
         // Handle throw rotation animation (restore player rotation after throw)
         HandleThrowRotationAnimation((float)delta);
@@ -827,6 +999,90 @@ public partial class Player : BaseCharacter
     }
 
     /// <summary>
+    /// Detects the equipped weapon type and applies appropriate arm positioning.
+    /// Called from _PhysicsProcess() after a few frames to ensure level scripts
+    /// have finished adding weapons to the player node.
+    /// </summary>
+    private void DetectAndApplyWeaponPose()
+    {
+        LogToFile($"[Player] Detecting weapon pose (frame {_weaponDetectFrameCount})...");
+        var detectedType = WeaponType.Rifle;  // Default to rifle pose
+
+        // Check for weapon children - weapons are added directly to player by level scripts
+        // Check in order of specificity: MiniUzi (SMG), Shotgun, then default to Rifle
+        var miniUzi = GetNodeOrNull<BaseWeapon>("MiniUzi");
+        var shotgun = GetNodeOrNull<BaseWeapon>("Shotgun");
+
+        if (miniUzi != null)
+        {
+            detectedType = WeaponType.SMG;
+            LogToFile("[Player] Detected weapon: Mini UZI (SMG pose)");
+        }
+        else if (shotgun != null)
+        {
+            detectedType = WeaponType.Shotgun;
+            LogToFile("[Player] Detected weapon: Shotgun (Shotgun pose)");
+        }
+        else
+        {
+            // Default to rifle (AssaultRifle or no weapon)
+            detectedType = WeaponType.Rifle;
+            LogToFile("[Player] Detected weapon: Rifle (default pose)");
+        }
+
+        _currentWeaponType = detectedType;
+        ApplyWeaponArmOffsets();
+    }
+
+    /// <summary>
+    /// Applies arm position offsets based on current weapon type.
+    /// Modifies base arm positions to create appropriate weapon-holding poses.
+    /// </summary>
+    private void ApplyWeaponArmOffsets()
+    {
+        // Original positions from Player.tscn: LeftArm (24, 6), RightArm (-2, 6)
+        var originalLeftArmPos = new Vector2(24, 6);
+        var originalRightArmPos = new Vector2(-2, 6);
+
+        switch (_currentWeaponType)
+        {
+            case WeaponType.SMG:
+                // SMG pose: Compact two-handed grip
+                // Left arm moves back toward body for shorter weapon
+                // Right arm moves forward slightly to meet left hand
+                _baseLeftArmPos = originalLeftArmPos + SmgLeftArmOffset;
+                _baseRightArmPos = originalRightArmPos + SmgRightArmOffset;
+                LogToFile($"[Player] Applied SMG arm pose: Left={_baseLeftArmPos}, Right={_baseRightArmPos}");
+                break;
+
+            case WeaponType.Shotgun:
+                // Shotgun pose: Similar to rifle but slightly tighter
+                _baseLeftArmPos = originalLeftArmPos + new Vector2(-3, 0);
+                _baseRightArmPos = originalRightArmPos + new Vector2(1, 0);
+                LogToFile($"[Player] Applied Shotgun arm pose: Left={_baseLeftArmPos}, Right={_baseRightArmPos}");
+                break;
+
+            case WeaponType.Rifle:
+            default:
+                // Rifle pose: Standard extended grip (original positions)
+                _baseLeftArmPos = originalLeftArmPos;
+                _baseRightArmPos = originalRightArmPos;
+                LogToFile($"[Player] Applied Rifle arm pose: Left={_baseLeftArmPos}, Right={_baseRightArmPos}");
+                break;
+        }
+
+        // Apply new base positions to sprites immediately
+        if (_leftArmSprite != null)
+        {
+            _leftArmSprite.Position = _baseLeftArmPos;
+        }
+        if (_rightArmSprite != null)
+        {
+            _rightArmSprite.Position = _baseRightArmPos;
+        }
+    }
+
+    /// <summary>
     /// Gets the normalized input direction from player input.
     /// </summary>
     /// <returns>Normalized direction vector.</returns>
@@ -935,10 +1191,21 @@ public partial class Player : BaseCharacter
     /// - At step 1 (R pressed): shooting resets the combo
     /// - At step 2 (R->F pressed): if previous magazine had ammo, one chamber bullet can be fired
     /// - After reload: if chamber bullet was fired, subtract one from new magazine
+    ///
+    /// Note: This reload sequence is skipped for weapons that use tube magazines (like Shotgun),
+    /// which have their own shell-by-shell reload mechanism via RMB drag gestures.
     /// </summary>
     private void HandleReloadSequenceInput()
     {
         if (CurrentWeapon == null)
+        {
+            return;
+        }
+
+        // Skip R-F-R reload sequence for weapons that use tube magazines (like Shotgun)
+        // These weapons have their own reload mechanism (shell-by-shell via RMB gestures)
+        // Pressing R key should be ignored for these weapons to avoid breaking ammo tracking
+        if (CurrentWeapon is Shotgun)
         {
             return;
         }
@@ -980,6 +1247,8 @@ public partial class Player : BaseCharacter
                 _reloadSequenceStep = 1;
                 _ammoAtReloadStart = CurrentWeapon.CurrentAmmo;
                 GD.Print($"[Player] Reload sequence started (R pressed) - ammo at start: {_ammoAtReloadStart} - press F next");
+                // Start animation: Step 1 - Grab magazine from chest
+                StartReloadAnimPhase(ReloadAnimPhase.GrabMagazine, ReloadAnimGrabDuration);
                 // Play magazine out sound
                 PlayReloadMagOutSound();
                 EmitSignal(SignalName.ReloadSequenceProgress, 1, 3);
@@ -989,6 +1258,8 @@ public partial class Player : BaseCharacter
             else if (_reloadSequenceStep == 2)
             {
                 // Complete reload sequence - instant reload!
+                // Start animation: Step 3 - Pull bolt/charging handle (back and forth motion)
+                StartReloadAnimPhase(ReloadAnimPhase.PullBolt, ReloadAnimBoltPullDuration);
                 // Play bolt cycling sound
                 PlayM16BoltSound();
                 CompleteReloadSequence();
@@ -1008,6 +1279,8 @@ public partial class Player : BaseCharacter
                 CurrentWeapon.StartReloadSequence(hadAmmoInMagazine);
 
                 GD.Print($"[Player] Reload sequence step 2 (F pressed) - bullet in chamber: {hadAmmoInMagazine} - press R to complete");
+                // Start animation: Step 2 - Insert magazine into rifle
+                StartReloadAnimPhase(ReloadAnimPhase.InsertMagazine, ReloadAnimInsertDuration);
                 // Play magazine in sound
                 PlayReloadMagInSound();
                 EmitSignal(SignalName.ReloadSequenceProgress, 2, 3);
@@ -1016,6 +1289,8 @@ public partial class Player : BaseCharacter
             {
                 // Wrong key pressed, reset sequence
                 GD.Print("[Player] Wrong key! Reload sequence reset (expected R)");
+                // Restart animation from grab phase
+                StartReloadAnimPhase(ReloadAnimPhase.GrabMagazine, ReloadAnimGrabDuration);
                 ResetReloadSequence();
             }
         }
@@ -1086,6 +1361,12 @@ public partial class Player : BaseCharacter
         _reloadSequenceStep = 0;
         _isReloadingSequence = false;
         _ammoAtReloadStart = 0;
+
+        // Return arms to idle if reload animation was active
+        if (_reloadAnimPhase != ReloadAnimPhase.None)
+        {
+            StartReloadAnimPhase(ReloadAnimPhase.ReturnIdle, ReloadAnimReturnDuration);
+        }
 
         // Cancel weapon's reload sequence state
         CurrentWeapon?.CancelReloadSequence();
@@ -1943,6 +2224,206 @@ public partial class Player : BaseCharacter
 
         _windUpIntensity = Mathf.Clamp(intensity + velocityBonus, 0.0f, 1.0f);
         _prevMousePos = currentMouse;
+    }
+
+    #endregion
+
+    #region Reload Animation Methods
+
+    /// <summary>
+    /// Start a new reload animation phase.
+    /// </summary>
+    /// <param name="phase">The ReloadAnimPhase to transition to.</param>
+    /// <param name="duration">How long this phase should last.</param>
+    private void StartReloadAnimPhase(ReloadAnimPhase phase, float duration)
+    {
+        _reloadAnimPhase = phase;
+        _reloadAnimTimer = duration;
+        _reloadAnimDuration = duration;
+
+        // Reset bolt pull sub-phase when entering bolt pull phase
+        if (phase == ReloadAnimPhase.PullBolt)
+        {
+            _boltPullSubPhase = 0;
+        }
+
+        LogToFile($"[Player.Reload.Anim] Phase changed to: {phase} (duration: {duration:F2}s)");
+    }
+
+    /// <summary>
+    /// Set arm z-index for reload animation (arms BELOW weapon).
+    /// User feedback: animated hand should be below weapon, not above it.
+    /// </summary>
+    private void SetReloadAnimZIndex()
+    {
+        // During reload operations, arms should appear BELOW the weapon
+        // Weapon has z_index = 1, so set arms to 0
+        if (_leftArmSprite != null)
+        {
+            _leftArmSprite.ZIndex = 0;
+        }
+        if (_rightArmSprite != null)
+        {
+            _rightArmSprite.ZIndex = 0;
+        }
+    }
+
+    /// <summary>
+    /// Update reload animation based on current phase.
+    /// Called every frame from _PhysicsProcess.
+    /// </summary>
+    /// <param name="delta">Time since last frame.</param>
+    private void UpdateReloadAnimation(float delta)
+    {
+        // Early exit if no animation active
+        if (_reloadAnimPhase == ReloadAnimPhase.None)
+        {
+            // Restore normal z-index when not animating
+            RestoreArmZIndex();
+            return;
+        }
+
+        // Update phase timer
+        if (_reloadAnimTimer > 0)
+        {
+            _reloadAnimTimer -= delta;
+        }
+
+        // Calculate target positions based on current phase
+        Vector2 leftArmTarget = _baseLeftArmPos;
+        Vector2 rightArmTarget = _baseRightArmPos;
+        float leftArmRot = 0.0f;
+        float rightArmRot = 0.0f;
+        float lerpSpeed = AnimLerpSpeed * delta;
+
+        // Set arms to lower z-index during reload operations (BELOW weapon)
+        // User feedback: "animated hand should be below weapon, not above it"
+        SetReloadAnimZIndex();
+
+        switch (_reloadAnimPhase)
+        {
+            case ReloadAnimPhase.GrabMagazine:
+                // Step 1: Left arm moves to chest to grab new magazine
+                leftArmTarget = _baseLeftArmPos + ReloadArmLeftGrab;
+                leftArmRot = Mathf.DegToRad(ReloadArmRotLeftGrab);
+                rightArmTarget = _baseRightArmPos + ReloadArmRightHold;
+                rightArmRot = Mathf.DegToRad(ReloadArmRotRightHold);
+                lerpSpeed = AnimLerpSpeedFast * delta;
+                break;
+
+            case ReloadAnimPhase.InsertMagazine:
+                // Step 2: Left arm brings magazine to weapon magwell (at middle of weapon)
+                // User feedback: "step 2 should end at middle of weapon length, not at the end"
+                leftArmTarget = _baseLeftArmPos + ReloadArmLeftInsert;
+                leftArmRot = Mathf.DegToRad(ReloadArmRotLeftInsert);
+                rightArmTarget = _baseRightArmPos + ReloadArmRightSteady;
+                rightArmRot = Mathf.DegToRad(ReloadArmRotRightSteady);
+                lerpSpeed = AnimLerpSpeed * delta;
+                break;
+
+            case ReloadAnimPhase.PullBolt:
+                // Step 3: Right hand traces rifle contour - back and forth motion
+                // User feedback: "step 3 should be a movement along the rifle contour
+                // right towards and away from oneself (back and forth)"
+                leftArmTarget = _baseLeftArmPos + ReloadArmLeftSupport;
+                leftArmRot = Mathf.DegToRad(ReloadArmRotLeftSupport);
+
+                if (_boltPullSubPhase == 0)
+                {
+                    // Sub-phase 0: Pull bolt back (toward player)
+                    rightArmTarget = _baseRightArmPos + ReloadArmRightBoltPull;
+                    rightArmRot = Mathf.DegToRad(ReloadArmRotRightBoltPull);
+                    lerpSpeed = AnimLerpSpeedFast * delta;
+
+                    // Log bolt pull progress periodically
+                    if (Engine.GetFramesDrawn() % 30 == 0)
+                    {
+                        LogToFile($"[Player.Reload.Anim] Bolt sub-phase 0 (pull back): timer={_reloadAnimTimer:F2}s, rightArm target={rightArmTarget}");
+                    }
+
+                    // When pull back completes, transition to return forward
+                    if (_reloadAnimTimer <= 0)
+                    {
+                        _boltPullSubPhase = 1;
+                        _reloadAnimTimer = ReloadAnimBoltReturnDuration;
+                        _reloadAnimDuration = ReloadAnimBoltReturnDuration;
+                        LogToFile($"[Player.Reload.Anim] Bolt sub-phase transition: pull→return (duration: {ReloadAnimBoltReturnDuration:F2}s)");
+                    }
+                }
+                else
+                {
+                    // Sub-phase 1: Release bolt (return forward)
+                    rightArmTarget = _baseRightArmPos + ReloadArmRightBoltReturn;
+                    rightArmRot = Mathf.DegToRad(ReloadArmRotRightBoltReturn);
+                    lerpSpeed = AnimLerpSpeedFast * delta;
+
+                    // Log bolt return progress periodically
+                    if (Engine.GetFramesDrawn() % 30 == 0)
+                    {
+                        LogToFile($"[Player.Reload.Anim] Bolt sub-phase 1 (return): timer={_reloadAnimTimer:F2}s, rightArm target={rightArmTarget}");
+                    }
+
+                    // When return completes, transition to return idle
+                    if (_reloadAnimTimer <= 0)
+                    {
+                        LogToFile("[Player.Reload.Anim] Bolt animation complete, transitioning to idle");
+                        StartReloadAnimPhase(ReloadAnimPhase.ReturnIdle, ReloadAnimReturnDuration);
+                    }
+                }
+                break;
+
+            case ReloadAnimPhase.ReturnIdle:
+                // Arms returning to base positions
+                leftArmTarget = _baseLeftArmPos;
+                rightArmTarget = _baseRightArmPos;
+                leftArmRot = 0.0f;
+                rightArmRot = 0.0f;
+                lerpSpeed = AnimLerpSpeed * delta;
+
+                // When return animation completes, end animation and restore z-index
+                if (_reloadAnimTimer <= 0)
+                {
+                    _reloadAnimPhase = ReloadAnimPhase.None;
+                    RestoreArmZIndex();
+                    LogToFile("[Player.Reload.Anim] Animation complete, returning to normal");
+                }
+                break;
+        }
+
+        // Apply arm positions with smooth interpolation
+        if (_leftArmSprite != null)
+        {
+            Vector2 oldPos = _leftArmSprite.Position;
+            _leftArmSprite.Position = _leftArmSprite.Position.Lerp(leftArmTarget, lerpSpeed);
+            _leftArmSprite.Rotation = Mathf.Lerp(_leftArmSprite.Rotation, leftArmRot, lerpSpeed);
+
+            // Log arm position changes periodically (every 60 frames = ~1 second)
+            if (Engine.GetFramesDrawn() % 60 == 0)
+            {
+                LogToFile($"[Player.Reload.Anim] LeftArm: pos={_leftArmSprite.Position}, target={leftArmTarget}, base={_baseLeftArmPos}");
+            }
+        }
+        else if (Engine.GetFramesDrawn() % 60 == 0)
+        {
+            LogToFile("[Player.Reload.Anim] WARNING: Left arm sprite is null during animation!");
+        }
+
+        if (_rightArmSprite != null)
+        {
+            Vector2 oldPos = _rightArmSprite.Position;
+            _rightArmSprite.Position = _rightArmSprite.Position.Lerp(rightArmTarget, lerpSpeed);
+            _rightArmSprite.Rotation = Mathf.Lerp(_rightArmSprite.Rotation, rightArmRot, lerpSpeed);
+
+            // Log arm position changes periodically (every 60 frames = ~1 second)
+            if (Engine.GetFramesDrawn() % 60 == 0)
+            {
+                LogToFile($"[Player.Reload.Anim] RightArm: pos={_rightArmSprite.Position}, target={rightArmTarget}, base={_baseRightArmPos}");
+            }
+        }
+        else if (Engine.GetFramesDrawn() % 60 == 0)
+        {
+            LogToFile("[Player.Reload.Anim] WARNING: Right arm sprite is null during animation!");
+        }
     }
 
     #endregion

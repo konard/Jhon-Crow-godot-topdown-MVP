@@ -269,6 +269,10 @@ func _ready() -> void:
 	if _right_arm_sprite:
 		_right_arm_sprite.z_index = 2  # Arms between body and head
 
+	# Note: Weapon pose detection is done in _process() after a few frames
+	# to ensure level scripts have finished adding weapons to the player.
+	# See _weapon_pose_applied and _weapon_detect_frame_count variables.
+
 	FileLogger.info("[Player] Ready! Ammo: %d/%d, Grenades: %d/%d, Health: %d/%d" % [
 		_current_ammo, max_ammo,
 		_current_grenades, max_grenades,
@@ -279,6 +283,13 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	if not _is_alive:
 		return
+
+	# Detect weapon pose after waiting a few frames for level scripts to add weapons
+	if not _weapon_pose_applied:
+		_weapon_detect_frame_count += 1
+		if _weapon_detect_frame_count >= WEAPON_DETECT_WAIT_FRAMES:
+			_detect_and_apply_weapon_pose()
+			_weapon_pose_applied = true
 
 	var input_direction := _get_input_direction()
 
@@ -294,22 +305,40 @@ func _physics_process(delta: float) -> void:
 	# Update player model rotation to face the aim direction (rifle direction)
 	_update_player_model_rotation()
 
-	# Update walking animation based on movement (only if not in grenade animation)
-	if _grenade_anim_phase == GrenadeAnimPhase.NONE:
+	# Update walking animation based on movement (only if not in grenade or reload animation)
+	if _grenade_anim_phase == GrenadeAnimPhase.NONE and _reload_anim_phase == ReloadAnimPhase.NONE:
 		_update_walk_animation(delta, input_direction)
 
 	# Update grenade animation
 	_update_grenade_animation(delta)
+
+	# Update reload animation
+	_update_reload_animation(delta)
 
 	# Update spread reset timer
 	_shot_timer += delta
 	if _shot_timer >= SPREAD_RESET_TIME:
 		_shot_count = 0
 
-	# Update simple reload timer
+	# Update simple reload timer and animation phases
 	if _is_reloading_simple:
 		_reload_timer += delta
-		if _reload_timer >= reload_time:
+		# Progress through animation phases based on reload progress
+		# Divide reload_time into thirds for each phase
+		var phase_duration := reload_time / 3.0
+		if _reload_timer < phase_duration:
+			# Phase 1: Grab magazine (already started)
+			pass
+		elif _reload_timer < phase_duration * 2.0:
+			# Phase 2: Insert magazine
+			if _reload_anim_phase == ReloadAnimPhase.GRAB_MAGAZINE:
+				_start_reload_anim_phase(ReloadAnimPhase.INSERT_MAGAZINE, phase_duration)
+		elif _reload_timer < reload_time:
+			# Phase 3: Pull bolt
+			if _reload_anim_phase == ReloadAnimPhase.INSERT_MAGAZINE:
+				_start_reload_anim_phase(ReloadAnimPhase.PULL_BOLT, phase_duration)
+		else:
+			# Complete reload
 			_complete_simple_reload()
 
 	# Handle grenade input first (so it can consume shoot input)
@@ -375,6 +404,73 @@ func _update_player_model_rotation() -> void:
 		_player_model.scale = Vector2(player_model_scale, -player_model_scale)
 	else:
 		_player_model.scale = Vector2(player_model_scale, player_model_scale)
+
+
+## Detects the equipped weapon type and applies appropriate arm positioning.
+## Called from _physics_process() after a few frames to ensure level scripts
+## have finished adding weapons to the player node.
+func _detect_and_apply_weapon_pose() -> void:
+	FileLogger.info("[Player] Detecting weapon pose (frame %d)..." % _weapon_detect_frame_count)
+	var detected_type := WeaponType.RIFLE  # Default to rifle pose
+
+	# Check for weapon children - weapons are added directly to player by level scripts
+	# Check in order of specificity: MiniUzi (SMG), Shotgun, then default to Rifle
+	var mini_uzi := get_node_or_null("MiniUzi")
+	var shotgun := get_node_or_null("Shotgun")
+
+	if mini_uzi != null:
+		detected_type = WeaponType.SMG
+		FileLogger.info("[Player] Detected weapon: Mini UZI (SMG pose)")
+	elif shotgun != null:
+		detected_type = WeaponType.SHOTGUN
+		FileLogger.info("[Player] Detected weapon: Shotgun (Shotgun pose)")
+	else:
+		# Default to rifle (AssaultRifle or no weapon)
+		detected_type = WeaponType.RIFLE
+		FileLogger.info("[Player] Detected weapon: Rifle (default pose)")
+
+	_current_weapon_type = detected_type
+	_apply_weapon_arm_offsets()
+
+
+## Applies arm position offsets based on current weapon type.
+## Modifies base arm positions to create appropriate weapon-holding poses.
+func _apply_weapon_arm_offsets() -> void:
+	# Reset to original scene positions first
+	# Original positions from Player.tscn: LeftArm (24, 6), RightArm (-2, 6)
+	var original_left_arm_pos := Vector2(24, 6)
+	var original_right_arm_pos := Vector2(-2, 6)
+
+	match _current_weapon_type:
+		WeaponType.SMG:
+			# SMG pose: Compact two-handed grip
+			# Left arm moves back toward body for shorter weapon
+			# Right arm moves forward slightly to meet left hand
+			_base_left_arm_pos = original_left_arm_pos + SMG_LEFT_ARM_OFFSET
+			_base_right_arm_pos = original_right_arm_pos + SMG_RIGHT_ARM_OFFSET
+			FileLogger.info("[Player] Applied SMG arm pose: Left=%s, Right=%s" % [
+				str(_base_left_arm_pos), str(_base_right_arm_pos)
+			])
+		WeaponType.SHOTGUN:
+			# Shotgun pose: Similar to rifle but slightly tighter
+			_base_left_arm_pos = original_left_arm_pos + Vector2(-3, 0)
+			_base_right_arm_pos = original_right_arm_pos + Vector2(1, 0)
+			FileLogger.info("[Player] Applied Shotgun arm pose: Left=%s, Right=%s" % [
+				str(_base_left_arm_pos), str(_base_right_arm_pos)
+			])
+		WeaponType.RIFLE, _:
+			# Rifle pose: Standard extended grip (original positions)
+			_base_left_arm_pos = original_left_arm_pos
+			_base_right_arm_pos = original_right_arm_pos
+			FileLogger.info("[Player] Applied Rifle arm pose: Left=%s, Right=%s" % [
+				str(_base_left_arm_pos), str(_base_right_arm_pos)
+			])
+
+	# Apply new base positions to sprites immediately
+	if _left_arm_sprite:
+		_left_arm_sprite.position = _base_left_arm_pos
+	if _right_arm_sprite:
+		_right_arm_sprite.position = _base_right_arm_pos
 
 
 ## Updates the walking animation based on player movement state.
@@ -565,6 +661,7 @@ func get_max_ammo() -> int:
 
 ## Handle simple reload input (just press R once).
 ## Reload takes reload_time seconds to complete.
+## Animation plays all three steps automatically.
 func _handle_simple_reload_input() -> void:
 	# Don't start reload if already reloading or at max ammo
 	if _is_reloading_simple or _current_ammo >= max_ammo:
@@ -573,6 +670,8 @@ func _handle_simple_reload_input() -> void:
 	if Input.is_action_just_pressed("reload"):
 		_is_reloading_simple = true
 		_reload_timer = 0.0
+		# Start animation: begins with grab magazine
+		_start_reload_anim_phase(ReloadAnimPhase.GRAB_MAGAZINE, RELOAD_ANIM_GRAB_DURATION)
 		# Play full reload sound for simple mode
 		var audio_manager: Node = get_node_or_null("/root/AudioManager")
 		if audio_manager and audio_manager.has_method("play_reload_full"):
@@ -587,6 +686,8 @@ func _complete_simple_reload() -> void:
 	_current_ammo = max_ammo
 	_is_reloading_simple = false
 	_reload_timer = 0.0
+	# Transition to return idle animation
+	_start_reload_anim_phase(ReloadAnimPhase.RETURN_IDLE, RELOAD_ANIM_RETURN_DURATION)
 	ammo_changed.emit(_current_ammo, max_ammo)
 	reload_completed.emit()
 	# Emit reload completion sound for in-game sound propagation
@@ -599,6 +700,10 @@ func _complete_simple_reload() -> void:
 ## Handle reload sequence input (R-F-R).
 ## Player must press R, then F, then R again to complete reload.
 ## Reload happens instantly once sequence is completed.
+## Three animation steps:
+## 1. R press: Grab magazine from chest with left hand
+## 2. F press: Insert magazine into rifle
+## 3. R press: Pull the bolt/charging handle
 func _handle_sequence_reload_input() -> void:
 	# Don't process reload if already at max ammo
 	if _current_ammo >= max_ammo:
@@ -614,6 +719,8 @@ func _handle_sequence_reload_input() -> void:
 			if Input.is_action_just_pressed("reload"):
 				_reload_sequence_step = 1
 				_is_reloading_sequence = true
+				# Start animation: Step 1 - Grab magazine from chest
+				_start_reload_anim_phase(ReloadAnimPhase.GRAB_MAGAZINE, RELOAD_ANIM_GRAB_DURATION)
 				# Play magazine out sound
 				if audio_manager and audio_manager.has_method("play_reload_mag_out"):
 					audio_manager.play_reload_mag_out(global_position)
@@ -624,6 +731,8 @@ func _handle_sequence_reload_input() -> void:
 			# Waiting for F press
 			if Input.is_action_just_pressed("reload_step"):
 				_reload_sequence_step = 2
+				# Start animation: Step 2 - Insert magazine into rifle
+				_start_reload_anim_phase(ReloadAnimPhase.INSERT_MAGAZINE, RELOAD_ANIM_INSERT_DURATION)
 				# Play magazine in sound
 				if audio_manager and audio_manager.has_method("play_reload_mag_in"):
 					audio_manager.play_reload_mag_in(global_position)
@@ -631,12 +740,16 @@ func _handle_sequence_reload_input() -> void:
 			elif Input.is_action_just_pressed("reload"):
 				# R pressed again - restart sequence with mag out sound
 				_reload_sequence_step = 1
+				# Restart animation from grab phase
+				_start_reload_anim_phase(ReloadAnimPhase.GRAB_MAGAZINE, RELOAD_ANIM_GRAB_DURATION)
 				if audio_manager and audio_manager.has_method("play_reload_mag_out"):
 					audio_manager.play_reload_mag_out(global_position)
 				reload_sequence_progress.emit(1, 3)
 		2:
 			# Waiting for final R press
 			if Input.is_action_just_pressed("reload"):
+				# Start animation: Step 3 - Pull bolt/charging handle
+				_start_reload_anim_phase(ReloadAnimPhase.PULL_BOLT, RELOAD_ANIM_BOLT_DURATION)
 				# Play bolt cycling sound and complete reload
 				if audio_manager and audio_manager.has_method("play_m16_bolt"):
 					audio_manager.play_m16_bolt(global_position)
@@ -644,6 +757,8 @@ func _handle_sequence_reload_input() -> void:
 			elif Input.is_action_just_pressed("reload_step"):
 				# Wrong key pressed, reset sequence
 				_reload_sequence_step = 1
+				# Restart animation from grab phase
+				_start_reload_anim_phase(ReloadAnimPhase.GRAB_MAGAZINE, RELOAD_ANIM_GRAB_DURATION)
 				if audio_manager and audio_manager.has_method("play_reload_mag_out"):
 					audio_manager.play_reload_mag_out(global_position)
 				reload_sequence_progress.emit(1, 3)
@@ -654,6 +769,7 @@ func _complete_reload() -> void:
 	_current_ammo = max_ammo
 	_reload_sequence_step = 0
 	_is_reloading_sequence = false
+	# Bolt pull phase transitions automatically to RETURN_IDLE in _update_reload_animation
 	ammo_changed.emit(_current_ammo, max_ammo)
 	reload_completed.emit()
 	reload_sequence_progress.emit(3, 3)
@@ -680,6 +796,9 @@ func cancel_reload() -> void:
 	_is_reloading_sequence = false
 	_is_reloading_simple = false
 	_reload_timer = 0.0
+	# Return arms to idle if reload animation was active
+	if _reload_anim_phase != ReloadAnimPhase.NONE:
+		_start_reload_anim_phase(ReloadAnimPhase.RETURN_IDLE, RELOAD_ANIM_RETURN_DURATION)
 
 
 ## Called when hit by a projectile.
@@ -832,6 +951,64 @@ enum GrenadeState {
 	AIMING                # Step 2 complete: only RMB held, drag to aim and release to throw
 }
 
+# ============================================================================
+# Reload Animation System
+# ============================================================================
+
+## Animation phases for assault rifle reload sequence.
+## Maps to the R-F-R input system for visual feedback.
+## Three steps as requested:
+## 1. Take magazine with left hand from chest
+## 2. Insert magazine into rifle
+## 3. Pull the bolt/charging handle
+enum ReloadAnimPhase {
+	NONE,               # Normal arm positions (weapon held)
+	GRAB_MAGAZINE,      # Step 1: Left hand moves to chest to grab new magazine
+	INSERT_MAGAZINE,    # Step 2: Left hand brings magazine to weapon, inserts it
+	PULL_BOLT,          # Step 3: Character pulls the charging handle
+	RETURN_IDLE         # Arms return to normal weapon-holding position
+}
+
+## Current reload animation phase.
+var _reload_anim_phase: int = ReloadAnimPhase.NONE
+
+## Reload animation phase timer for timed transitions.
+var _reload_anim_timer: float = 0.0
+
+## Reload animation phase duration in seconds.
+var _reload_anim_duration: float = 0.0
+
+## Target positions for reload arm animations (relative offsets from base positions).
+## These are in local PlayerModel space.
+## Base positions: LeftArm (24, 6), RightArm (-2, 6)
+## For reload, left arm goes to chest (vest/mag pouch area), then to weapon
+
+# Step 1: Grab magazine from chest - left arm moves back toward body
+const RELOAD_ARM_LEFT_GRAB := Vector2(-18, -2)        # Left hand at chest/vest mag pouch
+const RELOAD_ARM_RIGHT_HOLD := Vector2(0, 0)          # Right hand stays on weapon grip
+
+# Step 2: Insert magazine - left arm moves to weapon magwell
+const RELOAD_ARM_LEFT_INSERT := Vector2(8, 2)         # Left hand at weapon magwell (forward)
+const RELOAD_ARM_RIGHT_STEADY := Vector2(0, 1)        # Right hand steadies weapon
+
+# Step 3: Pull bolt - both arms involved, right pulls charging handle
+const RELOAD_ARM_LEFT_SUPPORT := Vector2(12, 0)       # Left hand holds foregrip
+const RELOAD_ARM_RIGHT_BOLT := Vector2(-6, -3)        # Right hand pulls bolt back
+
+## Target rotations for reload arm animations (in degrees).
+const RELOAD_ARM_ROT_LEFT_GRAB := -50.0      # Arm rotation when grabbing mag from chest
+const RELOAD_ARM_ROT_RIGHT_HOLD := 0.0       # Right arm steady during grab
+const RELOAD_ARM_ROT_LEFT_INSERT := -10.0    # Left arm rotation when inserting
+const RELOAD_ARM_ROT_RIGHT_STEADY := 5.0     # Slight tilt while steadying
+const RELOAD_ARM_ROT_LEFT_SUPPORT := 0.0     # Left arm on foregrip
+const RELOAD_ARM_ROT_RIGHT_BOLT := -20.0     # Right arm rotation when pulling bolt
+
+## Animation durations for each reload phase (in seconds).
+const RELOAD_ANIM_GRAB_DURATION := 0.25      # Time to grab magazine from chest
+const RELOAD_ANIM_INSERT_DURATION := 0.3     # Time to insert magazine
+const RELOAD_ANIM_BOLT_DURATION := 0.2       # Time to pull bolt
+const RELOAD_ANIM_RETURN_DURATION := 0.2     # Time to return to idle
+
 ## Current grenade state.
 var _grenade_state: int = GrenadeState.IDLE
 
@@ -884,6 +1061,42 @@ var _base_body_pos: Vector2 = Vector2.ZERO
 var _base_head_pos: Vector2 = Vector2.ZERO
 var _base_left_arm_pos: Vector2 = Vector2.ZERO
 var _base_right_arm_pos: Vector2 = Vector2.ZERO
+
+# ============================================================================
+# Weapon-Specific Arm Positioning System
+# ============================================================================
+
+## Weapon types for arm positioning.
+## Different weapon types require different arm poses for realistic holding.
+enum WeaponType {
+	RIFLE,  # Long barrel weapons (M16, AK47) - arms spread apart
+	SMG,    # Compact weapons (UZI, MP5) - arms closer together
+	SHOTGUN # Medium weapons (pump shotgun) - intermediate pose
+}
+
+## Currently detected weapon type.
+var _current_weapon_type: int = WeaponType.RIFLE
+
+## Whether weapon pose has been detected and applied.
+## Used to trigger detection in first few _process frames after _ready().
+var _weapon_pose_applied: bool = false
+
+## Frame counter for delayed weapon pose detection.
+## Weapons are added by level scripts AFTER player's _ready() completes.
+## We wait a few frames to ensure the weapon is added before detecting.
+var _weapon_detect_frame_count: int = 0
+
+## Number of frames to wait before detecting weapon pose.
+## This ensures level scripts have finished adding weapons.
+const WEAPON_DETECT_WAIT_FRAMES: int = 3
+
+## Arm position offsets for SMG weapons (relative to rifle base positions).
+## UZI and similar compact SMGs should have the left arm closer to the body
+## for a proper two-handed compact grip.
+## Left arm moves back (negative X) to create compact grip.
+const SMG_LEFT_ARM_OFFSET := Vector2(-10, 0)
+## Right arm moves slightly forward to meet left hand.
+const SMG_RIGHT_ARM_OFFSET := Vector2(3, 0)
 
 # ============================================================================
 # Grenade Animation System
@@ -1453,3 +1666,102 @@ func _update_wind_up_intensity() -> void:
 
 	_wind_up_intensity = clampf(intensity + velocity_bonus, 0.0, 1.0)
 	_prev_mouse_pos = current_mouse
+
+
+# ============================================================================
+# Reload Animation Functions
+# ============================================================================
+
+## Start a new reload animation phase.
+## @param phase: The ReloadAnimPhase to transition to.
+## @param duration: How long this phase should last.
+func _start_reload_anim_phase(phase: int, duration: float) -> void:
+	_reload_anim_phase = phase
+	_reload_anim_timer = duration
+	_reload_anim_duration = duration
+	FileLogger.info("[Player.Reload.Anim] Phase changed to: %s (duration: %.2fs)" % [
+		ReloadAnimPhase.keys()[phase], duration
+	])
+
+
+## Update reload animation based on current phase.
+## Called every frame from _physics_process.
+## Implements three steps as requested:
+## 1. Left hand grabs magazine from chest
+## 2. Left hand inserts magazine into rifle
+## 3. Pull the bolt/charging handle
+## @param delta: Time since last frame.
+func _update_reload_animation(delta: float) -> void:
+	# Early exit if no animation active
+	if _reload_anim_phase == ReloadAnimPhase.NONE:
+		return
+
+	# Update phase timer
+	if _reload_anim_timer > 0:
+		_reload_anim_timer -= delta
+
+	# Calculate animation progress (0.0 to 1.0)
+	var progress := 1.0
+	if _reload_anim_duration > 0:
+		progress = clampf(1.0 - (_reload_anim_timer / _reload_anim_duration), 0.0, 1.0)
+
+	# Calculate target positions based on current phase
+	var left_arm_target := _base_left_arm_pos
+	var right_arm_target := _base_right_arm_pos
+	var left_arm_rot := 0.0
+	var right_arm_rot := 0.0
+	var lerp_speed := ANIM_LERP_SPEED * delta
+
+	match _reload_anim_phase:
+		ReloadAnimPhase.GRAB_MAGAZINE:
+			# Step 1: Left hand moves to chest/vest to grab magazine
+			# Left arm moves back toward body (chest area where mag pouches are)
+			left_arm_target = _base_left_arm_pos + RELOAD_ARM_LEFT_GRAB
+			left_arm_rot = deg_to_rad(RELOAD_ARM_ROT_LEFT_GRAB)
+			# Right hand stays on weapon grip, steadying the rifle
+			right_arm_target = _base_right_arm_pos + RELOAD_ARM_RIGHT_HOLD
+			right_arm_rot = deg_to_rad(RELOAD_ARM_ROT_RIGHT_HOLD)
+			lerp_speed = ANIM_LERP_SPEED_FAST * delta
+
+		ReloadAnimPhase.INSERT_MAGAZINE:
+			# Step 2: Left hand moves forward to weapon magwell, inserts magazine
+			left_arm_target = _base_left_arm_pos + RELOAD_ARM_LEFT_INSERT
+			left_arm_rot = deg_to_rad(RELOAD_ARM_ROT_LEFT_INSERT)
+			# Right hand steadies the weapon slightly
+			right_arm_target = _base_right_arm_pos + RELOAD_ARM_RIGHT_STEADY
+			right_arm_rot = deg_to_rad(RELOAD_ARM_ROT_RIGHT_STEADY)
+			lerp_speed = ANIM_LERP_SPEED * delta
+
+		ReloadAnimPhase.PULL_BOLT:
+			# Step 3: Pull bolt/charging handle
+			# Left hand moves to foregrip to support weapon
+			left_arm_target = _base_left_arm_pos + RELOAD_ARM_LEFT_SUPPORT
+			left_arm_rot = deg_to_rad(RELOAD_ARM_ROT_LEFT_SUPPORT)
+			# Right hand pulls charging handle back
+			right_arm_target = _base_right_arm_pos + RELOAD_ARM_RIGHT_BOLT
+			right_arm_rot = deg_to_rad(RELOAD_ARM_ROT_RIGHT_BOLT)
+			lerp_speed = ANIM_LERP_SPEED_FAST * delta
+
+			# When bolt pull animation completes, transition to return idle
+			if _reload_anim_timer <= 0:
+				_start_reload_anim_phase(ReloadAnimPhase.RETURN_IDLE, RELOAD_ANIM_RETURN_DURATION)
+
+		ReloadAnimPhase.RETURN_IDLE:
+			# Arms returning to normal weapon-holding positions
+			left_arm_target = _base_left_arm_pos
+			right_arm_target = _base_right_arm_pos
+			lerp_speed = ANIM_LERP_SPEED * delta
+
+			# When return animation completes, end animation
+			if _reload_anim_timer <= 0:
+				_reload_anim_phase = ReloadAnimPhase.NONE
+				FileLogger.info("[Player.Reload.Anim] Reload animation complete, returning to normal")
+
+	# Apply arm positions with smooth interpolation
+	if _left_arm_sprite:
+		_left_arm_sprite.position = _left_arm_sprite.position.lerp(left_arm_target, lerp_speed)
+		_left_arm_sprite.rotation = lerpf(_left_arm_sprite.rotation, left_arm_rot, lerp_speed)
+
+	if _right_arm_sprite:
+		_right_arm_sprite.position = _right_arm_sprite.position.lerp(right_arm_target, lerp_speed)
+		_right_arm_sprite.rotation = lerpf(_right_arm_sprite.rotation, right_arm_rot, lerp_speed)
