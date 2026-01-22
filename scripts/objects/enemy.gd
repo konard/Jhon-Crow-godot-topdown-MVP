@@ -620,8 +620,7 @@ var _last_hit_direction: Vector2 = Vector2.RIGHT
 ## Death animation component reference.
 var _death_animation: Node = null
 
-## Scene for death animation component.
-const DeathAnimationComponent = preload("res://scripts/components/death_animation_component.gd")
+## Note: DeathAnimationComponent is available via class_name declaration.
 
 
 func _ready() -> void:

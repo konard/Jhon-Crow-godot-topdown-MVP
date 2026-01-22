@@ -1,3 +1,4 @@
+class_name DeathAnimationComponent
 extends Node2D
 ## Death animation component that handles death animations with ragdoll physics.
 ##
