@@ -257,4 +257,98 @@ Added diagnostic logging to:
 | 2026-01-22 11:27:17 | User started new test session |
 | 2026-01-22 11:27:28 | First reload animation triggered (GrabMagazine) |
 | 2026-01-22 11:28:52 | User reported "not seeing changes" |
-| 2026-01-22 (current) | Third fix: increased animation offsets, added diagnostic logging |
+| 2026-01-22 08:33:32 | Third fix: increased animation offsets, added diagnostic logging |
+
+---
+
+# Fourth Round of Feedback (2026-01-22)
+
+## User Feedback
+
+After the third fix with increased offsets, user tested and reported:
+
+1. **"теперь первый сломался (раньше рука тянулась куда надо, теперь за спину)"**
+   - Translation: "Now the first [step] is broken (before the hand was reaching where needed, now it goes behind the back)"
+
+2. **"третий этап анимации (движение туда-сюда вдоль оружия) - не появился"**
+   - Translation: "Third step animation (back-and-forth movement along the weapon) - didn't appear"
+
+## Investigation
+
+### Log Analysis
+
+Downloaded and analyzed new game logs:
+- `game_log_20260122_114303.txt`
+- `game_log_20260122_114411.txt`
+
+### Key Findings
+
+**1. Left arm positions show the problem:**
+```
+[11:43:10] [INFO] [Player.Reload.Anim] LeftArm: pos=(-15.999999, -1.9999998), target=(-16, -2), base=(24, 6)
+```
+
+The left arm base is at `(24, 6)` but target is `(-16, -2)` - a negative X coordinate means the arm went **behind the player**, not toward the chest.
+
+**2. Step 3 sub-phases not visible:**
+The log shows:
+```
+[11:43:11] [INFO] [Player.Reload.Anim] Phase changed to: PullBolt (duration: 0,15s)
+[11:43:11] [INFO] [Player.Reload.Anim] Phase changed to: ReturnIdle (duration: 0,20s)
+```
+
+Both phases happen within the same second (0.15s duration is too short), and the sub-phase transition log `"Bolt pull sub-phase: returning forward"` never appears.
+
+## Root Cause Analysis (Fourth Round)
+
+### Issue 1: Step 1 Goes Behind Back
+
+**Root Cause**: The offset `(-40, -8)` was too large.
+- Base left arm position: `(24, 6)`
+- Offset applied: `(-40, -8)`
+- Resulting target: `(24 + (-40), 6 + (-8)) = (-16, -2)` ← **This is behind the player!**
+
+The coordinate system:
+- Positive X = forward (toward weapon/mouse direction)
+- Negative X = backward (behind player)
+- Player body center is around `(0, 0)`
+
+For the arm to reach the chest/vest mag pouch, it should move from `(24, 6)` to around `(4, 2)` - still positive X, not negative!
+
+**Fix**: Changed offset from `(-40, -8)` to `(-20, -4)`:
+- New target: `(24 + (-20), 6 + (-4)) = (4, 2)` ← At body center/chest area
+
+### Issue 2: Step 3 Back-and-Forth Not Visible
+
+**Root Cause**: The bolt pull duration is too short (0.15s) for the back-and-forth to be visible.
+
+Additionally, looking at the animation code, when entering `PullBolt` phase:
+1. Timer set to 0.15s
+2. Arm lerps toward pull position
+3. When timer expires, sub-phase changes to 1, timer reset to 0.1s
+4. Arm lerps toward return position
+5. Total time: 0.25s - barely visible
+
+**Fix**:
+1. Increased `ReloadAnimBoltPullDuration` from 0.15s to 0.35s
+2. Increased `ReloadAnimBoltReturnDuration` from 0.1s to 0.25s
+3. Total visible bolt motion: 0.6s
+
+## Files Updated
+
+- `Scripts/Characters/Player.cs`:
+  - Fixed Step 1 offset: `(-40, -8)` → `(-20, -4)`
+  - Fixed Step 2 offset: `(-20, 0)` → `(-12, 0)`
+  - Increased bolt pull duration: 0.15s → 0.35s
+  - Increased bolt return duration: 0.1s → 0.25s
+  - Added detailed bolt sub-phase logging
+
+## Timeline Update
+
+| Time | Event |
+|------|-------|
+| 2026-01-22 08:33:32 | Third fix committed |
+| 2026-01-22 11:43:03 | User started new test session |
+| 2026-01-22 11:43:09 | Reload animation triggered - arm goes behind back |
+| 2026-01-22 11:45:19 | User reported step 1 broken, step 3 not visible |
+| 2026-01-22 (current) | Fourth fix: corrected offsets, increased durations |
