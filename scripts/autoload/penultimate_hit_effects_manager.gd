@@ -23,6 +23,9 @@ const SCREEN_CONTRAST_BOOST: float = 1.0
 ## Enemy saturation multiplier (4x).
 const ENEMY_SATURATION_MULTIPLIER: float = 4.0
 
+## Player saturation multiplier (same as enemies for consistency).
+const PLAYER_SATURATION_MULTIPLIER: float = 4.0
+
 ## Duration of the effect in real seconds (independent of time_scale).
 const EFFECT_DURATION_REAL_SECONDS: float = 3.0
 
@@ -44,6 +47,10 @@ var _connected_to_player: bool = false
 ## Cached list of enemies with their original modulate colors.
 ## Key: enemy instance, Value: original modulate Color
 var _enemy_original_colors: Dictionary = {}
+
+## Cached player sprites with their original modulate colors.
+## Key: sprite instance, Value: original modulate Color
+var _player_original_colors: Dictionary = {}
 
 ## Timer for tracking effect duration (uses real time, not game time).
 var _effect_start_time: float = 0.0
@@ -238,6 +245,9 @@ func _start_penultimate_effect() -> void:
 	# Apply enemy saturation (4x)
 	_apply_enemy_saturation()
 
+	# Apply player saturation (4x) - makes player more visible
+	_apply_player_saturation()
+
 
 ## End the penultimate hit effect.
 func _end_penultimate_effect() -> void:
@@ -259,6 +269,9 @@ func _end_penultimate_effect() -> void:
 
 	# Restore enemy colors
 	_restore_enemy_colors()
+
+	# Restore player sprite colors
+	_restore_player_colors()
 
 
 ## Apply 4x saturation to all enemies.
@@ -294,6 +307,65 @@ func _restore_enemy_colors() -> void:
 	_enemy_original_colors.clear()
 
 
+## Apply saturation boost to all player sprites (visibility during effect).
+## This makes the entire player more vivid during the penultimate hit effect.
+func _apply_player_saturation() -> void:
+	if _player == null:
+		return
+
+	_player_original_colors.clear()
+
+	# Find all player sprites in PlayerModel
+	var player_model := _player.get_node_or_null("PlayerModel") as Node2D
+	if player_model == null:
+		_log("WARNING: PlayerModel not found on player")
+		return
+
+	# Apply saturation to all direct sprite children (Body, Head, LeftArm, RightArm)
+	var sprites_saturated: int = 0
+	for child in player_model.get_children():
+		if child is Sprite2D:
+			_player_original_colors[child] = child.modulate
+			child.modulate = _saturate_color(child.modulate, PLAYER_SATURATION_MULTIPLIER)
+			sprites_saturated += 1
+
+	# Also apply saturation to armband (sibling of RightArm, not child - to avoid inheriting health modulate)
+	var armband := player_model.get_node_or_null("Armband") as Sprite2D
+	if armband:
+		_player_original_colors[armband] = armband.modulate
+		armband.modulate = _saturate_color(armband.modulate, PLAYER_SATURATION_MULTIPLIER)
+		sprites_saturated += 1
+
+	_log("Applied %.1fx saturation to %d player sprites" % [PLAYER_SATURATION_MULTIPLIER, sprites_saturated])
+
+
+## Restore original colors to player's sprites.
+## After restoring, tells the player to refresh their health visual to ensure
+## the correct health-based coloring is applied (not the stale stored colors).
+func _restore_player_colors() -> void:
+	for sprite in _player_original_colors.keys():
+		if is_instance_valid(sprite):
+			sprite.modulate = _player_original_colors[sprite]
+
+	if _player_original_colors.size() > 0:
+		_log("Restored original colors to %d player sprites" % _player_original_colors.size())
+
+	_player_original_colors.clear()
+
+	# Tell the player to refresh their health visual to apply correct colors
+	# This is needed because the stored colors might be stale (captured at a different
+	# health level or during a previous effect state)
+	if _player != null and is_instance_valid(_player):
+		# Try C# player method (RefreshHealthVisual)
+		if _player.has_method("RefreshHealthVisual"):
+			_player.RefreshHealthVisual()
+			_log("Called player RefreshHealthVisual (C#)")
+		# Try GDScript player method (refresh_health_visual)
+		elif _player.has_method("refresh_health_visual"):
+			_player.refresh_health_visual()
+			_log("Called player refresh_health_visual (GDScript)")
+
+
 ## Increase saturation of a color by a multiplier.
 ## Uses the same algorithm as the saturation shader.
 func _saturate_color(color: Color, multiplier: float) -> Color:
@@ -320,6 +392,7 @@ func reset_effects() -> void:
 	_end_penultimate_effect()
 	_player = null
 	_connected_to_player = false
+	_player_original_colors.clear()
 
 
 ## Called when the scene tree structure changes.

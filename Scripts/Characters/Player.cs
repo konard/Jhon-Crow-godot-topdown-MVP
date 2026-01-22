@@ -762,7 +762,20 @@ public partial class Player : BaseCharacter
     }
 
     /// <summary>
+    /// Public method to refresh the health visual.
+    /// Called by effects managers (like LastChanceEffectsManager) after they finish
+    /// modifying player sprite colors, to ensure the player returns to correct
+    /// health-based coloring.
+    /// </summary>
+    public void RefreshHealthVisual()
+    {
+        UpdateHealthVisual();
+    }
+
+    /// <summary>
     /// Sets the modulate color on all player sprite parts.
+    /// The armband is a separate sibling sprite (not child of RightArm) that keeps
+    /// its original color, so all body parts use the same health-based color.
     /// </summary>
     /// <param name="color">The color to apply to all sprites.</param>
     private void SetAllSpritesModulate(Color color)
@@ -781,6 +794,9 @@ public partial class Player : BaseCharacter
         }
         if (_rightArmSprite != null)
         {
+            // Right arm uses the same color as other body parts.
+            // The armband is now a separate sibling sprite (Armband node under PlayerModel)
+            // that doesn't inherit this modulate, keeping its bright red color visible.
             _rightArmSprite.Modulate = color;
         }
         if (_leftElbowJoint != null)
@@ -1451,10 +1467,24 @@ public partial class Player : BaseCharacter
         bullet.GlobalPosition = GlobalPosition + direction * BulletSpawnOffset;
 
         // Set bullet direction
-        bullet.Set("Direction", direction);
+        if (bullet.HasMethod("SetDirection"))
+        {
+            bullet.Call("SetDirection", direction);
+        }
+        else
+        {
+            bullet.Set("direction", direction);
+        }
 
         // Set shooter ID to prevent self-damage
-        bullet.Set("ShooterId", GetInstanceId());
+        if (bullet.HasMethod("SetShooterId"))
+        {
+            bullet.Call("SetShooterId", GetInstanceId());
+        }
+        else
+        {
+            bullet.Set("shooter_id", GetInstanceId());
+        }
 
         // Add bullet to the scene tree
         GetTree().CurrentScene.AddChild(bullet);
@@ -1856,6 +1886,13 @@ public partial class Player : BaseCharacter
     }
 
     /// <summary>
+    /// Sensitivity multiplier for throw distance calculation.
+    /// Higher value = farther throw for same drag distance.
+    /// Must match the value used in debug visualization.
+    /// </summary>
+    private const float ThrowSensitivityMultiplier = 9.0f;
+
+    /// <summary>
     /// Throw the grenade based on aiming drag direction and distance.
     /// Includes player rotation animation to prevent grenade hitting player.
     /// </summary>
@@ -1884,9 +1921,19 @@ public partial class Player : BaseCharacter
             dragDistance = 50.0f; // Minimum throw distance
         }
 
-        // Pass raw drag distance to grenade - GDScript handles the speed calculation
-        // The grenade's drag_to_speed_multiplier controls the sensitivity
-        LogToFile($"[Player.Grenade] Throwing! Direction: {throwDirection}, Drag distance: {dragDistance}");
+        // Apply sensitivity multiplier to increase throw range (matches GDScript player.gd)
+        float adjustedDragDistance = dragDistance * ThrowSensitivityMultiplier;
+
+        // Clamp max drag distance to viewport width * 3 (matches GDScript player.gd)
+        var viewport = GetViewport();
+        float maxDragDistance = 3840.0f; // Default 1280 * 3
+        if (viewport != null)
+        {
+            maxDragDistance = viewport.GetVisibleRect().Size.X * 3.0f;
+        }
+        adjustedDragDistance = Mathf.Min(adjustedDragDistance, maxDragDistance);
+
+        LogToFile($"[Player.Grenade] Throwing! Direction: {throwDirection}, Drag: {dragDistance} (adjusted: {adjustedDragDistance})");
 
         // Rotate player to face throw direction (prevents grenade hitting player when throwing upward)
         RotatePlayerForThrow(throwDirection);
@@ -1897,10 +1944,10 @@ public partial class Player : BaseCharacter
         Vector2 spawnPosition = GlobalPosition + throwDirection * spawnOffset;
         _activeGrenade.GlobalPosition = spawnPosition;
 
-        // Call the throw method on the grenade with raw drag distance
+        // Call the throw method on the grenade with adjusted drag distance
         if (_activeGrenade.HasMethod("throw_grenade"))
         {
-            _activeGrenade.Call("throw_grenade", throwDirection, dragDistance);
+            _activeGrenade.Call("throw_grenade", throwDirection, adjustedDragDistance);
         }
 
         // Emit signal
@@ -1913,7 +1960,7 @@ public partial class Player : BaseCharacter
             audioManager.Call("play_grenade_throw", GlobalPosition);
         }
 
-        LogToFile($"[Player.Grenade] Thrown! Direction: {throwDirection}, Drag distance: {dragDistance}");
+        LogToFile($"[Player.Grenade] Thrown! Direction: {throwDirection}, Adjusted drag: {adjustedDragDistance}");
 
         // Reset state (grenade is now independent)
         ResetGrenadeState();
@@ -2519,6 +2566,7 @@ public partial class Player : BaseCharacter
     /// <summary>
     /// Override _Draw to visualize grenade trajectory when debug mode is enabled.
     /// Shows predicted landing position based on current drag.
+    /// Uses the same calculation as ThrowGrenade() to ensure accuracy.
     /// </summary>
     public override void _Draw()
     {
@@ -2550,6 +2598,18 @@ public partial class Player : BaseCharacter
             throwDirection = dragVector.Normalized();
         }
 
+        // Apply sensitivity multiplier (same as ThrowGrenade)
+        float adjustedDragDistance = dragDistance * ThrowSensitivityMultiplier;
+
+        // Clamp max drag distance to viewport width * 3 (same as ThrowGrenade)
+        var viewport = GetViewport();
+        float maxDragDistance = 3840.0f; // Default 1280 * 3
+        if (viewport != null)
+        {
+            maxDragDistance = viewport.GetVisibleRect().Size.X * 3.0f;
+        }
+        adjustedDragDistance = Mathf.Min(adjustedDragDistance, maxDragDistance);
+
         // Constants from grenade_base.gd
         const float DragToSpeedMultiplier = 2.0f;
         const float MinThrowSpeed = 100.0f;
@@ -2557,9 +2617,9 @@ public partial class Player : BaseCharacter
         const float GroundFriction = 150.0f;
         const float SpawnOffset = 60.0f;
 
-        // Calculate throw speed (same as grenade_base.gd)
+        // Calculate throw speed using adjusted drag distance (same as grenade_base.gd)
         float throwSpeed = Mathf.Clamp(
-            dragDistance * DragToSpeedMultiplier,
+            adjustedDragDistance * DragToSpeedMultiplier,
             MinThrowSpeed,
             MaxThrowSpeed
         );

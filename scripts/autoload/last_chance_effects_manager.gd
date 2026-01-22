@@ -31,6 +31,10 @@ const RIPPLE_FREQUENCY: float = 25.0
 ## Ripple effect speed.
 const RIPPLE_SPEED: float = 2.0
 
+## Player saturation multiplier during last chance (same as enemy saturation).
+## Makes the player more vivid and visible during the effect.
+const PLAYER_SATURATION_MULTIPLIER: float = 4.0
+
 ## The CanvasLayer for screen effects.
 var _effects_layer: CanvasLayer = null
 
@@ -82,6 +86,10 @@ var _player_was_invulnerable: bool = false
 ## This is used because accessing C# HealthComponent.CurrentHealth from GDScript
 ## doesn't work reliably due to cross-language interoperability issues.
 var _player_current_health: float = 0.0
+
+## Original player sprite modulate colors (to restore after effect ends).
+## Key: sprite node, Value: original modulate Color
+var _player_original_colors: Dictionary = {}
 
 
 func _ready() -> void:
@@ -526,7 +534,7 @@ func _is_descendant_of(ancestor: Node, node: Node) -> bool:
 
 
 
-## Applies the visual effects (blue sepia + ripple).
+## Applies the visual effects (blue sepia + ripple + arm saturation).
 func _apply_visual_effects() -> void:
 	_effect_rect.visible = true
 	var material := _effect_rect.material as ShaderMaterial
@@ -536,6 +544,9 @@ func _apply_visual_effects() -> void:
 		material.set_shader_parameter("ripple_strength", RIPPLE_STRENGTH)
 		material.set_shader_parameter("time_offset", 0.0)
 		_log("Applied visual effects: sepia=%.2f, brightness=%.2f, ripple=%.4f" % [SEPIA_INTENSITY, BRIGHTNESS, RIPPLE_STRENGTH])
+
+	# Apply saturation boost to player's sprites (makes player more visible)
+	_apply_player_saturation()
 
 
 ## Ends the last chance effect.
@@ -593,6 +604,88 @@ func _remove_visual_effects() -> void:
 		material.set_shader_parameter("sepia_intensity", 0.0)
 		material.set_shader_parameter("brightness", 1.0)
 		material.set_shader_parameter("ripple_strength", 0.0)
+
+	# Restore original player sprite colors
+	_restore_player_colors()
+
+
+## Applies saturation boost to all player sprites (visibility during effect).
+## This makes the entire player more vivid during the last chance effect.
+func _apply_player_saturation() -> void:
+	if _player == null:
+		return
+
+	_player_original_colors.clear()
+
+	# Find all player sprites in PlayerModel
+	var player_model := _player.get_node_or_null("PlayerModel") as Node2D
+	if player_model == null:
+		_log("WARNING: PlayerModel not found on player")
+		return
+
+	# Apply saturation to all direct sprite children (Body, Head, LeftArm, RightArm)
+	var sprites_saturated: int = 0
+	for child in player_model.get_children():
+		if child is Sprite2D:
+			_player_original_colors[child] = child.modulate
+			child.modulate = _saturate_color(child.modulate, PLAYER_SATURATION_MULTIPLIER)
+			sprites_saturated += 1
+
+	# Also apply saturation to armband (sibling of RightArm, not child - to avoid inheriting health modulate)
+	var armband := player_model.get_node_or_null("Armband") as Sprite2D
+	if armband:
+		_player_original_colors[armband] = armband.modulate
+		armband.modulate = _saturate_color(armband.modulate, PLAYER_SATURATION_MULTIPLIER)
+		sprites_saturated += 1
+
+	_log("Applied %.1fx saturation to %d player sprites" % [PLAYER_SATURATION_MULTIPLIER, sprites_saturated])
+
+
+## Restores original colors to player's sprites.
+## After restoring, tells the player to refresh their health visual to ensure
+## the correct health-based coloring is applied (not the stale stored colors).
+func _restore_player_colors() -> void:
+	for sprite in _player_original_colors.keys():
+		if is_instance_valid(sprite):
+			sprite.modulate = _player_original_colors[sprite]
+
+	if _player_original_colors.size() > 0:
+		_log("Restored original colors to %d player sprites" % _player_original_colors.size())
+
+	_player_original_colors.clear()
+
+	# Tell the player to refresh their health visual to apply correct colors
+	# This is needed because the stored colors might be stale (captured at a different
+	# health level or during a previous effect state)
+	if _player != null and is_instance_valid(_player):
+		# Try C# player method (RefreshHealthVisual)
+		if _player.has_method("RefreshHealthVisual"):
+			_player.RefreshHealthVisual()
+			_log("Called player RefreshHealthVisual (C#)")
+		# Try GDScript player method (refresh_health_visual)
+		elif _player.has_method("refresh_health_visual"):
+			_player.refresh_health_visual()
+			_log("Called player refresh_health_visual (GDScript)")
+
+
+## Increase saturation of a color by a multiplier.
+## Uses standard luminance-based saturation algorithm.
+func _saturate_color(color: Color, multiplier: float) -> Color:
+	# Calculate luminance using standard weights
+	var luminance := color.r * 0.299 + color.g * 0.587 + color.b * 0.114
+
+	# Increase saturation by moving away from grayscale
+	var saturated_r := lerp(luminance, color.r, multiplier)
+	var saturated_g := lerp(luminance, color.g, multiplier)
+	var saturated_b := lerp(luminance, color.b, multiplier)
+
+	# Clamp to valid color range
+	return Color(
+		clampf(saturated_r, 0.0, 1.0),
+		clampf(saturated_g, 0.0, 1.0),
+		clampf(saturated_b, 0.0, 1.0),
+		color.a
+	)
 
 
 ## Pushes all bullets that are close to the player away.
@@ -856,6 +949,7 @@ func reset_effects() -> void:
 	_frozen_player_bullets.clear()
 	_frozen_grenades.clear()
 	_original_process_modes.clear()
+	_player_original_colors.clear()
 	_player_was_invulnerable = false
 
 
