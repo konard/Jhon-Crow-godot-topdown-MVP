@@ -6,6 +6,26 @@
 
 **Original (Russian):** "после первого открытия затвора: при зажатом MMB и драгндропе ПКМ вниз - затвор закрывается, вместо того чтобы зарядить заряд."
 
+## User Requirement Clarification
+
+**User stated (in Russian):** "при зажатом MMB должно быть невозможно закрыть затвор"
+
+**Translation:** "While MMB is held, it should be impossible to close the bolt"
+
+**Interpretation:**
+- When MMB is held, bolt closing should be BLOCKED entirely
+- Any RMB drag DOWN while MMB is held should load a shell (if possible)
+- Bolt can only be closed when MMB is released
+
+**Expected reload workflow:**
+1. Open bolt (RMB drag UP)
+2. Hold MMB
+3. RMB drag DOWN → load shell 1 (bolt stays open)
+4. RMB drag DOWN → load shell 2 (bolt stays open - MMB blocks close)
+5. RMB drag DOWN → load shell 3 (bolt stays open - MMB blocks close)
+6. Release MMB
+7. RMB drag DOWN → close bolt
+
 ## Timeline of Events
 
 ### Historical Context
@@ -28,13 +48,55 @@
 4. **First Fix Attempt** (2026-01-22 10:26): PR #233 created
    - Modified `TryProcessMidDragGesture()` to never process drag DOWN in Loading state
    - Always defers to release-based gesture processing
-   - User reports: "problem persists" (2026-01-22 13:07 Moscow time)
 
-## Root Cause Analysis
+5. **User Feedback** (2026-01-22 13:07 Moscow time): "problem persists"
+   - Log file shows NO `[Shotgun.Reload]` debug messages
+   - This indicates C# code changes were NOT included in the user's build
+   - See "C# Build Issue" section below
 
-### The Problematic Code Path (Before Fix)
+6. **Second User Feedback** (2026-01-22 13:23 Moscow time): Same issue
+   - User confirms: "при зажатом MMB должно быть невозможно закрыть затвор"
+   - Clarifies the expected behavior: MMB should BLOCK bolt closing
 
-In `TryProcessMidDragGesture()` for `ShotgunReloadState.Loading`:
+## C# Build Issue
+
+### Evidence
+
+Both user-provided logs (`game_log_20260122_130529.txt` and `game_log_20260122_132129.txt`) show:
+- The shotgun IS being detected: `[Player] Detected weapon: Shotgun (Shotgun pose)`
+- Multiple gunshot sounds from shotgun firing
+- **NO `[Shotgun.Reload]` debug messages at all**
+
+This is definitive evidence that the C# code changes (which include detailed reload logging) are NOT being compiled into the user's export.
+
+### Possible Causes
+
+1. **User running old build**: The C# code was not recompiled before export
+2. **Export configuration issue**: Windows export might not include C# assemblies
+3. **Godot C# export bug**: See [GitHub issue #112918](https://github.com/godotengine/godot/issues/112918) - affects Godot 4.6 dev builds
+
+### Solution
+
+Added version identifier to Shotgun.cs initialization:
+```csharp
+GD.Print("[Shotgun] *** C# BUILD VERSION: 2026-01-22-v2 (Issue #232 fix) ***");
+```
+
+If this message does NOT appear in the log, the C# code was not recompiled!
+
+## The Fix (v2)
+
+### Changed Behavior
+
+In `ProcessReloadGesture()` for `ShotgunReloadState.Loading`:
+
+**If MMB is currently held OR was held during drag:**
+- ALWAYS attempt to load a shell
+- Bolt close is BLOCKED
+- Bolt remains open for more shells
+
+**If MMB was never held during drag:**
+- Close bolt
 
 ```csharp
 case ShotgunReloadState.Loading:
@@ -44,88 +106,83 @@ case ShotgunReloadState.Loading:
 
         if (shouldLoadShell)
         {
-            return false;  // Don't process mid-drag
+            // Load shell (bolt close blocked while MMB held)
+            LoadShell();
+            // Bolt remains OPEN for more shells
         }
         else
         {
-            CompleteReload();  // BUG: Closes bolt prematurely!
+            // Close bolt (MMB never held)
+            CompleteReload();
         }
-        gestureProcessed = true;
     }
     break;
 ```
 
-**The Bug Flow:**
-1. User opens bolt (RMB drag UP) - works fine
-2. User wants to load a shell: holds MMB + RMB drag DOWN
-3. `TryProcessMidDragGesture()` is called as soon as drag threshold (~30px) is reached
-4. If user hasn't pressed MMB yet at that exact moment, `shouldLoadShell` evaluates to `false`
-5. Bolt closes prematurely via `CompleteReload()`
+### Mid-Drag Gesture Handling
 
-### The Fix Applied
-
-Changed the Loading state handling to never process mid-drag:
+In `TryProcessMidDragGesture()`, the Loading state with drag DOWN now ALWAYS returns `false` to defer to release-based gesture processing:
 
 ```csharp
 case ShotgunReloadState.Loading:
     if (isDragDown)
     {
-        // Always wait for RMB release in Loading state
+        // Always wait for RMB release to give user time to press MMB
         return false;
     }
     break;
 ```
 
-### Why The User Might Still See The Issue
-
-Possible reasons:
-
-1. **Testing against main branch**: PR #233 is not yet merged
-   - User needs to test against the `issue-232-5205289e4453` branch
-
-2. **Build not updated**: User might be running an old build
-   - The fix was committed at 10:26:27 UTC+1
-   - User's log is from 13:05:30 (likely UTC+3) = 10:05:30 UTC
-   - This is BEFORE the fix commit!
-
-3. **Another code path**: There might be another scenario not covered
-
-4. **GDScript interop issue**: The user mentioned "conflict of languages or imports"
-   - Need to verify C# and GDScript are working together correctly
-
-## Investigation: MMB Tracking During Reload
-
-The core logic for tracking MMB during reload:
-
-1. **Drag start**: `_wasMiddleMouseHeldDuringDrag = _isMiddleMouseHeld`
-2. **During drag**: `if (_isMiddleMouseHeld) { _wasMiddleMouseHeldDuringDrag = true; }`
-3. **After mid-drag gesture**: `_wasMiddleMouseHeldDuringDrag = _isMiddleMouseHeld` (RESET)
-4. **On RMB release**: Check `_wasMiddleMouseHeldDuringDrag || _isMiddleMouseHeld`
-
-**Potential Issue Found:**
-After a mid-drag gesture (like opening bolt), the flag is reset at line 415. If:
-- Bolt opens via mid-drag
-- Flag is reset to current MMB state (false if not held)
-- User presses MMB after this reset
-- The tracking loop (lines 419-424) should set flag to true
-- BUT: This only happens if RMB is still held
-
-**Edge Case:** If user releases RMB very quickly after opening bolt, and MMB was not captured during the tracking window, the shell won't load.
-
-## Proposed Solutions
-
-### Solution 1: Add More Comprehensive Debug Logging
-Add detailed logging at every step of the reload process to understand the exact sequence of events.
-
-### Solution 2: Review and Improve MMB Tracking
-Ensure `_wasMiddleMouseHeldDuringDrag` is properly maintained across all scenarios.
-
-### Solution 3: Consider Using Input Events Instead of Polling
-The current approach polls `Input.IsMouseButtonPressed()` in `_Process()`. Using input events via `_Input()` might provide more reliable button state tracking.
-
 ## Files Changed
 
-- `Scripts/Weapons/Shotgun.cs` - Fix in `TryProcessMidDragGesture()` and enhanced logging
+- `Scripts/Weapons/Shotgun.cs` - Fix in `ProcessReloadGesture()` and `TryProcessMidDragGesture()` plus version identifier
+
+## User-Provided Logs
+
+- `logs/game_log_20260122_130529.txt` - First log (no reload messages)
+- `logs/game_log_20260122_132129.txt` - Second log (still no reload messages)
+
+## Verification Instructions
+
+To verify the fix is working:
+
+1. **Check for version message in log:**
+   ```
+   [Shotgun] *** C# BUILD VERSION: 2026-01-22-v2 (Issue #232 fix) ***
+   ```
+
+2. **Check for reload debug messages:**
+   ```
+   [Shotgun.Reload] === BOLT OPENED ===
+   [Shotgun.Reload] === MMB DETECTED DURING DRAG ===
+   [Shotgun.Reload] >>> LOADING SHELL (MMB is/was held) <<<
+   [Shotgun.Reload] Bolt remains OPEN for more shells
+   ```
+
+3. **Test the workflow:**
+   - Open bolt (RMB drag UP)
+   - Hold MMB
+   - RMB drag DOWN → should load shell, bolt stays open
+   - RMB drag DOWN → should load another shell
+   - Release MMB
+   - RMB drag DOWN → should close bolt
+
+## C# Build Requirements
+
+For the fix to work, the user must:
+
+1. **Rebuild C# assemblies** before exporting:
+   - In Godot Editor: Build → Build Solution (or Ctrl+Shift+B)
+   - Or from command line: `dotnet build`
+
+2. **Use correct export template**:
+   - Ensure using Godot .NET/Mono version
+   - Download matching export templates
+
+3. **Check engine version**:
+   - User's log shows "4.3-stable"
+   - This version should work correctly
+   - Avoid Godot 4.6 dev builds (have export bugs)
 
 ## Related Issues
 
@@ -133,17 +190,8 @@ The current approach polls `Input.IsMouseButtonPressed()` in `_Process()`. Using
 - **Issue #210**: Continuous gestures feature (introduced regression)
 - **PR #214**: Fix for #213
 - **PR #215**: Continuous gestures implementation
+- **PR #233**: Fix for #232 (this issue)
 
-## User-Provided Logs
+## References
 
-- `logs/game_log_20260122_130529.txt` - Game log showing shotgun firing but no reload log messages
-
-## Next Steps
-
-1. Verify user is testing with the correct branch/build
-2. Add comprehensive debug logging
-3. Test all edge cases:
-   - Quick gestures (MMB pressed late)
-   - Slow gestures (MMB pressed early)
-   - Same-frame button releases
-   - Continuous gesture flows (UP then DOWN without release)
+- [Godot C# Export Bug #112918](https://github.com/godotengine/godot/issues/112918)
