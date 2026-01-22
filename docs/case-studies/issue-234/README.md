@@ -38,6 +38,22 @@
      - Last chance effect (hard mode) - `last_chance_effects_manager.gd`
      - Penultimate hit effect (normal mode) - `penultimate_hit_effects_manager.gd`
 
+### Feedback Session (Session 3)
+1. **Owner feedback:**
+   - Armband is only visible after last chance effect (should be visible ALWAYS)
+   - There should be only ONE armband, not two
+   - Game log attached: `game_log_20260122_132449.txt`
+2. **Root cause analysis:**
+   - Armband colors (RGB 220-255, 40-70, 40-70) were not bright enough to be visible during normal gameplay
+   - Both left and right arm sprites had armbands added when only one was requested
+3. **Solution implemented:**
+   - Restored left arm sprite to original state (no armband)
+   - Made right arm armband MUCH brighter:
+     - Light highlight: RGB(255, 90, 90) at x=9
+     - Main red: RGB(255, 40, 40) at x=10
+     - Dark shadow: RGB(200, 20, 20) at x=11
+   - Updated effects managers to only apply saturation boost to right arm
+
 ## Root Cause Analysis
 
 ### Why the Player Was Hard to See
@@ -61,21 +77,20 @@
 - Preserved original green shading pattern with red color replacement
 
 ### Runtime Color Intensification
-Both effect managers now apply 4x saturation to player arm sprites:
+Both effect managers now apply 4x saturation to the right arm sprite (which has the armband):
 
 ```gdscript
 ## Player armband saturation multiplier during last chance (same as enemy saturation).
 const ARMBAND_SATURATION_MULTIPLIER: float = 4.0
 
-## Applies saturation boost to player's arm sprites (armband visibility).
+## Applies saturation boost to player's arm sprite (armband visibility).
+## Note: Only the right arm has the armband.
 func _apply_arm_saturation() -> void:
-    # Find arm sprites on player
-    var left_arm := _player.get_node_or_null("PlayerModel/LeftArm") as Sprite2D
+    # Find right arm sprite on player (only right arm has the armband)
     var right_arm := _player.get_node_or_null("PlayerModel/RightArm") as Sprite2D
 
-    # Apply saturation using standard luminance-based algorithm
-    if left_arm:
-        left_arm.modulate = _saturate_color(left_arm.modulate, ARMBAND_SATURATION_MULTIPLIER)
+    if right_arm:
+        right_arm.modulate = _saturate_color(right_arm.modulate, ARMBAND_SATURATION_MULTIPLIER)
 ```
 
 ### Color Saturation Algorithm
@@ -92,15 +107,16 @@ func _saturate_color(color: Color, multiplier: float) -> Color:
 ## Files Changed
 
 ### Modified Files
-1. `assets/sprites/characters/player/player_left_arm.png` - Added/updated red armband
-2. `assets/sprites/characters/player/player_right_arm.png` - Added/updated red armband
+1. `assets/sprites/characters/player/player_left_arm.png` - Restored to original (no armband)
+2. `assets/sprites/characters/player/player_right_arm.png` - Very bright red armband (RGB 255,40,40)
 3. `assets/sprites/characters/player/player_combined_preview.png` - Updated preview
-4. `scripts/autoload/last_chance_effects_manager.gd` - Added arm saturation for hard mode
-5. `scripts/autoload/penultimate_hit_effects_manager.gd` - Added arm saturation for normal mode
-6. `experiments/add_armband.py` - Updated with more saturated colors
+4. `scripts/autoload/last_chance_effects_manager.gd` - Right arm saturation only for hard mode
+5. `scripts/autoload/penultimate_hit_effects_manager.gd` - Right arm saturation only for normal mode
+6. `experiments/add_armband.py` - Armband creation script
 
 ### New Files
 - `docs/case-studies/issue-234/` - This case study
+- `docs/case-studies/issue-234/logs/game_log_20260122_132449.txt` - Game log from testing
 
 ## Lessons Learned
 
@@ -108,6 +124,8 @@ func _saturate_color(color: Color, multiplier: float) -> Color:
 2. **Consistency is important:** If enemies get visual enhancement, player should too
 3. **Saturation affects visibility:** Bright, saturated colors are more visible than muted ones
 4. **Iterative feedback:** Initial implementation often needs refinement based on user testing
+5. **Base visibility matters:** Elements should be visible during normal gameplay, not just during effects
+6. **Less is more:** Single armband is sufficient and avoids visual confusion
 
 ## Related Issues
 
