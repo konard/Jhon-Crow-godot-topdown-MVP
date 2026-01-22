@@ -1066,8 +1066,14 @@ public partial class Shotgun : BaseWeapon
         Vector2 spawnPosition;
         if (isBlocked)
         {
-            // Wall detected at point-blank range - spawn at weapon position
-            spawnPosition = GlobalPosition + direction * 2.0f;
+            // Wall detected at point-blank range
+            // FIX: Use a minimum offset that preserves visible pellet spread
+            // At 2px with 7.5° spread, pellets have <1px separation (appear grouped)
+            // At 10px with 7.5° spread, pellets have ~1.3px separation (visible spread)
+            // Still apply a portion of the cloud offset for variation
+            float minSpawnOffset = 10.0f;
+            float cloudOffset = Mathf.Max(0, extraOffset) * 0.5f;
+            spawnPosition = GlobalPosition + direction * (minSpawnOffset + cloudOffset);
         }
         else
         {
