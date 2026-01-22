@@ -253,6 +253,11 @@ func _ready() -> void:
 	if _player_model:
 		_player_model.scale = Vector2(player_model_scale, player_model_scale)
 
+	# Store weapon mount base position for sling animation
+	if _weapon_mount:
+		_base_weapon_mount_pos = _weapon_mount.position
+		_base_weapon_mount_rot = _weapon_mount.rotation
+
 	# Set z-index for proper layering: head should be above weapon
 	# The weapon has z_index = 1, so head should be 2 or higher
 	if _head_sprite:
@@ -289,8 +294,12 @@ func _physics_process(delta: float) -> void:
 	# Update player model rotation to face the aim direction (rifle direction)
 	_update_player_model_rotation()
 
-	# Update walking animation based on movement
-	_update_walk_animation(delta, input_direction)
+	# Update walking animation based on movement (only if not in grenade animation)
+	if _grenade_anim_phase == GrenadeAnimPhase.NONE:
+		_update_walk_animation(delta, input_direction)
+
+	# Update grenade animation
+	_update_grenade_animation(delta)
 
 	# Update spread reset timer
 	_shot_timer += delta
@@ -876,6 +885,92 @@ var _base_head_pos: Vector2 = Vector2.ZERO
 var _base_left_arm_pos: Vector2 = Vector2.ZERO
 var _base_right_arm_pos: Vector2 = Vector2.ZERO
 
+# ============================================================================
+# Grenade Animation System
+# ============================================================================
+
+## Animation phases for grenade throwing sequence.
+## Maps to the multi-step input system for visual feedback.
+enum GrenadeAnimPhase {
+	NONE,           # Normal arm positions (walking/idle)
+	GRAB_GRENADE,   # Left hand moves to chest to grab grenade
+	PULL_PIN,       # Right hand pulls pin (quick snap animation)
+	HANDS_APPROACH, # Right hand moves toward left hand
+	TRANSFER,       # Grenade transfers to right hand
+	WIND_UP,        # Dynamic wind-up based on drag
+	THROW,          # Throwing motion
+	RETURN_IDLE     # Arms return to normal positions
+}
+
+## Current grenade animation phase.
+var _grenade_anim_phase: int = GrenadeAnimPhase.NONE
+
+## Animation phase timer for timed transitions.
+var _grenade_anim_timer: float = 0.0
+
+## Animation phase duration in seconds.
+var _grenade_anim_duration: float = 0.0
+
+## Current wind-up intensity (0.0 = no wind-up, 1.0 = maximum wind-up).
+var _wind_up_intensity: float = 0.0
+
+## Previous mouse position for velocity calculation.
+var _prev_mouse_pos: Vector2 = Vector2.ZERO
+
+## Whether weapon is in sling position (lowered for grenade handling).
+var _weapon_slung: bool = false
+
+## Reference to weapon mount for sling animation.
+@onready var _weapon_mount: Node2D = $PlayerModel/WeaponMount
+
+## Base weapon mount position (for sling animation).
+var _base_weapon_mount_pos: Vector2 = Vector2.ZERO
+
+## Base weapon mount rotation (for sling animation).
+var _base_weapon_mount_rot: float = 0.0
+
+## Target positions for arm animations (relative offsets from base positions).
+## These are in local PlayerModel space.
+## Base positions: LeftArm (24, 6), RightArm (-2, 6)
+## Body position: (-4, 0), so left shoulder area is approximately x=0 to x=5
+## To move left arm from x=24 to shoulder (x~5), we need offset of ~-20
+## During grenade operations, left arm should be BEHIND the body (toward shoulder)
+const ARM_LEFT_CHEST := Vector2(-15, 0)         # Left hand moves back to chest/shoulder area
+const ARM_RIGHT_PIN := Vector2(2, -2)           # Right hand slightly up for pin pull
+const ARM_LEFT_EXTENDED := Vector2(-10, 2)      # Left hand at chest level with grenade
+const ARM_RIGHT_APPROACH := Vector2(4, 0)       # Right hand approaching left
+const ARM_LEFT_TRANSFER := Vector2(-12, 3)      # Left hand drops back after transfer
+const ARM_RIGHT_HOLD := Vector2(3, 1)           # Right hand holding grenade
+const ARM_RIGHT_WIND_MIN := Vector2(4, 3)       # Minimum wind-up position
+const ARM_RIGHT_WIND_MAX := Vector2(8, 5)       # Maximum wind-up position
+const ARM_RIGHT_THROW := Vector2(-4, -2)        # Throw follow-through
+const ARM_LEFT_RELAXED := Vector2(-20, 2)       # Left arm at shoulder/body during wind-up/throw
+
+## Target rotations for arm animations (in degrees).
+const ARM_ROT_GRAB := -45.0           # Arm rotation when grabbing at chest
+const ARM_ROT_PIN_PULL := -15.0       # Right arm rotation when pulling pin
+const ARM_ROT_LEFT_AT_CHEST := -30.0  # Left arm rotation while holding grenade at chest
+const ARM_ROT_WIND_MIN := 15.0        # Right arm minimum wind-up rotation
+const ARM_ROT_WIND_MAX := 35.0        # Right arm maximum wind-up rotation
+const ARM_ROT_THROW := -25.0          # Right arm throw rotation
+const ARM_ROT_LEFT_RELAXED := -60.0   # Left arm hangs down at side during wind-up/throw
+
+## Animation durations for each phase (in seconds).
+const ANIM_GRAB_DURATION := 0.2
+const ANIM_PIN_DURATION := 0.15
+const ANIM_APPROACH_DURATION := 0.2
+const ANIM_TRANSFER_DURATION := 0.15
+const ANIM_THROW_DURATION := 0.2
+const ANIM_RETURN_DURATION := 0.3
+
+## Animation lerp speeds.
+const ANIM_LERP_SPEED := 15.0         # Position interpolation speed
+const ANIM_LERP_SPEED_FAST := 25.0    # Fast interpolation for snappy movements
+
+## Weapon sling position (lowered and rotated for chest carry).
+const WEAPON_SLING_OFFSET := Vector2(0, 15)     # Lower weapon
+const WEAPON_SLING_ROTATION := 1.2              # Rotate to hang down (radians, ~70 degrees)
+
 
 ## Handle grenade input with 2-step mechanic.
 ## Step 1: G + RMB drag right = start timer (pull pin)
@@ -904,6 +999,11 @@ func _handle_grenade_input() -> void:
 
 ## Handle IDLE state: waiting for G + RMB drag right to start timer.
 func _handle_grenade_idle_state() -> void:
+	# Start grab animation when G is first pressed (check before the is_action_pressed block)
+	if Input.is_action_just_pressed("grenade_prepare") and _current_grenades > 0:
+		_start_grenade_anim_phase(GrenadeAnimPhase.GRAB_GRENADE, ANIM_GRAB_DURATION)
+		FileLogger.info("[Player.Grenade] G pressed - starting grab animation")
+
 	# Check if G key is held and player has grenades
 	if Input.is_action_pressed("grenade_prepare") and _current_grenades > 0:
 		# Start drag tracking for step 1
@@ -920,12 +1020,19 @@ func _handle_grenade_idle_state() -> void:
 			# Check if dragged to the right (positive X direction)
 			if drag_vector.x > 20.0:  # Minimum drag distance
 				_start_grenade_timer()
+				# Start pin pull animation
+				_start_grenade_anim_phase(GrenadeAnimPhase.PULL_PIN, ANIM_PIN_DURATION)
 				FileLogger.info("[Player.Grenade] Step 1 complete: Timer started! Drag right detected (%.1f pixels)" % drag_vector.x)
 			else:
 				FileLogger.info("[Player.Grenade] Step 1 cancelled: Drag was not to the right (x=%.1f)" % drag_vector.x)
+				# Cancel animation if drag was cancelled
+				_start_grenade_anim_phase(GrenadeAnimPhase.RETURN_IDLE, ANIM_RETURN_DURATION)
 
 			_grenade_drag_active = false
 	else:
+		# G released without completing - return to idle
+		if _grenade_anim_phase == GrenadeAnimPhase.GRAB_GRENADE:
+			_start_grenade_anim_phase(GrenadeAnimPhase.RETURN_IDLE, ANIM_RETURN_DURATION)
 		_grenade_drag_active = false
 
 
@@ -935,6 +1042,7 @@ func _handle_grenade_timer_started_state() -> void:
 	if not Input.is_action_pressed("grenade_prepare"):
 		# G released - cancel and drop grenade
 		FileLogger.info("[Player.Grenade] Cancelled: G released while timer running")
+		_start_grenade_anim_phase(GrenadeAnimPhase.RETURN_IDLE, ANIM_RETURN_DURATION)
 		_drop_grenade_at_feet()
 		return
 
@@ -942,6 +1050,8 @@ func _handle_grenade_timer_started_state() -> void:
 	if Input.is_action_just_pressed("grenade_throw"):
 		_grenade_state = GrenadeState.WAITING_FOR_G_RELEASE
 		_is_preparing_grenade = true
+		# Start hands approach animation
+		_start_grenade_anim_phase(GrenadeAnimPhase.HANDS_APPROACH, ANIM_APPROACH_DURATION)
 		FileLogger.info("[Player.Grenade] Step 2 part 1: G+RMB held - now release G to ready the throw")
 
 
@@ -951,6 +1061,8 @@ func _handle_grenade_waiting_for_g_release_state() -> void:
 	if not Input.is_action_pressed("grenade_throw"):
 		_grenade_state = GrenadeState.TIMER_STARTED
 		_is_preparing_grenade = false
+		# Go back to left arm extended position
+		_start_grenade_anim_phase(GrenadeAnimPhase.PULL_PIN, ANIM_PIN_DURATION)
 		FileLogger.info("[Player.Grenade] RMB released before G - back to waiting for RMB")
 		return
 
@@ -958,6 +1070,9 @@ func _handle_grenade_waiting_for_g_release_state() -> void:
 	if not Input.is_action_pressed("grenade_prepare"):
 		_grenade_state = GrenadeState.AIMING
 		_aim_drag_start = get_global_mouse_position()
+		_prev_mouse_pos = _aim_drag_start
+		# Start transfer animation, then wind-up
+		_start_grenade_anim_phase(GrenadeAnimPhase.TRANSFER, ANIM_TRANSFER_DURATION)
 		FileLogger.info("[Player.Grenade] Step 2 complete: G released, RMB held - now aiming, drag and release RMB to throw")
 
 
@@ -966,9 +1081,18 @@ func _handle_grenade_aiming_state() -> void:
 	# In this state, G is already released (that's how we got here)
 	# We only care about RMB
 
+	# Update wind-up intensity based on mouse drag during aiming
+	_update_wind_up_intensity()
+
+	# If transfer animation is done, switch to wind-up
+	if _grenade_anim_phase == GrenadeAnimPhase.TRANSFER and _grenade_anim_timer <= 0:
+		_grenade_anim_phase = GrenadeAnimPhase.WIND_UP
+
 	# Check for RMB release (complete step 3 - throw!)
 	if Input.is_action_just_released("grenade_throw"):
 		var drag_end := get_global_mouse_position()
+		# Start throw animation
+		_start_grenade_anim_phase(GrenadeAnimPhase.THROW, ANIM_THROW_DURATION)
 		_throw_grenade(drag_end)
 		FileLogger.info("[Player.Grenade] Step 3 complete: Grenade thrown!")
 
@@ -1038,6 +1162,8 @@ func _reset_grenade_state() -> void:
 	_grenade_drag_start = Vector2.ZERO
 	_aim_drag_start = Vector2.ZERO
 	_active_grenade = null
+	_wind_up_intensity = 0.0
+	# Animation will transition via RETURN_IDLE phase (set by caller if needed)
 	FileLogger.info("[Player.Grenade] State reset to IDLE")
 
 
@@ -1156,3 +1282,174 @@ func add_grenades(count: int) -> void:
 ## Check if player is preparing to throw a grenade.
 func is_preparing_grenade() -> bool:
 	return _is_preparing_grenade
+
+
+# ============================================================================
+# Grenade Animation Functions
+# ============================================================================
+
+## Start a new grenade animation phase.
+## @param phase: The GrenadeAnimPhase to transition to.
+## @param duration: How long this phase should last (for timed phases).
+func _start_grenade_anim_phase(phase: int, duration: float) -> void:
+	_grenade_anim_phase = phase
+	_grenade_anim_timer = duration
+	_grenade_anim_duration = duration
+
+	# Enable weapon sling when handling grenade
+	if phase != GrenadeAnimPhase.NONE and phase != GrenadeAnimPhase.RETURN_IDLE:
+		_weapon_slung = true
+	elif phase == GrenadeAnimPhase.RETURN_IDLE:
+		# Will be unset when return animation completes
+		pass
+
+	FileLogger.info("[Player.Grenade.Anim] Phase changed to: %s (duration: %.2fs)" % [
+		GrenadeAnimPhase.keys()[phase], duration
+	])
+
+
+## Update grenade animation based on current phase.
+## Called every frame from _physics_process.
+## @param delta: Time since last frame.
+func _update_grenade_animation(delta: float) -> void:
+	# Early exit if no animation active
+	if _grenade_anim_phase == GrenadeAnimPhase.NONE:
+		return
+
+	# Update phase timer
+	if _grenade_anim_timer > 0:
+		_grenade_anim_timer -= delta
+
+	# Calculate animation progress (0.0 to 1.0)
+	var progress := 1.0
+	if _grenade_anim_duration > 0:
+		progress = clampf(1.0 - (_grenade_anim_timer / _grenade_anim_duration), 0.0, 1.0)
+
+	# Calculate target positions based on current phase
+	var left_arm_target := _base_left_arm_pos
+	var right_arm_target := _base_right_arm_pos
+	var left_arm_rot := 0.0
+	var right_arm_rot := 0.0
+	var lerp_speed := ANIM_LERP_SPEED * delta
+
+	match _grenade_anim_phase:
+		GrenadeAnimPhase.GRAB_GRENADE:
+			# Left arm moves back to shoulder/chest area (away from weapon) to grab grenade
+			# Large negative X offset pulls the arm from weapon front toward body
+			left_arm_target = _base_left_arm_pos + ARM_LEFT_CHEST
+			left_arm_rot = deg_to_rad(ARM_ROT_GRAB)
+			lerp_speed = ANIM_LERP_SPEED_FAST * delta
+
+		GrenadeAnimPhase.PULL_PIN:
+			# Left hand holds grenade at chest level, right hand pulls pin
+			left_arm_target = _base_left_arm_pos + ARM_LEFT_EXTENDED
+			left_arm_rot = deg_to_rad(ARM_ROT_LEFT_AT_CHEST)
+			right_arm_target = _base_right_arm_pos + ARM_RIGHT_PIN
+			right_arm_rot = deg_to_rad(ARM_ROT_PIN_PULL)
+			lerp_speed = ANIM_LERP_SPEED_FAST * delta
+
+		GrenadeAnimPhase.HANDS_APPROACH:
+			# Both hands at chest level, preparing for transfer
+			left_arm_target = _base_left_arm_pos + ARM_LEFT_EXTENDED
+			left_arm_rot = deg_to_rad(ARM_ROT_LEFT_AT_CHEST)
+			right_arm_target = _base_right_arm_pos + ARM_RIGHT_APPROACH
+
+		GrenadeAnimPhase.TRANSFER:
+			# Left arm drops back toward body, right hand takes grenade
+			left_arm_target = _base_left_arm_pos + ARM_LEFT_TRANSFER
+			left_arm_rot = deg_to_rad(ARM_ROT_LEFT_RELAXED * 0.5)
+			right_arm_target = _base_right_arm_pos + ARM_RIGHT_HOLD
+			lerp_speed = ANIM_LERP_SPEED * delta
+
+		GrenadeAnimPhase.WIND_UP:
+			# LEFT ARM: Fully retracted to shoulder/body area, hangs at side
+			# This is the key position - arm must be clearly NOT on the weapon
+			left_arm_target = _base_left_arm_pos + ARM_LEFT_RELAXED
+			left_arm_rot = deg_to_rad(ARM_ROT_LEFT_RELAXED)
+			# RIGHT ARM: Interpolate between min and max wind-up based on intensity
+			var wind_up_offset := ARM_RIGHT_WIND_MIN.lerp(ARM_RIGHT_WIND_MAX, _wind_up_intensity)
+			right_arm_target = _base_right_arm_pos + wind_up_offset
+			var wind_up_rot := lerpf(ARM_ROT_WIND_MIN, ARM_ROT_WIND_MAX, _wind_up_intensity)
+			right_arm_rot = deg_to_rad(wind_up_rot)
+			lerp_speed = ANIM_LERP_SPEED_FAST * delta  # Responsive to input
+
+		GrenadeAnimPhase.THROW:
+			# Throwing motion - right arm swings forward, left stays at body
+			left_arm_target = _base_left_arm_pos + ARM_LEFT_RELAXED
+			left_arm_rot = deg_to_rad(ARM_ROT_LEFT_RELAXED)
+			right_arm_target = _base_right_arm_pos + ARM_RIGHT_THROW
+			right_arm_rot = deg_to_rad(ARM_ROT_THROW)
+			lerp_speed = ANIM_LERP_SPEED_FAST * delta
+
+			# When throw animation completes, transition to return
+			if _grenade_anim_timer <= 0:
+				_start_grenade_anim_phase(GrenadeAnimPhase.RETURN_IDLE, ANIM_RETURN_DURATION)
+
+		GrenadeAnimPhase.RETURN_IDLE:
+			# Arms returning to base positions (back to holding weapon)
+			left_arm_target = _base_left_arm_pos
+			right_arm_target = _base_right_arm_pos
+			lerp_speed = ANIM_LERP_SPEED * delta
+
+			# When return animation completes, end animation
+			if _grenade_anim_timer <= 0:
+				_grenade_anim_phase = GrenadeAnimPhase.NONE
+				_weapon_slung = false
+				FileLogger.info("[Player.Grenade.Anim] Animation complete, returning to normal")
+
+	# Apply arm positions with smooth interpolation
+	if _left_arm_sprite:
+		_left_arm_sprite.position = _left_arm_sprite.position.lerp(left_arm_target, lerp_speed)
+		_left_arm_sprite.rotation = lerpf(_left_arm_sprite.rotation, left_arm_rot, lerp_speed)
+
+	if _right_arm_sprite:
+		_right_arm_sprite.position = _right_arm_sprite.position.lerp(right_arm_target, lerp_speed)
+		_right_arm_sprite.rotation = lerpf(_right_arm_sprite.rotation, right_arm_rot, lerp_speed)
+
+	# Update weapon sling animation
+	_update_weapon_sling(delta)
+
+
+## Update weapon sling position (lower weapon when handling grenade).
+## @param delta: Time since last frame.
+func _update_weapon_sling(delta: float) -> void:
+	if not _weapon_mount:
+		return
+
+	var target_pos := _base_weapon_mount_pos
+	var target_rot := _base_weapon_mount_rot
+
+	if _weapon_slung:
+		# Lower weapon to chest/sling position
+		target_pos = _base_weapon_mount_pos + WEAPON_SLING_OFFSET
+		target_rot = _base_weapon_mount_rot + WEAPON_SLING_ROTATION
+
+	var lerp_speed := ANIM_LERP_SPEED * delta
+	_weapon_mount.position = _weapon_mount.position.lerp(target_pos, lerp_speed)
+	_weapon_mount.rotation = lerpf(_weapon_mount.rotation, target_rot, lerp_speed)
+
+
+## Update wind-up intensity based on mouse drag distance during aiming.
+func _update_wind_up_intensity() -> void:
+	var current_mouse := get_global_mouse_position()
+
+	# Calculate drag distance from aim start
+	var drag_vector := current_mouse - _aim_drag_start
+	var drag_distance := drag_vector.length()
+
+	# Get viewport for max drag calculation
+	var viewport := get_viewport()
+	var max_drag := 600.0  # Default max drag distance
+	if viewport:
+		max_drag = viewport.get_visible_rect().size.x * 0.5
+
+	# Calculate base intensity from distance
+	var intensity := clampf(drag_distance / max_drag, 0.0, 1.0)
+
+	# Add velocity component for more responsive feel
+	var mouse_delta := current_mouse - _prev_mouse_pos
+	var mouse_velocity := mouse_delta.length()
+	var velocity_bonus := clampf(mouse_velocity / 50.0, 0.0, 0.2)
+
+	_wind_up_intensity = clampf(intensity + velocity_bonus, 0.0, 1.0)
+	_prev_mouse_pos = current_mouse
