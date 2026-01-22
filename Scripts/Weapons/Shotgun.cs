@@ -216,6 +216,19 @@ public partial class Shotgun : BaseWeapon
     {
         base._Ready();
 
+        // Re-initialize reserve shells for shotgun using MaxReserveAmmo from WeaponData
+        // The base class initializes MagazineInventory based on StartingMagazineCount,
+        // but for the shotgun we want to use MaxReserveAmmo to control reserve shells.
+        // Shotgun's tube magazine is separate (ShellsInTube), so we use the MagazineInventory
+        // as a simple reserve pool: one magazine with MaxReserveAmmo shells.
+        if (WeaponData != null)
+        {
+            int maxReserve = WeaponData.MaxReserveAmmo;
+            // Create a single "magazine" that acts as the reserve shell pool
+            MagazineInventory.Initialize(1, maxReserve, fillAllMagazines: true);
+            GD.Print($"[Shotgun] Initialized reserve shells: {maxReserve} (from WeaponData.MaxReserveAmmo)");
+        }
+
         // Get the shotgun sprite for visual representation
         _shotgunSprite = GetNodeOrNull<Sprite2D>("ShotgunSprite");
 
@@ -249,7 +262,7 @@ public partial class Shotgun : BaseWeapon
         ShellsInTube = TubeMagazineCapacity;
         EmitSignal(SignalName.ShellCountChanged, ShellsInTube, TubeMagazineCapacity);
 
-        GD.Print($"[Shotgun] Ready - Pellets={MinPellets}-{MaxPellets}, Shells={ShellsInTube}/{TubeMagazineCapacity}, CloudOffset={MaxSpawnOffset}px, Tutorial={_isTutorialLevel}");
+        GD.Print($"[Shotgun] Ready - Pellets={MinPellets}-{MaxPellets}, Shells={ShellsInTube}/{TubeMagazineCapacity}, Reserve={ReserveAmmo}, Total={ShellsInTube + ReserveAmmo}, CloudOffset={MaxSpawnOffset}px, Tutorial={_isTutorialLevel}");
     }
 
     /// <summary>
