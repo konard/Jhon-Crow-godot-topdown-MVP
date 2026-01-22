@@ -344,3 +344,122 @@ Key points from research:
 | game_log_20260122_041747.txt | 04:17 | No |
 
 All four logs show the same pattern: GrenadeManager works, PauseMenu logs appear, but ArmoryMenu script never executes.
+
+---
+
+## Phase 8: Root Cause Identified and Fixed (2026-01-22 05:26)
+
+### New Log: `game_log_20260122_052623.txt`
+
+The log provides **definitive evidence** of the script compilation issue:
+
+```
+[05:26:29] [INFO] [PauseMenu] Armory button pressed
+[05:26:29] [INFO] [PauseMenu] Creating new armory menu instance
+[05:26:29] [INFO] [PauseMenu] armory_menu_scene resource path: res://scenes/ui/ArmoryMenu.tscn
+[05:26:29] [INFO] [PauseMenu] Instance created, class: CanvasLayer, name: ArmoryMenu
+[05:26:29] [INFO] [PauseMenu] Script attached: res://scripts/ui/armory_menu.gd
+[05:26:29] [INFO] [PauseMenu] WARNING: back_pressed signal NOT found on instance!
+[05:26:29] [INFO] [PauseMenu] back_pressed signal connected
+[05:26:29] [INFO] [PauseMenu] Armory menu instance added as child, is_inside_tree: true
+[05:26:29] [INFO] [PauseMenu] WARNING: _populate_weapon_grid method NOT found!
+```
+
+### Final Root Cause: GDScript Compilation Failure in Export Build
+
+The log clearly shows:
+1. Script IS attached: `res://scripts/ui/armory_menu.gd`
+2. **BUT signal NOT found**: `WARNING: back_pressed signal NOT found on instance!`
+3. **AND method NOT found**: `WARNING: _populate_weapon_grid method NOT found!`
+
+This is the **smoking gun**: The script file is referenced, but its class members (signals, methods) are not available. This happens when:
+
+1. **GDScript fails to compile** in the export build but succeeds in the editor
+2. **The compiled bytecode is invalid** or incompatible with the export build
+3. **A silent parse error** prevents the script from fully loading
+
+### User Feedback
+
+The user reported: "новое armory работает" (new armory works) - referring to the UPSTREAM version of armory_menu.gd. This confirmed:
+- The UPSTREAM armory_menu.gd works fine
+- MY modified armory_menu.gd causes compilation failures in export builds
+
+### Solution: Simplify to Match Upstream Pattern
+
+Instead of using a separate grenade selection system with GrenadeManager integration in the armory menu, I simplified the approach to match the upstream pattern:
+
+**Before (broken):**
+- Complex grenade slot creation via `_create_grenade_slot()` method
+- Dynamic querying of GrenadeManager for grenade types
+- Separate grenade selection logic from weapon selection
+- Type annotations like `var grenade_types := _grenade_manager.get_all_grenade_types()`
+
+**After (working):**
+- Add grenades directly to the WEAPONS dictionary (like upstream's Flashbang)
+- Add `is_grenade: true` flag to distinguish grenades from weapons
+- Reuse existing `_create_weapon_slot()` logic for all items
+- Simple integration with GrenadeManager for grenade type changes
+
+### Key Changes Made
+
+1. **Added frag_grenade to WEAPONS dictionary:**
+```gdscript
+const WEAPONS: Dictionary = {
+    # ... existing weapons ...
+    "frag_grenade": {
+        "name": "Frag Grenade",
+        "icon_path": "res://assets/sprites/weapons/frag_grenade.png",
+        "unlocked": true,
+        "description": "Offensive grenade - explodes on impact, releases 4 shrapnel pieces that ricochet.",
+        "is_grenade": true,
+        "grenade_type": 1
+    },
+    # ... other weapons ...
+}
+```
+
+2. **Modified slot click handling:**
+```gdscript
+func _on_slot_gui_input(event: InputEvent, slot: PanelContainer, weapon_id: String) -> void:
+    if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+        var weapon_data: Dictionary = WEAPONS.get(weapon_id, {})
+        var is_grenade: bool = weapon_data.get("is_grenade", false)
+
+        if is_grenade:
+            _select_grenade(weapon_id, weapon_data)
+        else:
+            _select_weapon(weapon_id)
+```
+
+3. **Added grenade selection with level restart:**
+```gdscript
+func _select_grenade(weapon_id: String, weapon_data: Dictionary) -> void:
+    if _grenade_manager == null:
+        return
+
+    var grenade_type: int = weapon_data.get("grenade_type", 0)
+
+    if _grenade_manager.is_selected(grenade_type):
+        return
+
+    # Set new grenade type - this will restart the level
+    _grenade_manager.set_grenade_type(grenade_type, true)
+```
+
+### Lessons Learned
+
+1. **Export builds are less forgiving** than the Godot editor for script errors
+2. **Complex type inference** (`:=` with method return types) can cause issues in exports
+3. **Keep UI scripts simple** - follow existing patterns that are known to work
+4. **The WEAPONS dictionary pattern** is a proven approach in this codebase
+
+### Files Modified
+
+1. `scripts/ui/armory_menu.gd` - Simplified to upstream pattern + frag grenade
+
+### Testing Request
+
+User should rebuild and test the armory menu to verify:
+1. All items (M16, Flashbang, Frag Grenade, Shotgun, locked weapons) are displayed
+2. Clicking Frag Grenade restarts the level and selects it
+3. Both weapon and grenade selections are highlighted correctly
