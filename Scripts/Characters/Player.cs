@@ -219,6 +219,73 @@ public partial class Player : BaseCharacter
 
     #endregion
 
+    #region Reload Animation System
+
+    /// <summary>
+    /// Animation phases for assault rifle reload sequence.
+    /// Maps to the R-F-R input system for visual feedback.
+    /// Three steps as requested:
+    /// 1. Take magazine with left hand from chest
+    /// 2. Insert magazine into rifle
+    /// 3. Pull the bolt/charging handle
+    /// </summary>
+    private enum ReloadAnimPhase
+    {
+        None,           // Normal arm positions (weapon held)
+        GrabMagazine,   // Step 1: Left hand moves to chest to grab new magazine
+        InsertMagazine, // Step 2: Left hand brings magazine to weapon, inserts it
+        PullBolt,       // Step 3: Character pulls the charging handle
+        ReturnIdle      // Arms return to normal weapon-holding position
+    }
+
+    /// <summary>
+    /// Current reload animation phase.
+    /// </summary>
+    private ReloadAnimPhase _reloadAnimPhase = ReloadAnimPhase.None;
+
+    /// <summary>
+    /// Reload animation phase timer for timed transitions.
+    /// </summary>
+    private float _reloadAnimTimer = 0.0f;
+
+    /// <summary>
+    /// Reload animation phase duration in seconds.
+    /// </summary>
+    private float _reloadAnimDuration = 0.0f;
+
+    // Target positions for reload arm animations (relative offsets from base positions)
+    // These are in local PlayerModel space
+    // Base positions: LeftArm (24, 6), RightArm (-2, 6)
+    // For reload, left arm goes to chest (vest/mag pouch area), then to weapon
+
+    // Step 1: Grab magazine from chest - left arm moves back toward body
+    private static readonly Vector2 ReloadArmLeftGrab = new Vector2(-18, -2);      // Left hand at chest/vest mag pouch
+    private static readonly Vector2 ReloadArmRightHold = new Vector2(0, 0);        // Right hand stays on weapon grip
+
+    // Step 2: Insert magazine - left arm moves to weapon magwell
+    private static readonly Vector2 ReloadArmLeftInsert = new Vector2(8, 2);       // Left hand at weapon magwell (forward)
+    private static readonly Vector2 ReloadArmRightSteady = new Vector2(0, 1);      // Right hand steadies weapon
+
+    // Step 3: Pull bolt - both arms involved, right pulls charging handle
+    private static readonly Vector2 ReloadArmLeftSupport = new Vector2(12, 0);     // Left hand holds foregrip
+    private static readonly Vector2 ReloadArmRightBolt = new Vector2(-6, -3);      // Right hand pulls bolt back
+
+    // Target rotations for reload arm animations (in degrees)
+    private const float ReloadArmRotLeftGrab = -50.0f;     // Arm rotation when grabbing mag from chest
+    private const float ReloadArmRotRightHold = 0.0f;      // Right arm steady during grab
+    private const float ReloadArmRotLeftInsert = -10.0f;   // Left arm rotation when inserting
+    private const float ReloadArmRotRightSteady = 5.0f;    // Slight tilt while steadying
+    private const float ReloadArmRotLeftSupport = 0.0f;    // Left arm on foregrip
+    private const float ReloadArmRotRightBolt = -20.0f;    // Right arm rotation when pulling bolt
+
+    // Animation durations for each reload phase (in seconds)
+    private const float ReloadAnimGrabDuration = 0.25f;    // Time to grab magazine from chest
+    private const float ReloadAnimInsertDuration = 0.3f;   // Time to insert magazine
+    private const float ReloadAnimBoltDuration = 0.2f;     // Time to pull bolt
+    private const float ReloadAnimReturnDuration = 0.2f;   // Time to return to idle
+
+    #endregion
+
     #region Grenade Animation System
 
     /// <summary>
@@ -554,7 +621,12 @@ public partial class Player : BaseCharacter
             _rightArmSprite.ZIndex = 2;  // Arms between body and head
         }
 
-        LogToFile($"[Player] Ready! Grenades: {_currentGrenades}/{MaxGrenades}");
+        // Log ready status with full info
+        int currentAmmo = CurrentWeapon?.CurrentAmmo ?? 0;
+        int maxAmmo = CurrentWeapon?.WeaponData?.MagazineSize ?? 0;
+        int currentHealth = (int)(HealthComponent?.CurrentHealth ?? 0);
+        int maxHealth = (int)(HealthComponent?.MaxHealth ?? 0);
+        LogToFile($"[Player] Ready! Ammo: {currentAmmo}/{maxAmmo}, Grenades: {_currentGrenades}/{MaxGrenades}, Health: {currentHealth}/{maxHealth}");
     }
 
     /// <summary>
@@ -619,14 +691,17 @@ public partial class Player : BaseCharacter
         // Update player model rotation to face the aim direction (rifle direction)
         UpdatePlayerModelRotation();
 
-        // Update walking animation based on movement (only if not in grenade animation)
-        if (_grenadeAnimPhase == GrenadeAnimPhase.None)
+        // Update walking animation based on movement (only if not in grenade or reload animation)
+        if (_grenadeAnimPhase == GrenadeAnimPhase.None && _reloadAnimPhase == ReloadAnimPhase.None)
         {
             UpdateWalkAnimation((float)delta, inputDirection);
         }
 
         // Update grenade animation
         UpdateGrenadeAnimation((float)delta);
+
+        // Update reload animation
+        UpdateReloadAnimation((float)delta);
 
         // Handle throw rotation animation (restore player rotation after throw)
         HandleThrowRotationAnimation((float)delta);
@@ -980,6 +1055,8 @@ public partial class Player : BaseCharacter
                 _reloadSequenceStep = 1;
                 _ammoAtReloadStart = CurrentWeapon.CurrentAmmo;
                 GD.Print($"[Player] Reload sequence started (R pressed) - ammo at start: {_ammoAtReloadStart} - press F next");
+                // Start animation: Step 1 - Grab magazine from chest
+                StartReloadAnimPhase(ReloadAnimPhase.GrabMagazine, ReloadAnimGrabDuration);
                 // Play magazine out sound
                 PlayReloadMagOutSound();
                 EmitSignal(SignalName.ReloadSequenceProgress, 1, 3);
@@ -989,6 +1066,8 @@ public partial class Player : BaseCharacter
             else if (_reloadSequenceStep == 2)
             {
                 // Complete reload sequence - instant reload!
+                // Start animation: Step 3 - Pull bolt/charging handle
+                StartReloadAnimPhase(ReloadAnimPhase.PullBolt, ReloadAnimBoltDuration);
                 // Play bolt cycling sound
                 PlayM16BoltSound();
                 CompleteReloadSequence();
@@ -1008,6 +1087,8 @@ public partial class Player : BaseCharacter
                 CurrentWeapon.StartReloadSequence(hadAmmoInMagazine);
 
                 GD.Print($"[Player] Reload sequence step 2 (F pressed) - bullet in chamber: {hadAmmoInMagazine} - press R to complete");
+                // Start animation: Step 2 - Insert magazine into rifle
+                StartReloadAnimPhase(ReloadAnimPhase.InsertMagazine, ReloadAnimInsertDuration);
                 // Play magazine in sound
                 PlayReloadMagInSound();
                 EmitSignal(SignalName.ReloadSequenceProgress, 2, 3);
@@ -1016,6 +1097,8 @@ public partial class Player : BaseCharacter
             {
                 // Wrong key pressed, reset sequence
                 GD.Print("[Player] Wrong key! Reload sequence reset (expected R)");
+                // Restart animation from grab phase
+                StartReloadAnimPhase(ReloadAnimPhase.GrabMagazine, ReloadAnimGrabDuration);
                 ResetReloadSequence();
             }
         }
@@ -1086,6 +1169,12 @@ public partial class Player : BaseCharacter
         _reloadSequenceStep = 0;
         _isReloadingSequence = false;
         _ammoAtReloadStart = 0;
+
+        // Return arms to idle if reload animation was active
+        if (_reloadAnimPhase != ReloadAnimPhase.None)
+        {
+            StartReloadAnimPhase(ReloadAnimPhase.ReturnIdle, ReloadAnimReturnDuration);
+        }
 
         // Cancel weapon's reload sequence state
         CurrentWeapon?.CancelReloadSequence();
@@ -1929,6 +2018,115 @@ public partial class Player : BaseCharacter
 
         _windUpIntensity = Mathf.Clamp(intensity + velocityBonus, 0.0f, 1.0f);
         _prevMousePos = currentMouse;
+    }
+
+    #endregion
+
+    #region Reload Animation Methods
+
+    /// <summary>
+    /// Start a new reload animation phase.
+    /// </summary>
+    /// <param name="phase">The ReloadAnimPhase to transition to.</param>
+    /// <param name="duration">How long this phase should last.</param>
+    private void StartReloadAnimPhase(ReloadAnimPhase phase, float duration)
+    {
+        _reloadAnimPhase = phase;
+        _reloadAnimTimer = duration;
+        _reloadAnimDuration = duration;
+        LogToFile($"[Player.Reload.Anim] Phase changed to: {phase} (duration: {duration:F2}s)");
+    }
+
+    /// <summary>
+    /// Update reload animation based on current phase.
+    /// Called every frame from _PhysicsProcess.
+    /// </summary>
+    /// <param name="delta">Time since last frame.</param>
+    private void UpdateReloadAnimation(float delta)
+    {
+        // Early exit if no animation active
+        if (_reloadAnimPhase == ReloadAnimPhase.None)
+        {
+            return;
+        }
+
+        // Update phase timer
+        if (_reloadAnimTimer > 0)
+        {
+            _reloadAnimTimer -= delta;
+        }
+
+        // Calculate target positions based on current phase
+        Vector2 leftArmTarget = _baseLeftArmPos;
+        Vector2 rightArmTarget = _baseRightArmPos;
+        float leftArmRot = 0.0f;
+        float rightArmRot = 0.0f;
+        float lerpSpeed = AnimLerpSpeed * delta;
+
+        switch (_reloadAnimPhase)
+        {
+            case ReloadAnimPhase.GrabMagazine:
+                // Step 1: Left arm moves to chest to grab new magazine
+                leftArmTarget = _baseLeftArmPos + ReloadArmLeftGrab;
+                leftArmRot = Mathf.DegToRad(ReloadArmRotLeftGrab);
+                rightArmTarget = _baseRightArmPos + ReloadArmRightHold;
+                rightArmRot = Mathf.DegToRad(ReloadArmRotRightHold);
+                lerpSpeed = AnimLerpSpeedFast * delta;
+                break;
+
+            case ReloadAnimPhase.InsertMagazine:
+                // Step 2: Left arm brings magazine to weapon magwell
+                leftArmTarget = _baseLeftArmPos + ReloadArmLeftInsert;
+                leftArmRot = Mathf.DegToRad(ReloadArmRotLeftInsert);
+                rightArmTarget = _baseRightArmPos + ReloadArmRightSteady;
+                rightArmRot = Mathf.DegToRad(ReloadArmRotRightSteady);
+                lerpSpeed = AnimLerpSpeed * delta;
+                break;
+
+            case ReloadAnimPhase.PullBolt:
+                // Step 3: Right hand pulls bolt, left supports on foregrip
+                leftArmTarget = _baseLeftArmPos + ReloadArmLeftSupport;
+                leftArmRot = Mathf.DegToRad(ReloadArmRotLeftSupport);
+                rightArmTarget = _baseRightArmPos + ReloadArmRightBolt;
+                rightArmRot = Mathf.DegToRad(ReloadArmRotRightBolt);
+                lerpSpeed = AnimLerpSpeedFast * delta;
+
+                // When bolt pull completes, transition to return idle
+                if (_reloadAnimTimer <= 0)
+                {
+                    StartReloadAnimPhase(ReloadAnimPhase.ReturnIdle, ReloadAnimReturnDuration);
+                }
+                break;
+
+            case ReloadAnimPhase.ReturnIdle:
+                // Arms returning to base positions
+                leftArmTarget = _baseLeftArmPos;
+                rightArmTarget = _baseRightArmPos;
+                leftArmRot = 0.0f;
+                rightArmRot = 0.0f;
+                lerpSpeed = AnimLerpSpeed * delta;
+
+                // When return animation completes, end animation
+                if (_reloadAnimTimer <= 0)
+                {
+                    _reloadAnimPhase = ReloadAnimPhase.None;
+                    LogToFile("[Player.Reload.Anim] Animation complete, returning to normal");
+                }
+                break;
+        }
+
+        // Apply arm positions with smooth interpolation
+        if (_leftArmSprite != null)
+        {
+            _leftArmSprite.Position = _leftArmSprite.Position.Lerp(leftArmTarget, lerpSpeed);
+            _leftArmSprite.Rotation = Mathf.Lerp(_leftArmSprite.Rotation, leftArmRot, lerpSpeed);
+        }
+
+        if (_rightArmSprite != null)
+        {
+            _rightArmSprite.Position = _rightArmSprite.Position.Lerp(rightArmTarget, lerpSpeed);
+            _rightArmSprite.Rotation = Mathf.Lerp(_rightArmSprite.Rotation, rightArmRot, lerpSpeed);
+        }
     }
 
     #endregion
