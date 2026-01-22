@@ -3841,9 +3841,9 @@ func _get_health_percent() -> float:
 ## @param direction: The normalized direction the bullet will travel.
 ## @return: The global position where the bullet should spawn.
 func _get_bullet_spawn_position(direction: Vector2) -> Vector2:
-	# The rifle sprite (m16_topdown_small.png) has offset 10px and is 32px long
-	# so muzzle is ~22px from WeaponMount center (32 - 10 = 22)
-	var muzzle_offset := 22.0 * enemy_model_scale  # Scale with enemy model
+	# The rifle sprite (m16_rifle_topdown.png) has offset 20px and is 64px long
+	# so muzzle is ~44px from WeaponMount center (64 - 20 = 44)
+	var muzzle_offset := 44.0 * enemy_model_scale  # Scale with enemy model
 	if _weapon_mount:
 		# Use weapon mount global position as the base, then offset to muzzle
 		return _weapon_mount.global_position + direction * muzzle_offset
