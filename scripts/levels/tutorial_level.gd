@@ -7,7 +7,7 @@ extends Node2D
 ##    - For shotgun: LMB shoot → RMB UP (eject shell) → RMB DOWN (chamber)
 ## 3. Player switches fire mode (B key) - only if player has assault rifle
 ## 4. Player reloads using R -> F -> R sequence
-##    - For shotgun: RMB UP (open bolt) → MMB+RMB DOWN (load shells) → RMB DOWN (close bolt)
+##    - For shotgun: RMB UP (open bolt) → [MMB hold + RMB DOWN]×N (load shells) → RMB DOWN (close bolt)
 ## 5. Player throws a grenade (G + RMB drag right, then G+RMB held → release G, then RMB drag and release)
 ## 6. Shows completion message with Q restart hint
 ##
@@ -545,7 +545,7 @@ func _update_prompt_text() -> void:
 		TutorialStep.RELOAD:
 			if _has_shotgun:
 				# Shotgun-specific reload instructions with shell loading gestures
-				# RMB drag UP (open bolt) → MMB+RMB drag DOWN (load shells, up to 8) → RMB drag DOWN (close bolt)
+				# RMB drag UP (open bolt) → [MMB hold + RMB DOWN]×N (load shells) → RMB DOWN (close bolt)
 				_prompt_label.text = "[ПКМ↑ открыть] [СКМ+ПКМ↓ x8] [ПКМ↓ закрыть]"
 			else:
 				_prompt_label.text = "[R] [F] [R] Перезарядись"
