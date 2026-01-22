@@ -155,6 +155,38 @@ Features for icon design:
 - Sliding foregrip mechanism
 - Traditional stock and barrel proportions
 
+## Implementation Progress
+
+### Phase 1 - Completed (PR #195)
+
+**Implemented:**
+- ✅ Shotgun.cs with multi-pellet system (6-12 pellets per shot)
+- ✅ 15° spread cone with even distribution
+- ✅ Buckshot caliber (35° max ricochet, no penetration)
+- ✅ Large screen shake (25.0 intensity)
+- ✅ Armory integration with weapon selection
+- ✅ Tutorial support with shotgun-specific instructions
+
+**Issues Found (2026-01-22 04:13 Game Log):**
+
+1. **Armory Selection Not Working**: The armory menu displayed the shotgun but there was no mechanism to actually select and equip it. The Player scene had AssaultRifle hardcoded.
+
+2. **Root Cause**:
+   - `Player.tscn` had AssaultRifle as embedded child node
+   - `Player.cs` auto-equipped "AssaultRifle" by name at `_Ready()`
+   - No weapon selection persistence in GameManager
+
+**Fix Applied:**
+- Added `selected_weapon` to GameManager for persistence
+- Made armory menu slots clickable with visual selection highlighting
+- Modified `tutorial_level.gd` and `building_level.gd` to swap weapons based on GameManager selection
+- Updated tutorial prompts with shotgun-specific gestures
+
+### Phase 2 - Pending
+
+- Manual pump-action cycling with RMB gestures
+- Shell-by-shell reload with MMB + RMB gestures
+
 ## Conclusion
 
 The shotgun implementation is technically feasible and architecturally sound within the existing codebase. The primary challenge lies in the manual shell reload system, which requires a new input paradigm. A phased approach is recommended to balance feature delivery with risk management.

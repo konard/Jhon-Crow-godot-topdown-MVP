@@ -83,6 +83,9 @@ func _ready() -> void:
 		push_error("Tutorial: Player not found!")
 		return
 
+	# Swap weapon based on GameManager selection
+	_setup_selected_weapon()
+
 	# Find UI container
 	_ui = get_node_or_null("CanvasLayer/UI")
 
@@ -107,6 +110,53 @@ func _ready() -> void:
 	# Register player with GameManager
 	if GameManager:
 		GameManager.set_player(_player)
+
+
+## Setup the weapon based on GameManager's selected weapon.
+## Removes the default AssaultRifle and loads the selected weapon.
+func _setup_selected_weapon() -> void:
+	if _player == null:
+		return
+
+	# Get selected weapon from GameManager
+	var selected_weapon_id: String = "m16"  # Default
+	if GameManager:
+		selected_weapon_id = GameManager.get_selected_weapon()
+
+	print("Tutorial: Setting up weapon: %s" % selected_weapon_id)
+
+	# If shotgun is selected, we need to swap weapons
+	if selected_weapon_id == "shotgun":
+		# Remove the default AssaultRifle
+		var assault_rifle = _player.get_node_or_null("AssaultRifle")
+		if assault_rifle:
+			assault_rifle.queue_free()
+			print("Tutorial: Removed default AssaultRifle")
+
+		# Load and add the shotgun
+		var shotgun_scene = load("res://scenes/weapons/csharp/Shotgun.tscn")
+		if shotgun_scene:
+			var shotgun = shotgun_scene.instantiate()
+			shotgun.name = "Shotgun"
+			_player.add_child(shotgun)
+
+			# Set the CurrentWeapon reference in C# Player
+			if _player.has_method("EquipWeapon"):
+				_player.EquipWeapon(shotgun)
+			elif _player.get("CurrentWeapon") != null:
+				_player.CurrentWeapon = shotgun
+
+			print("Tutorial: Shotgun equipped successfully")
+		else:
+			push_error("Tutorial: Failed to load Shotgun scene!")
+	# For M16 (assault rifle), it's already in the scene - just ensure it's equipped
+	else:
+		var assault_rifle = _player.get_node_or_null("AssaultRifle")
+		if assault_rifle and _player.get("CurrentWeapon") == null:
+			if _player.has_method("EquipWeapon"):
+				_player.EquipWeapon(assault_rifle)
+			elif _player.get("CurrentWeapon") != null:
+				_player.CurrentWeapon = assault_rifle
 
 
 func _process(_delta: float) -> void:
@@ -421,16 +471,18 @@ func _update_prompt_text() -> void:
 			_prompt_label.text = "[WASD] Подойди к мишеням"
 		TutorialStep.SHOOT_TARGETS:
 			if _has_shotgun:
-				# Shotgun-specific shooting instructions
-				_prompt_label.text = "[ЛКМ] Стреляй из дробовика (6-12 дробин)"
+				# Shotgun-specific shooting instructions with pump-action gestures
+				# LMB shoot → RMB drag up → RMB drag down (pump cycle)
+				_prompt_label.text = "[ЛКМ стрельба] [ПКМ↑ затвор] [ПКМ↓ передёрнуть]"
 			else:
 				_prompt_label.text = "[ЛКМ] Стреляй по мишеням"
 		TutorialStep.SWITCH_FIRE_MODE:
 			_prompt_label.text = "[B] Переключи режим стрельбы"
 		TutorialStep.RELOAD:
 			if _has_shotgun:
-				# Shotgun-specific reload instructions (Phase 1 - instant reload)
-				_prompt_label.text = "[R] Перезаряди дробовик"
+				# Shotgun-specific reload instructions with shell loading gestures
+				# RMB drag down (open action) → MMB+RMB drag down (load shells, up to 8) → RMB drag up (close)
+				_prompt_label.text = "[ПКМ↓ открыть] [СКМ+ПКМ↓ x8] [ПКМ↑ закрыть]"
 			else:
 				_prompt_label.text = "[R] [F] [R] Перезарядись"
 		TutorialStep.THROW_GRENADE:

@@ -23,6 +23,17 @@ var player: Node2D = null
 ## Toggle with F7 key - works in both editor and exported builds.
 var debug_mode_enabled: bool = false
 
+## Currently selected weapon ID for player equipment.
+## Valid values: "m16", "shotgun" (corresponds to armory_menu WEAPONS keys)
+## Default: "m16" (assault rifle)
+var selected_weapon: String = "m16"
+
+## Weapon scene paths mapped to weapon IDs.
+const WEAPON_SCENES: Dictionary = {
+	"m16": "res://scenes/weapons/csharp/AssaultRifle.tscn",
+	"shotgun": "res://scenes/weapons/csharp/Shotgun.tscn"
+}
+
 ## Signal emitted when an enemy is killed (for screen effects).
 signal enemy_killed
 
@@ -34,6 +45,9 @@ signal stats_updated
 
 ## Signal emitted when debug mode is toggled (F7 key).
 signal debug_mode_toggled(enabled: bool)
+
+## Signal emitted when weapon selection changes.
+signal weapon_selected(weapon_id: String)
 
 
 func _ready() -> void:
@@ -124,6 +138,29 @@ func toggle_debug_mode() -> void:
 ## Returns whether debug mode is currently enabled.
 func is_debug_mode_enabled() -> bool:
 	return debug_mode_enabled
+
+
+## Sets the currently selected weapon.
+## @param weapon_id: The weapon identifier (e.g., "m16", "shotgun")
+func set_selected_weapon(weapon_id: String) -> void:
+	if weapon_id in WEAPON_SCENES:
+		selected_weapon = weapon_id
+		weapon_selected.emit(weapon_id)
+		_log_to_file("Weapon selected: %s" % weapon_id)
+	else:
+		push_warning("Unknown weapon ID: %s" % weapon_id)
+
+
+## Gets the currently selected weapon ID.
+func get_selected_weapon() -> String:
+	return selected_weapon
+
+
+## Gets the scene path for the selected weapon.
+func get_selected_weapon_scene_path() -> String:
+	if selected_weapon in WEAPON_SCENES:
+		return WEAPON_SCENES[selected_weapon]
+	return WEAPON_SCENES["m16"]  # Default to assault rifle
 
 
 ## Log a message to the file logger if available.
