@@ -642,6 +642,8 @@ func _apply_player_saturation() -> void:
 
 
 ## Restores original colors to player's sprites.
+## After restoring, tells the player to refresh their health visual to ensure
+## the correct health-based coloring is applied (not the stale stored colors).
 func _restore_player_colors() -> void:
 	for sprite in _player_original_colors.keys():
 		if is_instance_valid(sprite):
@@ -651,6 +653,19 @@ func _restore_player_colors() -> void:
 		_log("Restored original colors to %d player sprites" % _player_original_colors.size())
 
 	_player_original_colors.clear()
+
+	# Tell the player to refresh their health visual to apply correct colors
+	# This is needed because the stored colors might be stale (captured at a different
+	# health level or during a previous effect state)
+	if _player != null and is_instance_valid(_player):
+		# Try C# player method (RefreshHealthVisual)
+		if _player.has_method("RefreshHealthVisual"):
+			_player.RefreshHealthVisual()
+			_log("Called player RefreshHealthVisual (C#)")
+		# Try GDScript player method (refresh_health_visual)
+		elif _player.has_method("refresh_health_visual"):
+			_player.refresh_health_visual()
+			_log("Called player refresh_health_visual (GDScript)")
 
 
 ## Increase saturation of a color by a multiplier.

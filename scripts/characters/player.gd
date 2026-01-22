@@ -875,6 +875,14 @@ func _update_health_visual() -> void:
 	_set_all_sprites_modulate(color)
 
 
+## Public method to refresh the health visual.
+## Called by effects managers (like LastChanceEffectsManager) after they finish
+## modifying player sprite colors, to ensure the player returns to correct
+## health-based coloring.
+func refresh_health_visual() -> void:
+	_update_health_visual()
+
+
 ## Sets the modulate color on all player sprite parts.
 ## The armband is a separate child sprite that keeps its original color,
 ## so all body parts including right arm use the same health-based color.
