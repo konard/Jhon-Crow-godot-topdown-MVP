@@ -174,10 +174,13 @@ public partial class Shotgun : BaseWeapon
     /// <summary>
     /// Cooldown time (in seconds) after closing bolt before it can be opened again.
     /// This prevents accidental bolt reopening due to mouse movement.
-    /// Increased from 250ms to 400ms to 500ms based on user feedback that accidental opens still occurred
-    /// during pump-action sequences after firing.
+    /// History of adjustments based on user feedback:
+    /// - 250ms: Initial value, too short
+    /// - 400ms: Still had accidental opens
+    /// - 500ms: Still had accidental opens during pump-action sequences
+    /// - 750ms: Current value, provides longer protection window
     /// </summary>
-    private const float BoltCloseCooldownSeconds = 0.5f;
+    private const float BoltCloseCooldownSeconds = 0.75f;
 
     /// <summary>
     /// Timestamp when the bolt was last closed (for cooldown protection).
@@ -272,7 +275,15 @@ public partial class Shotgun : BaseWeapon
 
         // Initialize shell count
         ShellsInTube = TubeMagazineCapacity;
-        EmitSignal(SignalName.ShellCountChanged, ShellsInTube, TubeMagazineCapacity);
+
+        // Emit initial shell count signal using CallDeferred to ensure it happens
+        // AFTER the shotgun is added to the scene tree. This is critical because
+        // GDScript handlers (like building_level.gd's _on_shell_count_changed) need
+        // to find the shotgun via _player.get_node_or_null("Shotgun") to read ReserveAmmo,
+        // and this only works after the shotgun is added as a child of the player.
+        // Without deferring, the signal fires during _Ready() before add_child() completes,
+        // causing reserve ammo to display as 0.
+        CallDeferred(MethodName.EmitInitialShellCount);
 
         GD.Print($"[Shotgun] Ready - Pellets={MinPellets}-{MaxPellets}, Shells={ShellsInTube}/{TubeMagazineCapacity}, Reserve={ReserveAmmo}, Total={ShellsInTube + ReserveAmmo}, CloudOffset={MaxSpawnOffset}px, Tutorial={_isTutorialLevel}");
     }
@@ -665,7 +676,14 @@ public partial class Shotgun : BaseWeapon
                         PlayPumpDownSound();
                         EmitSignal(SignalName.ActionStateChanged, (int)ActionState);
                         EmitSignal(SignalName.PumpActionCycled, "down");
-                        GD.Print("[Shotgun] Pump DOWN - chambered, ready to fire");
+                        if (VerboseInputLogging)
+                        {
+                            GD.Print($"[Shotgun.Input] Release-based pump DOWN - chambered at time {_lastBoltCloseTime:F3}s, cooldown ends at {_lastBoltCloseTime + BoltCloseCooldownSeconds:F3}s");
+                        }
+                        else
+                        {
+                            GD.Print("[Shotgun] Pump DOWN - chambered, ready to fire");
+                        }
                     }
                     else
                     {
@@ -673,7 +691,14 @@ public partial class Shotgun : BaseWeapon
                         ActionState = ShotgunActionState.Ready;
                         PlayPumpDownSound();
                         EmitSignal(SignalName.ActionStateChanged, (int)ActionState);
-                        GD.Print("[Shotgun] Pump DOWN - tube empty, need to reload");
+                        if (VerboseInputLogging)
+                        {
+                            GD.Print($"[Shotgun.Input] Release-based pump DOWN - tube empty at time {_lastBoltCloseTime:F3}s, cooldown ends at {_lastBoltCloseTime + BoltCloseCooldownSeconds:F3}s");
+                        }
+                        else
+                        {
+                            GD.Print("[Shotgun] Pump DOWN - tube empty, need to reload");
+                        }
                     }
                 }
                 break;
@@ -762,6 +787,17 @@ public partial class Shotgun : BaseWeapon
     #endregion
 
     #region Reload System
+
+    /// <summary>
+    /// Emits the initial shell count signal after the shotgun is added to the scene tree.
+    /// This is called via CallDeferred to ensure the signal is emitted after add_child() completes,
+    /// allowing GDScript handlers to find the shotgun node and read ReserveAmmo correctly.
+    /// </summary>
+    private void EmitInitialShellCount()
+    {
+        EmitSignal(SignalName.ShellCountChanged, ShellsInTube, TubeMagazineCapacity);
+        GD.Print($"[Shotgun] Initial ShellCountChanged emitted (deferred): {ShellsInTube}/{TubeMagazineCapacity}, ReserveAmmo={ReserveAmmo}");
+    }
 
     /// <summary>
     /// Starts the shotgun reload sequence by opening the bolt directly.
