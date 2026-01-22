@@ -213,14 +213,17 @@ class MockArmoryMenu:
 			"description": "Coming soon"
 		},
 		"shotgun": {
-			"name": "???",
-			"icon_path": "",
-			"unlocked": false,
-			"description": "Coming soon"
+			"name": "Shotgun",
+			"icon_path": "res://assets/sprites/weapons/shotgun.png",
+			"unlocked": true,
+			"description": "Pump-action shotgun with 6-12 pellet spread"
 		}
 	}
 
 	signal back_pressed
+	signal weapon_selected(weapon_id: String)
+
+	var _selected_weapon: String = "m16"
 
 	func get_weapon_count() -> int:
 		return WEAPONS.size()
@@ -247,6 +250,14 @@ class MockArmoryMenu:
 
 	func get_status_text() -> String:
 		return "Unlocked: %d / %d" % [get_unlocked_count(), get_weapon_count()]
+
+	func select_weapon(weapon_id: String) -> void:
+		if weapon_id in WEAPONS and WEAPONS[weapon_id]["unlocked"]:
+			_selected_weapon = weapon_id
+			weapon_selected.emit(weapon_id)
+
+	func get_selected_weapon() -> String:
+		return _selected_weapon
 
 
 # ============================================================================
@@ -492,18 +503,17 @@ func test_armory_menu_m16_unlocked() -> void:
 func test_armory_menu_other_weapons_locked() -> void:
 	armory_menu = MockArmoryMenu.new()
 	assert_false(armory_menu.is_weapon_unlocked("ak47"), "AK47 should be locked")
-	assert_false(armory_menu.is_weapon_unlocked("shotgun"), "Shotgun should be locked")
 
 
 func test_armory_menu_unlocked_count() -> void:
 	armory_menu = MockArmoryMenu.new()
-	assert_eq(armory_menu.get_unlocked_count(), 1, "Should have 1 unlocked weapon")
+	assert_eq(armory_menu.get_unlocked_count(), 2, "Should have 2 unlocked weapons (M16 and Shotgun)")
 
 
 func test_armory_menu_status_text() -> void:
 	armory_menu = MockArmoryMenu.new()
 	var status := armory_menu.get_status_text()
-	assert_eq(status, "Unlocked: 1 / 3", "Status should show 1 of 3 unlocked")
+	assert_eq(status, "Unlocked: 2 / 3", "Status should show 2 of 3 unlocked")
 
 
 func test_armory_menu_get_weapon_data() -> void:
@@ -521,3 +531,32 @@ func test_armory_menu_invalid_weapon() -> void:
 
 	assert_true(data.is_empty(), "Should return empty dictionary for invalid weapon")
 	assert_false(armory_menu.is_weapon_unlocked("invalid_weapon"), "Invalid weapon should not be unlocked")
+
+
+func test_armory_menu_shotgun_unlocked() -> void:
+	armory_menu = MockArmoryMenu.new()
+	assert_true(armory_menu.is_weapon_unlocked("shotgun"), "Shotgun should be unlocked")
+
+
+func test_armory_menu_select_weapon_changes_selection() -> void:
+	armory_menu = MockArmoryMenu.new()
+	assert_eq(armory_menu.get_selected_weapon(), "m16", "Default weapon should be M16")
+
+	armory_menu.select_weapon("shotgun")
+
+	assert_eq(armory_menu.get_selected_weapon(), "shotgun", "Should select shotgun")
+
+
+func test_armory_menu_cannot_select_locked_weapon() -> void:
+	armory_menu = MockArmoryMenu.new()
+	armory_menu.select_weapon("ak47")  # Locked weapon
+
+	assert_eq(armory_menu.get_selected_weapon(), "m16", "Should remain M16 when trying to select locked weapon")
+
+
+func test_armory_menu_get_shotgun_data() -> void:
+	armory_menu = MockArmoryMenu.new()
+	var data := armory_menu.get_weapon_data("shotgun")
+
+	assert_eq(data["name"], "Shotgun", "Should return correct weapon name")
+	assert_true(data["unlocked"], "Shotgun should be unlocked")

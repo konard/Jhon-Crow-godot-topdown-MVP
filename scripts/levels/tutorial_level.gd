@@ -52,8 +52,14 @@ var _has_thrown_grenade: bool = false
 ## Whether the player has an assault rifle (for fire mode tutorial step).
 var _has_assault_rifle: bool = false
 
+## Whether the player has a shotgun (for shotgun-specific tutorial).
+var _has_shotgun: bool = false
+
 ## Reference to the player's assault rifle weapon (for fire mode tracking).
 var _assault_rifle: Node = null
+
+## Reference to the player's shotgun weapon (for shotgun-specific tracking).
+var _shotgun: Node = null
 
 ## Floating prompt label that follows the player.
 var _prompt_label: Label = null
@@ -76,6 +82,9 @@ func _ready() -> void:
 	if _player == null:
 		push_error("Tutorial: Player not found!")
 		return
+
+	# Swap weapon based on GameManager selection
+	_setup_selected_weapon()
 
 	# Find UI container
 	_ui = get_node_or_null("CanvasLayer/UI")
@@ -101,6 +110,53 @@ func _ready() -> void:
 	# Register player with GameManager
 	if GameManager:
 		GameManager.set_player(_player)
+
+
+## Setup the weapon based on GameManager's selected weapon.
+## Removes the default AssaultRifle and loads the selected weapon.
+func _setup_selected_weapon() -> void:
+	if _player == null:
+		return
+
+	# Get selected weapon from GameManager
+	var selected_weapon_id: String = "m16"  # Default
+	if GameManager:
+		selected_weapon_id = GameManager.get_selected_weapon()
+
+	print("Tutorial: Setting up weapon: %s" % selected_weapon_id)
+
+	# If shotgun is selected, we need to swap weapons
+	if selected_weapon_id == "shotgun":
+		# Remove the default AssaultRifle
+		var assault_rifle = _player.get_node_or_null("AssaultRifle")
+		if assault_rifle:
+			assault_rifle.queue_free()
+			print("Tutorial: Removed default AssaultRifle")
+
+		# Load and add the shotgun
+		var shotgun_scene = load("res://scenes/weapons/csharp/Shotgun.tscn")
+		if shotgun_scene:
+			var shotgun = shotgun_scene.instantiate()
+			shotgun.name = "Shotgun"
+			_player.add_child(shotgun)
+
+			# Set the CurrentWeapon reference in C# Player
+			if _player.has_method("EquipWeapon"):
+				_player.EquipWeapon(shotgun)
+			elif _player.get("CurrentWeapon") != null:
+				_player.CurrentWeapon = shotgun
+
+			print("Tutorial: Shotgun equipped successfully")
+		else:
+			push_error("Tutorial: Failed to load Shotgun scene!")
+	# For M16 (assault rifle), it's already in the scene - just ensure it's equipped
+	else:
+		var assault_rifle = _player.get_node_or_null("AssaultRifle")
+		if assault_rifle and _player.get("CurrentWeapon") == null:
+			if _player.has_method("EquipWeapon"):
+				_player.EquipWeapon(assault_rifle)
+			elif _player.get("CurrentWeapon") != null:
+				_player.CurrentWeapon = assault_rifle
 
 
 func _process(_delta: float) -> void:
@@ -135,7 +191,24 @@ func _connect_player_signals() -> void:
 
 	# Try to connect to weapon signals (C# Player)
 	var weapon = _player.get_node_or_null("AssaultRifle")
-	if weapon != null:
+	var shotgun = _player.get_node_or_null("Shotgun")
+
+	if shotgun != null:
+		_shotgun = shotgun
+		_has_shotgun = true
+		print("Tutorial: Player has Shotgun - shotgun-specific tutorial enabled")
+
+		# Connect to reload signals from player (C# Player)
+		if _player.has_signal("ReloadCompleted"):
+			_player.ReloadCompleted.connect(_on_player_reload_completed)
+		elif _player.has_signal("reload_completed"):
+			_player.reload_completed.connect(_on_player_reload_completed)
+
+		# Connect to shotgun ammo signal
+		if shotgun.has_signal("AmmoChanged"):
+			shotgun.AmmoChanged.connect(_on_weapon_ammo_changed)
+
+	elif weapon != null:
 		_assault_rifle = weapon
 		_has_assault_rifle = true
 		print("Tutorial: Player has AssaultRifle - fire mode tutorial enabled")
@@ -170,9 +243,18 @@ func _setup_ammo_tracking() -> void:
 		return
 
 	# Try to get the player's weapon for C# Player
+	var shotgun = _player.get_node_or_null("Shotgun")
 	var weapon = _player.get_node_or_null("AssaultRifle")
-	if weapon != null:
-		# C# Player with weapon - connect to weapon signals
+
+	if shotgun != null:
+		# C# Player with shotgun - connect to weapon signals
+		if shotgun.has_signal("AmmoChanged"):
+			shotgun.AmmoChanged.connect(_on_weapon_ammo_changed)
+		# Initial ammo display from shotgun
+		if shotgun.get("CurrentAmmo") != null and shotgun.get("ReserveAmmo") != null:
+			_update_ammo_label_magazine(shotgun.CurrentAmmo, shotgun.ReserveAmmo)
+	elif weapon != null:
+		# C# Player with assault rifle - connect to weapon signals
 		if weapon.has_signal("AmmoChanged"):
 			weapon.AmmoChanged.connect(_on_weapon_ammo_changed)
 		# Initial ammo display from weapon
@@ -388,11 +470,21 @@ func _update_prompt_text() -> void:
 		TutorialStep.MOVE_TO_TARGETS:
 			_prompt_label.text = "[WASD] Подойди к мишеням"
 		TutorialStep.SHOOT_TARGETS:
-			_prompt_label.text = "[ЛКМ] Стреляй по мишеням"
+			if _has_shotgun:
+				# Shotgun-specific shooting instructions with pump-action gestures
+				# LMB shoot → RMB drag up → RMB drag down (pump cycle)
+				_prompt_label.text = "[ЛКМ стрельба] [ПКМ↑ затвор] [ПКМ↓ передёрнуть]"
+			else:
+				_prompt_label.text = "[ЛКМ] Стреляй по мишеням"
 		TutorialStep.SWITCH_FIRE_MODE:
 			_prompt_label.text = "[B] Переключи режим стрельбы"
 		TutorialStep.RELOAD:
-			_prompt_label.text = "[R] [F] [R] Перезарядись"
+			if _has_shotgun:
+				# Shotgun-specific reload instructions with shell loading gestures
+				# RMB drag down (open action) → MMB+RMB drag down (load shells, up to 8) → RMB drag up (close)
+				_prompt_label.text = "[ПКМ↓ открыть] [СКМ+ПКМ↓ x8] [ПКМ↑ закрыть]"
+			else:
+				_prompt_label.text = "[R] [F] [R] Перезарядись"
 		TutorialStep.THROW_GRENADE:
 			# 2-step grenade throwing:
 			# Step 1: G + RMB drag right = start timer (pin pulled)

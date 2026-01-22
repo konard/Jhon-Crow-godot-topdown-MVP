@@ -8,6 +8,9 @@ extends CanvasLayer
 ## Signal emitted when the back button is pressed.
 signal back_pressed
 
+## Signal emitted when a weapon is selected.
+signal weapon_selected(weapon_id: String)
+
 ## Dictionary of all weapons with their data.
 ## Keys: weapon_id, Values: dictionary with name, icon_path, unlocked status
 const WEAPONS: Dictionary = {
@@ -30,10 +33,10 @@ const WEAPONS: Dictionary = {
 		"description": "Coming soon"
 	},
 	"shotgun": {
-		"name": "???",
-		"icon_path": "",
-		"unlocked": false,
-		"description": "Coming soon"
+		"name": "Shotgun",
+		"icon_path": "res://assets/sprites/weapons/shotgun.png",
+		"unlocked": true,
+		"description": "Pump-action shotgun - 6-12 pellets per shot, 15° spread, no wall penetration. Press LMB to fire."
 	},
 	"smg": {
 		"name": "???",
@@ -60,6 +63,12 @@ const WEAPONS: Dictionary = {
 @onready var back_button: Button = $MenuContainer/PanelContainer/MarginContainer/VBoxContainer/BackButton
 @onready var status_label: Label = $MenuContainer/PanelContainer/MarginContainer/VBoxContainer/StatusLabel
 
+## Currently selected weapon slot (for visual highlighting).
+var _selected_slot: PanelContainer = null
+
+## Map of weapon slots by weapon ID.
+var _weapon_slots: Dictionary = {}
+
 
 func _ready() -> void:
 	# Connect button signals
@@ -73,9 +82,11 @@ func _ready() -> void:
 
 
 func _populate_weapon_grid() -> void:
-	# Clear existing children
+	# Clear existing children and slot tracking
 	for child in weapon_grid.get_children():
 		child.queue_free()
+	_weapon_slots.clear()
+	_selected_slot = null
 
 	# Count unlocked weapons for status
 	var unlocked_count: int = 0
@@ -86,6 +97,7 @@ func _populate_weapon_grid() -> void:
 		var weapon_data: Dictionary = WEAPONS[weapon_id]
 		var slot := _create_weapon_slot(weapon_id, weapon_data)
 		weapon_grid.add_child(slot)
+		_weapon_slots[weapon_id] = slot
 
 		if weapon_data["unlocked"]:
 			unlocked_count += 1
@@ -93,11 +105,17 @@ func _populate_weapon_grid() -> void:
 	# Update status label
 	status_label.text = "Unlocked: %d / %d" % [unlocked_count, total_count]
 
+	# Highlight currently selected weapon from GameManager
+	_highlight_selected_weapon()
+
 
 func _create_weapon_slot(weapon_id: String, weapon_data: Dictionary) -> PanelContainer:
 	var slot := PanelContainer.new()
 	slot.name = weapon_id + "_slot"
 	slot.custom_minimum_size = Vector2(100, 100)
+
+	# Store weapon_id in slot's metadata for click handling
+	slot.set_meta("weapon_id", weapon_id)
 
 	var vbox := VBoxContainer.new()
 	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -140,7 +158,75 @@ func _create_weapon_slot(weapon_id: String, weapon_data: Dictionary) -> PanelCon
 	# Add tooltip
 	slot.tooltip_text = weapon_data["description"]
 
+	# Make unlocked weapons clickable
+	if weapon_data["unlocked"]:
+		slot.mouse_filter = Control.MOUSE_FILTER_STOP
+		slot.gui_input.connect(_on_slot_gui_input.bind(slot, weapon_id))
+		# Change cursor on hover for clickable slots
+		slot.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	else:
+		slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
 	return slot
+
+
+## Handle click on weapon slot.
+func _on_slot_gui_input(event: InputEvent, slot: PanelContainer, weapon_id: String) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		_select_weapon(weapon_id)
+		# Play click sound via AudioManager
+		var audio_manager = get_node_or_null("/root/AudioManager")
+		if audio_manager and audio_manager.has_method("play_ui_click"):
+			audio_manager.play_ui_click()
+
+
+## Select a weapon and update GameManager.
+func _select_weapon(weapon_id: String) -> void:
+	# Update selection in GameManager
+	if GameManager:
+		GameManager.set_selected_weapon(weapon_id)
+
+	# Emit signal for external listeners
+	weapon_selected.emit(weapon_id)
+
+	# Update visual highlighting
+	_highlight_selected_weapon()
+
+
+## Highlight the currently selected weapon slot.
+func _highlight_selected_weapon() -> void:
+	var current_weapon_id: String = "m16"  # Default
+	if GameManager:
+		current_weapon_id = GameManager.get_selected_weapon()
+
+	# Reset all slots to default style
+	for wid in _weapon_slots:
+		var slot: PanelContainer = _weapon_slots[wid]
+		# Create default style (transparent/subtle background)
+		var default_style := StyleBoxFlat.new()
+		default_style.bg_color = Color(0.2, 0.2, 0.2, 0.5)
+		default_style.corner_radius_top_left = 4
+		default_style.corner_radius_top_right = 4
+		default_style.corner_radius_bottom_left = 4
+		default_style.corner_radius_bottom_right = 4
+		slot.add_theme_stylebox_override("panel", default_style)
+
+	# Highlight selected slot
+	if current_weapon_id in _weapon_slots:
+		var selected_slot: PanelContainer = _weapon_slots[current_weapon_id]
+		var selected_style := StyleBoxFlat.new()
+		selected_style.bg_color = Color(0.3, 0.5, 0.3, 0.8)  # Green highlight
+		selected_style.border_color = Color(0.4, 0.8, 0.4, 1.0)
+		selected_style.border_width_left = 2
+		selected_style.border_width_right = 2
+		selected_style.border_width_top = 2
+		selected_style.border_width_bottom = 2
+		selected_style.corner_radius_top_left = 4
+		selected_style.corner_radius_top_right = 4
+		selected_style.corner_radius_bottom_left = 4
+		selected_style.corner_radius_bottom_right = 4
+		selected_slot.add_theme_stylebox_override("panel", selected_style)
+		_selected_slot = selected_slot
 
 
 func _on_back_pressed() -> void:
