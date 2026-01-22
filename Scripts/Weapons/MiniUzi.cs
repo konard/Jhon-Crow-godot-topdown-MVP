@@ -349,7 +349,9 @@ public partial class MiniUzi : BaseWeapon
 
     /// <summary>
     /// Triggers screen shake based on shooting direction and current spread.
-    /// Mini UZI has high screen shake.
+    /// Mini UZI has high screen shake with progressive intensity:
+    /// - Shake intensity increases with consecutive shots (up to 4x at max spread)
+    /// - This creates stronger recoil the longer you hold the trigger
     /// </summary>
     private void TriggerScreenShake(Vector2 shootDirection)
     {
@@ -364,20 +366,26 @@ public partial class MiniUzi : BaseWeapon
             return;
         }
 
-        // Calculate shake intensity based on fire rate
+        // Calculate base shake intensity based on fire rate
         float fireRate = WeaponData.FireRate;
-        float shakeIntensity;
+        float baseShakeIntensity;
         if (fireRate > 0)
         {
-            shakeIntensity = WeaponData.ScreenShakeIntensity / fireRate * 10.0f;
+            baseShakeIntensity = WeaponData.ScreenShakeIntensity / fireRate * 10.0f;
         }
         else
         {
-            shakeIntensity = WeaponData.ScreenShakeIntensity;
+            baseShakeIntensity = WeaponData.ScreenShakeIntensity;
         }
 
-        // Calculate spread ratio for recovery time (matches progressive spread system)
+        // Calculate spread ratio for progressive shake (matches progressive spread system)
         float spreadRatio = Mathf.Clamp((float)_shotCount / ShotsToMaxSpread, 0.0f, 1.0f);
+
+        // Progressive shake intensity: increases from base to 4x as spread increases
+        // At first shot (spreadRatio=0): 1.0x intensity
+        // At max spread (spreadRatio=1): 4.0x intensity
+        float shakeMultiplier = 1.0f + spreadRatio * 3.0f;
+        float shakeIntensity = baseShakeIntensity * shakeMultiplier;
 
         // Calculate recovery time
         float minRecovery = WeaponData.ScreenShakeMinRecoveryTime;
