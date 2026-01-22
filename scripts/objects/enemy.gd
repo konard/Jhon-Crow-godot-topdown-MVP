@@ -163,6 +163,16 @@ enum BehaviorMode {
 ## This prevents pre-firing at players who are at cover edges.
 @export var lead_prediction_visibility_threshold: float = 0.6
 
+## Walking animation speed multiplier - higher = faster leg cycle.
+@export var walk_anim_speed: float = 12.0
+
+## Walking animation intensity - higher = more pronounced movement.
+@export var walk_anim_intensity: float = 1.0
+
+## Scale multiplier for the enemy model (body, head, arms).
+## Default is 1.3 to match the player size.
+@export var enemy_model_scale: float = 1.3
+
 ## Signal emitted when the enemy is hit.
 signal hit
 
@@ -194,11 +204,23 @@ signal ammo_depleted
 ## 23 degrees ≈ 0.4014 radians.
 const PLAYER_DISTRACTION_ANGLE: float = 0.4014
 
-## Reference to the sprite for color changes.
-@onready var _sprite: Sprite2D = $Sprite2D
+## Reference to the enemy model node containing all sprites.
+@onready var _enemy_model: Node2D = $EnemyModel
+
+## References to individual sprite parts for color changes and animation.
+@onready var _body_sprite: Sprite2D = $EnemyModel/Body
+@onready var _head_sprite: Sprite2D = $EnemyModel/Head
+@onready var _left_arm_sprite: Sprite2D = $EnemyModel/LeftArm
+@onready var _right_arm_sprite: Sprite2D = $EnemyModel/RightArm
+
+## Legacy reference for compatibility (points to body sprite).
+@onready var _sprite: Sprite2D = $EnemyModel/Body
 
 ## Reference to the weapon sprite for visual rotation.
-@onready var _weapon_sprite: Sprite2D = $WeaponSprite
+@onready var _weapon_sprite: Sprite2D = $EnemyModel/WeaponMount/WeaponSprite
+
+## Reference to weapon mount for animation.
+@onready var _weapon_mount: Node2D = $EnemyModel/WeaponMount
 
 ## RayCast2D for line of sight detection.
 @onready var _raycast: RayCast2D = $RayCast2D
@@ -221,6 +243,18 @@ const PLAYER_DISTRACTION_ANGLE: float = 0.4014
 ## Original collision layer for HitArea (to restore on respawn).
 var _original_hit_area_layer: int = 0
 var _original_hit_area_mask: int = 0
+
+## Walking animation time accumulator.
+var _walk_anim_time: float = 0.0
+
+## Whether the enemy is currently walking (for animation state).
+var _is_walking: bool = false
+
+## Base positions for body parts (stored on ready for animation offsets).
+var _base_body_pos: Vector2 = Vector2.ZERO
+var _base_head_pos: Vector2 = Vector2.ZERO
+var _base_left_arm_pos: Vector2 = Vector2.ZERO
+var _base_right_arm_pos: Vector2 = Vector2.ZERO
 
 ## Wall detection raycasts for obstacle avoidance (created at runtime).
 var _wall_raycasts: Array[RayCast2D] = []
@@ -608,6 +642,20 @@ func _ready() -> void:
 	if bullet_scene == null:
 		bullet_scene = preload("res://scenes/projectiles/Bullet.tscn")
 
+	# Initialize walking animation base positions
+	if _body_sprite:
+		_base_body_pos = _body_sprite.position
+	if _head_sprite:
+		_base_head_pos = _head_sprite.position
+	if _left_arm_sprite:
+		_base_left_arm_pos = _left_arm_sprite.position
+	if _right_arm_sprite:
+		_base_right_arm_pos = _right_arm_sprite.position
+
+	# Apply scale to enemy model for larger appearance (same as player)
+	if _enemy_model:
+		_enemy_model.scale = Vector2(enemy_model_scale, enemy_model_scale)
+
 
 ## Initialize health with random value between min and max.
 func _initialize_health() -> void:
@@ -974,6 +1022,12 @@ func _physics_process(delta: float) -> void:
 	# Update weapon sprite rotation to match enemy aim direction
 	_update_weapon_sprite_rotation()
 
+	# Update enemy model rotation to face movement/aim direction
+	_update_enemy_model_rotation()
+
+	# Update walking animation based on movement
+	_update_walk_animation(delta)
+
 	move_and_slide()
 
 
@@ -992,6 +1046,100 @@ func _update_goap_state() -> void:
 	_goap_world_state["can_hit_from_cover"] = _can_hit_player_from_current_position()
 	_goap_world_state["enemies_in_combat"] = _count_enemies_in_combat()
 	_goap_world_state["player_distracted"] = _is_player_distracted()
+
+
+## Updates the enemy model rotation to face the aim/movement direction.
+## The enemy model (body, head, arms) rotates to follow the direction of movement or aim.
+func _update_enemy_model_rotation() -> void:
+	if not _enemy_model:
+		return
+
+	# Determine the direction to face:
+	# - If can see player, face the player
+	# - Otherwise, face the movement direction
+	var face_direction: Vector2
+
+	if _player != null and _can_see_player:
+		# Face the player
+		face_direction = (_player.global_position - global_position).normalized()
+	elif velocity.length_squared() > 1.0:
+		# Face movement direction
+		face_direction = velocity.normalized()
+	else:
+		# Keep current rotation
+		return
+
+	# Calculate target rotation angle
+	var target_angle := face_direction.angle()
+
+	# Apply rotation to the enemy model
+	_enemy_model.rotation = target_angle
+
+	# Handle sprite flipping for left/right aim
+	# When aiming left (angle > 90° or < -90°), flip vertically to avoid upside-down appearance
+	var aiming_left := absf(target_angle) > PI / 2
+
+	# Flip the enemy model vertically when aiming left
+	if aiming_left:
+		_enemy_model.scale = Vector2(enemy_model_scale, -enemy_model_scale)
+	else:
+		_enemy_model.scale = Vector2(enemy_model_scale, enemy_model_scale)
+
+
+## Updates the walking animation based on enemy movement state.
+## Creates a natural bobbing motion for body parts during movement.
+## @param delta: Time since last frame.
+func _update_walk_animation(delta: float) -> void:
+	var is_moving := velocity.length() > 10.0
+
+	if is_moving:
+		# Accumulate animation time based on movement speed
+		# Use combat_move_speed as max for faster walk animation during combat
+		var max_speed := maxf(move_speed, combat_move_speed)
+		var speed_factor := velocity.length() / max_speed
+		_walk_anim_time += delta * walk_anim_speed * speed_factor
+		_is_walking = true
+
+		# Calculate animation offsets using sine waves
+		# Body bobs up and down (frequency = 2x for double step)
+		var body_bob := sin(_walk_anim_time * 2.0) * 1.5 * walk_anim_intensity
+
+		# Head bobs slightly less than body (dampened)
+		var head_bob := sin(_walk_anim_time * 2.0) * 0.8 * walk_anim_intensity
+
+		# Arms swing opposite to each other (alternating)
+		var arm_swing := sin(_walk_anim_time) * 3.0 * walk_anim_intensity
+
+		# Apply offsets to sprites
+		if _body_sprite:
+			_body_sprite.position = _base_body_pos + Vector2(0, body_bob)
+
+		if _head_sprite:
+			_head_sprite.position = _base_head_pos + Vector2(0, head_bob)
+
+		if _left_arm_sprite:
+			# Left arm swings forward/back (y-axis in top-down)
+			_left_arm_sprite.position = _base_left_arm_pos + Vector2(arm_swing, 0)
+
+		if _right_arm_sprite:
+			# Right arm swings opposite to left arm
+			_right_arm_sprite.position = _base_right_arm_pos + Vector2(-arm_swing, 0)
+	else:
+		# Return to idle pose smoothly
+		if _is_walking:
+			_is_walking = false
+			_walk_anim_time = 0.0
+
+		# Interpolate back to base positions
+		var lerp_speed := 10.0 * delta
+		if _body_sprite:
+			_body_sprite.position = _body_sprite.position.lerp(_base_body_pos, lerp_speed)
+		if _head_sprite:
+			_head_sprite.position = _head_sprite.position.lerp(_base_head_pos, lerp_speed)
+		if _left_arm_sprite:
+			_left_arm_sprite.position = _left_arm_sprite.position.lerp(_base_left_arm_pos, lerp_speed)
+		if _right_arm_sprite:
+			_right_arm_sprite.position = _right_arm_sprite.position.lerp(_base_right_arm_pos, lerp_speed)
 
 
 ## Update suppression state.
@@ -3639,10 +3787,10 @@ func on_hit_with_bullet_info(hit_direction: Vector2, caliber_data: Resource, has
 
 ## Shows a brief flash effect when hit.
 func _show_hit_flash() -> void:
-	if not _sprite:
+	if not _enemy_model:
 		return
 
-	_sprite.modulate = hit_flash_color
+	_set_all_sprites_modulate(hit_flash_color)
 
 	await get_tree().create_timer(hit_flash_duration).timeout
 
@@ -3653,12 +3801,23 @@ func _show_hit_flash() -> void:
 
 ## Updates the sprite color based on current health percentage.
 func _update_health_visual() -> void:
-	if not _sprite:
-		return
-
 	# Interpolate color based on health percentage
 	var health_percent := _get_health_percent()
-	_sprite.modulate = full_health_color.lerp(low_health_color, 1.0 - health_percent)
+	var color := full_health_color.lerp(low_health_color, 1.0 - health_percent)
+	_set_all_sprites_modulate(color)
+
+
+## Sets the modulate color on all enemy sprite parts.
+## @param color: The color to apply to all sprites.
+func _set_all_sprites_modulate(color: Color) -> void:
+	if _body_sprite:
+		_body_sprite.modulate = color
+	if _head_sprite:
+		_head_sprite.modulate = color
+	if _left_arm_sprite:
+		_left_arm_sprite.modulate = color
+	if _right_arm_sprite:
+		_right_arm_sprite.modulate = color
 
 
 ## Returns the current health as a percentage (0.0 to 1.0).
