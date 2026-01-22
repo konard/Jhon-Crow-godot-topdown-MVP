@@ -935,10 +935,21 @@ public partial class Player : BaseCharacter
     /// - At step 1 (R pressed): shooting resets the combo
     /// - At step 2 (R->F pressed): if previous magazine had ammo, one chamber bullet can be fired
     /// - After reload: if chamber bullet was fired, subtract one from new magazine
+    ///
+    /// Note: This reload sequence is skipped for weapons that use tube magazines (like Shotgun),
+    /// which have their own shell-by-shell reload mechanism via RMB drag gestures.
     /// </summary>
     private void HandleReloadSequenceInput()
     {
         if (CurrentWeapon == null)
+        {
+            return;
+        }
+
+        // Skip R-F-R reload sequence for weapons that use tube magazines (like Shotgun)
+        // These weapons have their own reload mechanism (shell-by-shell via RMB gestures)
+        // Pressing R key should be ignored for these weapons to avoid breaking ammo tracking
+        if (CurrentWeapon is Shotgun)
         {
             return;
         }
