@@ -262,27 +262,39 @@ public partial class Player : BaseCharacter
     private static readonly Vector2 ReloadArmLeftGrab = new Vector2(-18, -2);      // Left hand at chest/vest mag pouch
     private static readonly Vector2 ReloadArmRightHold = new Vector2(0, 0);        // Right hand stays on weapon grip
 
-    // Step 2: Insert magazine - left arm moves to weapon magwell
-    private static readonly Vector2 ReloadArmLeftInsert = new Vector2(8, 2);       // Left hand at weapon magwell (forward)
+    // Step 2: Insert magazine - left arm moves to weapon magwell (at middle of weapon, not at the end)
+    // Weapon length: ~40 pixels from center, magwell at middle (~0 offset from player center)
+    private static readonly Vector2 ReloadArmLeftInsert = new Vector2(-4, 2);      // Left hand at weapon magwell (middle of weapon)
     private static readonly Vector2 ReloadArmRightSteady = new Vector2(0, 1);      // Right hand steadies weapon
 
-    // Step 3: Pull bolt - both arms involved, right pulls charging handle
-    private static readonly Vector2 ReloadArmLeftSupport = new Vector2(12, 0);     // Left hand holds foregrip
-    private static readonly Vector2 ReloadArmRightBolt = new Vector2(-6, -3);      // Right hand pulls bolt back
+    // Step 3: Pull bolt - right arm moves along rifle contour (back and forth motion)
+    // The right hand should trace the rifle's right side: forward, then back to pull bolt, then release
+    private static readonly Vector2 ReloadArmLeftSupport = new Vector2(-2, 0);     // Left hand holds near magwell
+    private static readonly Vector2 ReloadArmRightBoltStart = new Vector2(4, 2);   // Right hand at charging handle (forward on rifle)
+    private static readonly Vector2 ReloadArmRightBoltPull = new Vector2(-8, -2);  // Right hand pulls bolt back (toward player)
+    private static readonly Vector2 ReloadArmRightBoltReturn = new Vector2(4, 2);  // Right hand returns forward (bolt release)
 
     // Target rotations for reload arm animations (in degrees)
     private const float ReloadArmRotLeftGrab = -50.0f;     // Arm rotation when grabbing mag from chest
     private const float ReloadArmRotRightHold = 0.0f;      // Right arm steady during grab
     private const float ReloadArmRotLeftInsert = -10.0f;   // Left arm rotation when inserting
     private const float ReloadArmRotRightSteady = 5.0f;    // Slight tilt while steadying
-    private const float ReloadArmRotLeftSupport = 0.0f;    // Left arm on foregrip
-    private const float ReloadArmRotRightBolt = -20.0f;    // Right arm rotation when pulling bolt
+    private const float ReloadArmRotLeftSupport = 0.0f;    // Left arm on foregrip/magwell
+    private const float ReloadArmRotRightBoltStart = -5.0f;   // Right arm at bolt handle
+    private const float ReloadArmRotRightBoltPull = -25.0f;   // Right arm rotation when pulling bolt back
+    private const float ReloadArmRotRightBoltReturn = -5.0f;  // Right arm rotation when releasing bolt
 
     // Animation durations for each reload phase (in seconds)
     private const float ReloadAnimGrabDuration = 0.25f;    // Time to grab magazine from chest
     private const float ReloadAnimInsertDuration = 0.3f;   // Time to insert magazine
-    private const float ReloadAnimBoltDuration = 0.2f;     // Time to pull bolt
+    private const float ReloadAnimBoltPullDuration = 0.15f;   // Time to reach bolt handle and pull back
+    private const float ReloadAnimBoltReturnDuration = 0.1f;  // Time for bolt to return forward
     private const float ReloadAnimReturnDuration = 0.2f;   // Time to return to idle
+
+    /// <summary>
+    /// Sub-phase for bolt pull animation (0 = pulling, 1 = returning)
+    /// </summary>
+    private int _boltPullSubPhase = 0;
 
     #endregion
 
@@ -1066,8 +1078,8 @@ public partial class Player : BaseCharacter
             else if (_reloadSequenceStep == 2)
             {
                 // Complete reload sequence - instant reload!
-                // Start animation: Step 3 - Pull bolt/charging handle
-                StartReloadAnimPhase(ReloadAnimPhase.PullBolt, ReloadAnimBoltDuration);
+                // Start animation: Step 3 - Pull bolt/charging handle (back and forth motion)
+                StartReloadAnimPhase(ReloadAnimPhase.PullBolt, ReloadAnimBoltPullDuration);
                 // Play bolt cycling sound
                 PlayM16BoltSound();
                 CompleteReloadSequence();
@@ -2034,7 +2046,32 @@ public partial class Player : BaseCharacter
         _reloadAnimPhase = phase;
         _reloadAnimTimer = duration;
         _reloadAnimDuration = duration;
+
+        // Reset bolt pull sub-phase when entering bolt pull phase
+        if (phase == ReloadAnimPhase.PullBolt)
+        {
+            _boltPullSubPhase = 0;
+        }
+
         LogToFile($"[Player.Reload.Anim] Phase changed to: {phase} (duration: {duration:F2}s)");
+    }
+
+    /// <summary>
+    /// Set arm z-index for reload animation (arms BELOW weapon).
+    /// User feedback: animated hand should be below weapon, not above it.
+    /// </summary>
+    private void SetReloadAnimZIndex()
+    {
+        // During reload operations, arms should appear BELOW the weapon
+        // Weapon has z_index = 1, so set arms to 0
+        if (_leftArmSprite != null)
+        {
+            _leftArmSprite.ZIndex = 0;
+        }
+        if (_rightArmSprite != null)
+        {
+            _rightArmSprite.ZIndex = 0;
+        }
     }
 
     /// <summary>
@@ -2047,6 +2084,8 @@ public partial class Player : BaseCharacter
         // Early exit if no animation active
         if (_reloadAnimPhase == ReloadAnimPhase.None)
         {
+            // Restore normal z-index when not animating
+            RestoreArmZIndex();
             return;
         }
 
@@ -2063,6 +2102,10 @@ public partial class Player : BaseCharacter
         float rightArmRot = 0.0f;
         float lerpSpeed = AnimLerpSpeed * delta;
 
+        // Set arms to lower z-index during reload operations (BELOW weapon)
+        // User feedback: "animated hand should be below weapon, not above it"
+        SetReloadAnimZIndex();
+
         switch (_reloadAnimPhase)
         {
             case ReloadAnimPhase.GrabMagazine:
@@ -2075,7 +2118,8 @@ public partial class Player : BaseCharacter
                 break;
 
             case ReloadAnimPhase.InsertMagazine:
-                // Step 2: Left arm brings magazine to weapon magwell
+                // Step 2: Left arm brings magazine to weapon magwell (at middle of weapon)
+                // User feedback: "step 2 should end at middle of weapon length, not at the end"
                 leftArmTarget = _baseLeftArmPos + ReloadArmLeftInsert;
                 leftArmRot = Mathf.DegToRad(ReloadArmRotLeftInsert);
                 rightArmTarget = _baseRightArmPos + ReloadArmRightSteady;
@@ -2084,17 +2128,40 @@ public partial class Player : BaseCharacter
                 break;
 
             case ReloadAnimPhase.PullBolt:
-                // Step 3: Right hand pulls bolt, left supports on foregrip
+                // Step 3: Right hand traces rifle contour - back and forth motion
+                // User feedback: "step 3 should be a movement along the rifle contour
+                // right towards and away from oneself (back and forth)"
                 leftArmTarget = _baseLeftArmPos + ReloadArmLeftSupport;
                 leftArmRot = Mathf.DegToRad(ReloadArmRotLeftSupport);
-                rightArmTarget = _baseRightArmPos + ReloadArmRightBolt;
-                rightArmRot = Mathf.DegToRad(ReloadArmRotRightBolt);
-                lerpSpeed = AnimLerpSpeedFast * delta;
 
-                // When bolt pull completes, transition to return idle
-                if (_reloadAnimTimer <= 0)
+                if (_boltPullSubPhase == 0)
                 {
-                    StartReloadAnimPhase(ReloadAnimPhase.ReturnIdle, ReloadAnimReturnDuration);
+                    // Sub-phase 0: Pull bolt back (toward player)
+                    rightArmTarget = _baseRightArmPos + ReloadArmRightBoltPull;
+                    rightArmRot = Mathf.DegToRad(ReloadArmRotRightBoltPull);
+                    lerpSpeed = AnimLerpSpeedFast * delta;
+
+                    // When pull back completes, transition to return forward
+                    if (_reloadAnimTimer <= 0)
+                    {
+                        _boltPullSubPhase = 1;
+                        _reloadAnimTimer = ReloadAnimBoltReturnDuration;
+                        _reloadAnimDuration = ReloadAnimBoltReturnDuration;
+                        LogToFile("[Player.Reload.Anim] Bolt pull sub-phase: returning forward");
+                    }
+                }
+                else
+                {
+                    // Sub-phase 1: Release bolt (return forward)
+                    rightArmTarget = _baseRightArmPos + ReloadArmRightBoltReturn;
+                    rightArmRot = Mathf.DegToRad(ReloadArmRotRightBoltReturn);
+                    lerpSpeed = AnimLerpSpeedFast * delta;
+
+                    // When return completes, transition to return idle
+                    if (_reloadAnimTimer <= 0)
+                    {
+                        StartReloadAnimPhase(ReloadAnimPhase.ReturnIdle, ReloadAnimReturnDuration);
+                    }
                 }
                 break;
 
@@ -2106,10 +2173,11 @@ public partial class Player : BaseCharacter
                 rightArmRot = 0.0f;
                 lerpSpeed = AnimLerpSpeed * delta;
 
-                // When return animation completes, end animation
+                // When return animation completes, end animation and restore z-index
                 if (_reloadAnimTimer <= 0)
                 {
                     _reloadAnimPhase = ReloadAnimPhase.None;
+                    RestoreArmZIndex();
                     LogToFile("[Player.Reload.Anim] Animation complete, returning to normal");
                 }
                 break;
