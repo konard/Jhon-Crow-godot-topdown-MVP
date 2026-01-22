@@ -59,6 +59,9 @@ var _file_logger: Node = null
 
 
 func _ready() -> void:
+	# CRITICAL: First line diagnostic - if this doesn't appear, script failed to load
+	print("[ImpactEffectsManager] _ready() STARTING...")
+
 	# Get FileLogger reference - print diagnostic if it fails
 	_file_logger = get_node_or_null("/root/FileLogger")
 	if _file_logger == null:

@@ -3954,6 +3954,14 @@ func on_hit_with_bullet_info(hit_direction: Vector2, caliber_data: Resource, has
 		_log_to_file("ImpactEffectsManager found, calling spawn_blood_effect")
 	else:
 		_log_to_file("WARNING: ImpactEffectsManager not found at /root/ImpactEffectsManager")
+		# Debug: List all autoload children of /root for diagnostics
+		var root_node := get_node_or_null("/root")
+		if root_node:
+			var autoload_names: Array = []
+			for child in root_node.get_children():
+				if child.name != get_tree().current_scene.name if get_tree().current_scene else true:
+					autoload_names.append(child.name)
+			_log_to_file("Available autoloads: " + ", ".join(autoload_names))
 
 	if _current_health <= 0:
 		# Track special kill info before death
