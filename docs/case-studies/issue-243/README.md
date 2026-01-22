@@ -274,6 +274,81 @@ To verify the fix is working:
 
 ---
 
+## SECOND ROOT CAUSE DISCOVERED (2026-01-22 18:15+)
+
+### User Report
+
+User uploaded new log file `game_log_20260122_181509.txt` showing the issue is NOT fixed. The log clearly shows:
+
+```
+[18:15:43] RMB drag started - initial MMB state: False
+[18:15:43] Mid-drag DOWN in Loading state: shouldLoad=False - NOT processing mid-drag, waiting for RMB release
+(... 19 more identical messages ...)
+[18:15:43] RMB released - processing drag gesture (wasMMBDuringDrag=False)
+[18:15:43] RMB release in Loading state: wasMMBDuringDrag=False, isMMBHeld=False => shouldLoadShell=False
+[18:15:43] Closing bolt (MMB was not held)
+```
+
+**Critical Observation:** The user was pressing MMB during the drag (we can see 19 "Mid-drag DOWN" log entries), but `_wasMiddleMouseHeldDuringDrag` remained `False` throughout!
+
+### The Second Root Cause
+
+In `HandleDragGestures()`, when already dragging, the code was structured as:
+
+```csharp
+else  // Already dragging
+{
+    // ... setup code ...
+    if (TryProcessMidDragGesture(dragVector))  // ← Called FIRST
+    {
+        // gesture processed
+    }
+}
+// MMB tracking happens OUTSIDE the else block, AFTER TryProcessMidDragGesture
+if (_isMiddleMouseHeld)
+{
+    _wasMiddleMouseHeldDuringDrag = true;  // ← Updated SECOND (too late!)
+}
+```
+
+**The Bug Sequence:**
+1. User presses RMB (drag starts, `_wasMiddleMouseHeldDuringDrag = false` because MMB not held yet)
+2. User presses MMB while holding RMB (MMB now held)
+3. Frame update: `TryProcessMidDragGesture()` is called
+   - Checks `_wasMiddleMouseHeldDuringDrag` → still `false`!
+   - Logs "shouldLoad=False"
+4. THEN MMB tracking code runs: `_wasMiddleMouseHeldDuringDrag = true` (but too late!)
+5. User releases RMB, bolt closes instead of loading shell
+
+### The Fix
+
+Move MMB tracking code BEFORE `TryProcessMidDragGesture()` call:
+
+```csharp
+else  // Already dragging
+{
+    // CRITICAL FIX: Update MMB tracking FIRST!
+    if (_isMiddleMouseHeld)
+    {
+        _wasMiddleMouseHeldDuringDrag = true;
+    }
+
+    // THEN check for mid-drag gesture
+    if (TryProcessMidDragGesture(dragVector))
+    {
+        // gesture processed
+    }
+}
+```
+
+### Why This Wasn't Caught Before
+
+The first fix addressed the timing issue in `_Process()` where `UpdateMiddleMouseState()` was called after `HandleDragGestures()`. This fixed cases where user pressed MMB at drag start.
+
+However, when user pressed RMB first (without MMB), then pressed MMB mid-drag, the second bug manifested because the MMB tracking within the "already dragging" branch was still executing in the wrong order.
+
+---
+
 ## Lessons Learned
 
 1. **Input state update order matters**: In frame-based game loops, the order of input state updates relative to input processing is critical.
@@ -287,3 +362,5 @@ To verify the fix is working:
 5. **Use the correct logging system**: In multi-system projects, ensure diagnostic messages use the appropriate logging mechanism. `GD.Print()` only writes to console; FileLogger must be called explicitly for file logging.
 
 6. **Verify timing of builds vs tests**: Always compare timestamps of user test logs with CI build completion times to ensure they tested the correct build.
+
+7. **Order matters EVERYWHERE**: Even after fixing the order at one level (`_Process()`), similar ordering issues can exist at other levels (inside `HandleDragGestures()`). Always trace the complete data flow.

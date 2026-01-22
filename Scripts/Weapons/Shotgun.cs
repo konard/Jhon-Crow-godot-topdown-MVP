@@ -157,10 +157,16 @@ public partial class Shotgun : BaseWeapon
     /// This is needed because users often release MMB and RMB at the same time,
     /// so we need to track if MMB was held during the drag, not just at release.
     ///
-    /// ROOT CAUSE FIX (Issue #243): The "only works on second attempt" bug was caused
-    /// by _isMiddleMouseHeld being updated AFTER HandleDragGestures() was called.
-    /// This meant the first frame of a drag used stale MMB state from the previous frame.
-    /// Fixed by updating _isMiddleMouseHeld BEFORE HandleDragGestures() in _Process().
+    /// ROOT CAUSE FIX (Issue #243): The "only works on second attempt" bug had TWO causes:
+    ///
+    /// 1. (Initial fix) _isMiddleMouseHeld was updated AFTER HandleDragGestures() in _Process().
+    ///    Fixed by updating _isMiddleMouseHeld BEFORE HandleDragGestures() in _Process().
+    ///
+    /// 2. (Second fix) When already dragging, the MMB tracking was done AFTER calling
+    ///    TryProcessMidDragGesture(). This meant if user pressed MMB mid-drag:
+    ///    - TryProcessMidDragGesture() checked _wasMiddleMouseHeldDuringDrag (still false)
+    ///    - THEN MMB tracking updated _wasMiddleMouseHeldDuringDrag = true (too late!)
+    ///    Fixed by moving MMB tracking BEFORE TryProcessMidDragGesture() call.
     /// </summary>
     private bool _wasMiddleMouseHeldDuringDrag = false;
 
@@ -422,7 +428,26 @@ public partial class Shotgun : BaseWeapon
             }
             else
             {
-                // Already dragging - check for mid-drag gesture completion
+                // Already dragging - first update MMB tracking, THEN check for mid-drag gesture
+                // CRITICAL FIX (Issue #243 - second root cause): The MMB tracking MUST happen
+                // BEFORE TryProcessMidDragGesture() is called. Previously, the tracking was done
+                // AFTER the mid-drag processing, so when TryProcessMidDragGesture() checked
+                // _wasMiddleMouseHeldDuringDrag, it was using stale data from before the user
+                // pressed MMB during the drag.
+                //
+                // Bug sequence (before fix):
+                // 1. User presses RMB (drag starts with MMB=false)
+                // 2. User presses MMB while holding RMB
+                // 3. TryProcessMidDragGesture() called - checks _wasMiddleMouseHeldDuringDrag (still false!)
+                // 4. MMB tracking updates _wasMiddleMouseHeldDuringDrag = true (too late!)
+                //
+                // Fix: Update MMB tracking first, then call TryProcessMidDragGesture()
+                if (_isMiddleMouseHeld)
+                {
+                    _wasMiddleMouseHeldDuringDrag = true;
+                }
+
+                // Now check for mid-drag gesture completion
                 // This enables continuous gestures without releasing RMB
                 Vector2 currentPosition = GetGlobalMousePosition();
                 Vector2 dragVector = currentPosition - _dragStartPosition;
@@ -435,13 +460,6 @@ public partial class Shotgun : BaseWeapon
                     // Reset MMB tracking for the new gesture segment
                     _wasMiddleMouseHeldDuringDrag = _isMiddleMouseHeld;
                 }
-            }
-
-            // Track if MMB is held at any point during the drag
-            // This fixes timing issues where users release both buttons simultaneously
-            if (_isMiddleMouseHeld)
-            {
-                _wasMiddleMouseHeldDuringDrag = true;
             }
         }
         else if (_isDragging)
