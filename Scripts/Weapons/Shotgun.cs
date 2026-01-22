@@ -171,6 +171,17 @@ public partial class Shotgun : BaseWeapon
     private const bool VerboseInputLogging = false;
 
     /// <summary>
+    /// Cooldown time (in seconds) after closing bolt before it can be opened again.
+    /// This prevents accidental bolt reopening due to mouse movement.
+    /// </summary>
+    private const float BoltCloseCooldownSeconds = 0.25f;
+
+    /// <summary>
+    /// Timestamp when the bolt was last closed (for cooldown protection).
+    /// </summary>
+    private double _lastBoltCloseTime = 0.0;
+
+    /// <summary>
     /// Signal emitted when action state changes.
     /// </summary>
     [Signal]
@@ -443,6 +454,9 @@ public partial class Shotgun : BaseWeapon
                     if (isDragDown)
                     {
                         // Mid-drag pump down - chamber round
+                        // Record close time for cooldown protection
+                        _lastBoltCloseTime = Time.GetTicksMsec() / 1000.0;
+
                         if (ShellsInTube > 0)
                         {
                             ActionState = ShotgunActionState.Ready;
@@ -463,7 +477,7 @@ public partial class Shotgun : BaseWeapon
                     break;
 
                 case ShotgunActionState.Ready:
-                    if (isDragUp && ShellsInTube < TubeMagazineCapacity)
+                    if (isDragUp && ShellsInTube < TubeMagazineCapacity && !IsInBoltCloseCooldown())
                     {
                         // Mid-drag start reload
                         StartReload();
@@ -585,6 +599,9 @@ public partial class Shotgun : BaseWeapon
                 if (isDragDown)
                 {
                     // Chamber next round (push pump forward/down)
+                    // Record close time for cooldown protection
+                    _lastBoltCloseTime = Time.GetTicksMsec() / 1000.0;
+
                     if (ShellsInTube > 0)
                     {
                         ActionState = ShotgunActionState.Ready;
@@ -606,7 +623,8 @@ public partial class Shotgun : BaseWeapon
 
             case ShotgunActionState.Ready:
                 // If ready and drag UP, might be starting reload (open bolt)
-                if (isDragUp && ShellsInTube < TubeMagazineCapacity)
+                // Check cooldown to prevent accidental bolt reopening after close
+                if (isDragUp && ShellsInTube < TubeMagazineCapacity && !IsInBoltCloseCooldown())
                 {
                     StartReload();
                 }
@@ -749,6 +767,7 @@ public partial class Shotgun : BaseWeapon
 
     /// <summary>
     /// Completes the reload sequence by closing the action.
+    /// Records the close time to enable cooldown protection against accidental reopening.
     /// </summary>
     private void CompleteReload()
     {
@@ -759,11 +778,34 @@ public partial class Shotgun : BaseWeapon
 
         ReloadState = ShotgunReloadState.NotReloading;
         ActionState = ShotgunActionState.Ready;
+
+        // Record bolt close time for cooldown protection
+        _lastBoltCloseTime = Time.GetTicksMsec() / 1000.0;
+
         PlayActionCloseSound();
         EmitSignal(SignalName.ReloadStateChanged, (int)ReloadState);
         EmitSignal(SignalName.ActionStateChanged, (int)ActionState);
         EmitSignal(SignalName.ReloadFinished);
         GD.Print($"[Shotgun] Reload complete - ready to fire with {ShellsInTube} shells");
+    }
+
+    /// <summary>
+    /// Checks if we are within the cooldown period after closing the bolt.
+    /// This prevents accidental bolt reopening due to continued mouse movement.
+    /// </summary>
+    /// <returns>True if cooldown is active and bolt opening should be blocked.</returns>
+    private bool IsInBoltCloseCooldown()
+    {
+        double currentTime = Time.GetTicksMsec() / 1000.0;
+        double elapsedSinceClose = currentTime - _lastBoltCloseTime;
+        bool inCooldown = elapsedSinceClose < BoltCloseCooldownSeconds;
+
+        if (inCooldown && VerboseInputLogging)
+        {
+            GD.Print($"[Shotgun.Input] Bolt open blocked by cooldown: {elapsedSinceClose:F3}s < {BoltCloseCooldownSeconds}s");
+        }
+
+        return inCooldown;
     }
 
     /// <summary>
