@@ -163,6 +163,16 @@ enum BehaviorMode {
 ## This prevents pre-firing at players who are at cover edges.
 @export var lead_prediction_visibility_threshold: float = 0.6
 
+## Walking animation speed multiplier - higher = faster leg cycle.
+@export var walk_anim_speed: float = 12.0
+
+## Walking animation intensity - higher = more pronounced movement.
+@export var walk_anim_intensity: float = 1.0
+
+## Scale multiplier for the enemy model (body, head, arms).
+## Default is 1.3 to match the player size.
+@export var enemy_model_scale: float = 1.3
+
 ## Signal emitted when the enemy is hit.
 signal hit
 
@@ -194,11 +204,23 @@ signal ammo_depleted
 ## 23 degrees ≈ 0.4014 radians.
 const PLAYER_DISTRACTION_ANGLE: float = 0.4014
 
-## Reference to the sprite for color changes.
-@onready var _sprite: Sprite2D = $Sprite2D
+## Reference to the enemy model node containing all sprites.
+@onready var _enemy_model: Node2D = $EnemyModel
+
+## References to individual sprite parts for color changes and animation.
+@onready var _body_sprite: Sprite2D = $EnemyModel/Body
+@onready var _head_sprite: Sprite2D = $EnemyModel/Head
+@onready var _left_arm_sprite: Sprite2D = $EnemyModel/LeftArm
+@onready var _right_arm_sprite: Sprite2D = $EnemyModel/RightArm
+
+## Legacy reference for compatibility (points to body sprite).
+@onready var _sprite: Sprite2D = $EnemyModel/Body
 
 ## Reference to the weapon sprite for visual rotation.
-@onready var _weapon_sprite: Sprite2D = $WeaponSprite
+@onready var _weapon_sprite: Sprite2D = $EnemyModel/WeaponMount/WeaponSprite
+
+## Reference to weapon mount for animation.
+@onready var _weapon_mount: Node2D = $EnemyModel/WeaponMount
 
 ## RayCast2D for line of sight detection.
 @onready var _raycast: RayCast2D = $RayCast2D
@@ -221,6 +243,18 @@ const PLAYER_DISTRACTION_ANGLE: float = 0.4014
 ## Original collision layer for HitArea (to restore on respawn).
 var _original_hit_area_layer: int = 0
 var _original_hit_area_mask: int = 0
+
+## Walking animation time accumulator.
+var _walk_anim_time: float = 0.0
+
+## Whether the enemy is currently walking (for animation state).
+var _is_walking: bool = false
+
+## Base positions for body parts (stored on ready for animation offsets).
+var _base_body_pos: Vector2 = Vector2.ZERO
+var _base_head_pos: Vector2 = Vector2.ZERO
+var _base_left_arm_pos: Vector2 = Vector2.ZERO
+var _base_right_arm_pos: Vector2 = Vector2.ZERO
 
 ## Wall detection raycasts for obstacle avoidance (created at runtime).
 var _wall_raycasts: Array[RayCast2D] = []
@@ -608,6 +642,20 @@ func _ready() -> void:
 	if bullet_scene == null:
 		bullet_scene = preload("res://scenes/projectiles/Bullet.tscn")
 
+	# Initialize walking animation base positions
+	if _body_sprite:
+		_base_body_pos = _body_sprite.position
+	if _head_sprite:
+		_base_head_pos = _head_sprite.position
+	if _left_arm_sprite:
+		_base_left_arm_pos = _left_arm_sprite.position
+	if _right_arm_sprite:
+		_base_right_arm_pos = _right_arm_sprite.position
+
+	# Apply scale to enemy model for larger appearance (same as player)
+	if _enemy_model:
+		_enemy_model.scale = Vector2(enemy_model_scale, enemy_model_scale)
+
 
 ## Initialize health with random value between min and max.
 func _initialize_health() -> void:
@@ -961,7 +1009,15 @@ func _physics_process(delta: float) -> void:
 	_update_goap_state()
 	_update_suppression(delta)
 
-	# Process AI state machine
+	# Update enemy model rotation BEFORE processing AI state (which may shoot).
+	# This ensures the weapon is correctly positioned when bullets are created.
+	# Note: We don't call _update_weapon_sprite_rotation() anymore because:
+	# 1. The EnemyModel rotation already rotates the weapon correctly
+	# 2. The previous _update_weapon_sprite_rotation() was using the Enemy's rotation
+	#    instead of EnemyModel's rotation, causing the weapon to be offset by 90 degrees
+	_update_enemy_model_rotation()
+
+	# Process AI state machine (may trigger shooting)
 	_process_ai_state(delta)
 
 	# Update debug label if enabled
@@ -971,8 +1027,8 @@ func _physics_process(delta: float) -> void:
 	if debug_label_enabled:
 		queue_redraw()
 
-	# Update weapon sprite rotation to match enemy aim direction
-	_update_weapon_sprite_rotation()
+	# Update walking animation based on movement
+	_update_walk_animation(delta)
 
 	move_and_slide()
 
@@ -992,6 +1048,175 @@ func _update_goap_state() -> void:
 	_goap_world_state["can_hit_from_cover"] = _can_hit_player_from_current_position()
 	_goap_world_state["enemies_in_combat"] = _count_enemies_in_combat()
 	_goap_world_state["player_distracted"] = _is_player_distracted()
+
+
+## Updates the enemy model rotation to face the aim/movement direction.
+## The enemy model (body, head, arms) rotates to follow the direction of movement or aim.
+## Note: Enemy sprites face RIGHT (0 radians), same as player sprites.
+##
+## IMPORTANT: When aiming at the player, we calculate the direction from the WEAPON position
+## to the player, not from the enemy center. This ensures the weapon barrel actually points
+## at the player, accounting for the weapon's offset from the enemy center.
+func _update_enemy_model_rotation() -> void:
+	if not _enemy_model:
+		return
+
+	# Determine the direction to face:
+	# - If can see player, face the player (simple direction from enemy center)
+	# - Otherwise, face the movement direction
+	#
+	# NOTE: We use simple center-to-player direction, NOT offset-compensated direction.
+	# This ensures the weapon visually points in the same direction as bullets fly.
+	# The bullets are fired from the muzzle toward the target, and the muzzle is
+	# positioned along the direction the model faces.
+	var face_direction: Vector2
+
+	if _player != null and _can_see_player:
+		# Simple direction from enemy center to player (like player character does)
+		face_direction = (_player.global_position - global_position).normalized()
+	elif velocity.length_squared() > 1.0:
+		# Face movement direction
+		face_direction = velocity.normalized()
+	else:
+		# Keep current rotation
+		return
+
+	# Calculate target rotation angle
+	# Enemy sprites face RIGHT (same as player sprites, 0 radians)
+	var target_angle := face_direction.angle()
+
+	# Apply rotation to the enemy model
+	_enemy_model.rotation = target_angle
+
+	# Handle sprite flipping for left/right aim
+	# When aiming left (angle > 90 or < -90), flip vertically to avoid upside-down appearance
+	var aiming_left := absf(target_angle) > PI / 2
+
+	# Flip the enemy model vertically when aiming left
+	if aiming_left:
+		_enemy_model.scale = Vector2(enemy_model_scale, -enemy_model_scale)
+	else:
+		_enemy_model.scale = Vector2(enemy_model_scale, enemy_model_scale)
+
+
+## DEPRECATED: This function is no longer used.
+##
+## Previously used to calculate an aim direction that would compensate for the weapon's
+## offset from the enemy center. This caused issues because:
+## 1. The model rotation was different from the bullet direction
+## 2. The weapon would visually point in a different direction than bullets fly
+##
+## The new approach is simpler:
+## 1. Model faces the player (center-to-center direction)
+## 2. Bullets spawn from muzzle and fly FROM MUZZLE TO TARGET
+## 3. This ensures the weapon visually points where bullets go
+##
+## Kept for reference in case the iterative offset approach is needed elsewhere.
+##
+## @param target_pos: The position to aim at (typically the player's position).
+## @return: The direction vector the model should face for the weapon to point at target.
+func _calculate_aim_direction_from_weapon(target_pos: Vector2) -> Vector2:
+	# WeaponMount is at local position (0, 6) in EnemyModel
+	# This offset needs to be accounted for when calculating aim direction
+	var weapon_mount_local := Vector2(0, 6)
+
+	# Start with a rough estimate: direction from enemy center to target
+	var rough_direction := (target_pos - global_position)
+	var rough_distance := rough_direction.length()
+
+	# For distant targets, the offset error is negligible - use simple calculation
+	# threshold is ~3x the weapon offset to avoid unnecessary iteration
+	if rough_distance > 25.0 * enemy_model_scale:
+		return rough_direction.normalized()
+
+	# For close targets, iterate to find the correct rotation
+	# Start with the rough direction
+	var current_direction := rough_direction.normalized()
+
+	# Iterate to refine the aim direction (2 iterations is usually enough)
+	for _i in range(2):
+		var estimated_angle := current_direction.angle()
+
+		# Determine if we would flip (affects how weapon offset transforms)
+		var would_flip := absf(estimated_angle) > PI / 2
+
+		# Calculate weapon position with this estimated rotation
+		var weapon_offset_world: Vector2
+		if would_flip:
+			# When flipped, scale.y is negative, which affects the Y component of the offset
+			# Transform: scale then rotate
+			var scaled := Vector2(weapon_mount_local.x * enemy_model_scale, weapon_mount_local.y * -enemy_model_scale)
+			weapon_offset_world = scaled.rotated(estimated_angle)
+		else:
+			var scaled := weapon_mount_local * enemy_model_scale
+			weapon_offset_world = scaled.rotated(estimated_angle)
+
+		var weapon_global_pos := global_position + weapon_offset_world
+
+		# Calculate new direction from weapon to target
+		var new_direction := (target_pos - weapon_global_pos)
+		if new_direction.length_squared() < 0.01:
+			# Target is at weapon position, keep current direction
+			break
+		current_direction = new_direction.normalized()
+
+	return current_direction
+
+
+## Updates the walking animation based on enemy movement state.
+## Creates a natural bobbing motion for body parts during movement.
+## @param delta: Time since last frame.
+func _update_walk_animation(delta: float) -> void:
+	var is_moving := velocity.length() > 10.0
+
+	if is_moving:
+		# Accumulate animation time based on movement speed
+		# Use combat_move_speed as max for faster walk animation during combat
+		var max_speed := maxf(move_speed, combat_move_speed)
+		var speed_factor := velocity.length() / max_speed
+		_walk_anim_time += delta * walk_anim_speed * speed_factor
+		_is_walking = true
+
+		# Calculate animation offsets using sine waves
+		# Body bobs up and down (frequency = 2x for double step)
+		var body_bob := sin(_walk_anim_time * 2.0) * 1.5 * walk_anim_intensity
+
+		# Head bobs slightly less than body (dampened)
+		var head_bob := sin(_walk_anim_time * 2.0) * 0.8 * walk_anim_intensity
+
+		# Arms swing opposite to each other (alternating)
+		var arm_swing := sin(_walk_anim_time) * 3.0 * walk_anim_intensity
+
+		# Apply offsets to sprites
+		if _body_sprite:
+			_body_sprite.position = _base_body_pos + Vector2(0, body_bob)
+
+		if _head_sprite:
+			_head_sprite.position = _base_head_pos + Vector2(0, head_bob)
+
+		if _left_arm_sprite:
+			# Left arm swings forward/back (y-axis in top-down)
+			_left_arm_sprite.position = _base_left_arm_pos + Vector2(arm_swing, 0)
+
+		if _right_arm_sprite:
+			# Right arm swings opposite to left arm
+			_right_arm_sprite.position = _base_right_arm_pos + Vector2(-arm_swing, 0)
+	else:
+		# Return to idle pose smoothly
+		if _is_walking:
+			_is_walking = false
+			_walk_anim_time = 0.0
+
+		# Interpolate back to base positions
+		var lerp_speed := 10.0 * delta
+		if _body_sprite:
+			_body_sprite.position = _body_sprite.position.lerp(_base_body_pos, lerp_speed)
+		if _head_sprite:
+			_head_sprite.position = _head_sprite.position.lerp(_base_head_pos, lerp_speed)
+		if _left_arm_sprite:
+			_left_arm_sprite.position = _left_arm_sprite.position.lerp(_base_left_arm_pos, lerp_speed)
+		if _right_arm_sprite:
+			_right_arm_sprite.position = _right_arm_sprite.position.lerp(_base_right_arm_pos, lerp_speed)
 
 
 ## Update suppression state.
@@ -2093,11 +2318,12 @@ func _shoot_with_inaccuracy() -> void:
 	if not _should_shoot_at_target(target_position):
 		return
 
-	# Get the weapon muzzle position (where bullet spawns)
-	var muzzle_position := _get_muzzle_position()
+	# Calculate bullet spawn position at weapon muzzle first
+	var weapon_forward := _get_weapon_forward_direction()
+	var bullet_spawn_pos := _get_bullet_spawn_position(weapon_forward)
 
-	# Calculate direction from muzzle to target
-	var direction := (target_position - muzzle_position).normalized()
+	# Calculate base direction FROM MUZZLE TO TARGET
+	var direction := (target_position - bullet_spawn_pos).normalized()
 
 	# Add inaccuracy spread
 	var inaccuracy_angle := randf_range(-RETREAT_INACCURACY_SPREAD, RETREAT_INACCURACY_SPREAD)
@@ -2110,12 +2336,11 @@ func _shoot_with_inaccuracy() -> void:
 
 	# Create and fire bullet
 	var bullet := bullet_scene.instantiate()
-	bullet.global_position = muzzle_position
+	bullet.global_position = bullet_spawn_pos
 	bullet.direction = direction
 	bullet.shooter_id = get_instance_id()
 	# Set shooter position for distance-based penetration calculation
-	# Use muzzle position for accurate distance calculation
-	bullet.shooter_position = muzzle_position
+	bullet.shooter_position = bullet_spawn_pos
 	get_tree().current_scene.add_child(bullet)
 
 	# Play sounds
@@ -2149,11 +2374,12 @@ func _shoot_burst_shot() -> void:
 
 	var target_position := _player.global_position
 
-	# Get the weapon muzzle position (where bullet spawns)
-	var muzzle_position := _get_muzzle_position()
+	# Calculate bullet spawn position at weapon muzzle first
+	var weapon_forward := _get_weapon_forward_direction()
+	var bullet_spawn_pos := _get_bullet_spawn_position(weapon_forward)
 
-	# Calculate direction from muzzle to target
-	var direction := (target_position - muzzle_position).normalized()
+	# Calculate base direction FROM MUZZLE TO TARGET
+	var direction := (target_position - bullet_spawn_pos).normalized()
 
 	# Apply arc offset for burst spread
 	direction = direction.rotated(_retreat_burst_angle_offset)
@@ -2169,12 +2395,11 @@ func _shoot_burst_shot() -> void:
 
 	# Create and fire bullet
 	var bullet := bullet_scene.instantiate()
-	bullet.global_position = muzzle_position
+	bullet.global_position = bullet_spawn_pos
 	bullet.direction = direction
 	bullet.shooter_id = get_instance_id()
 	# Set shooter position for distance-based penetration calculation
-	# Use muzzle position for accurate distance calculation
-	bullet.shooter_position = muzzle_position
+	bullet.shooter_position = bullet_spawn_pos
 	get_tree().current_scene.add_child(bullet)
 
 	# Play sounds
@@ -2592,14 +2817,13 @@ func _is_firing_line_clear_of_friendlies(target_position: Vector2) -> bool:
 	if not enable_friendly_fire_avoidance:
 		return true
 
-	# Get the actual muzzle position where bullets will spawn
-	var muzzle_position := _get_muzzle_position()
-	var distance := muzzle_position.distance_to(target_position)
+	var direction := (target_position - global_position).normalized()
+	var distance := global_position.distance_to(target_position)
 
 	# Use direct space state to check if any enemies are in the firing line
 	var space_state := get_world_2d().direct_space_state
 	var query := PhysicsRayQueryParameters2D.new()
-	query.from = muzzle_position  # Start from weapon muzzle
+	query.from = global_position + direction * bullet_spawn_offset  # Start from bullet spawn point
 	query.to = target_position
 	query.collision_mask = 2  # Only check enemies (layer 2)
 	query.exclude = [get_rid()]  # Exclude self using RID
@@ -2611,7 +2835,7 @@ func _is_firing_line_clear_of_friendlies(target_position: Vector2) -> bool:
 
 	# Check if the hit position is before the target
 	var hit_position: Vector2 = result["position"]
-	var distance_to_hit := muzzle_position.distance_to(hit_position)
+	var distance_to_hit := global_position.distance_to(hit_position)
 
 	if distance_to_hit < distance - 20.0:  # 20 pixel tolerance
 		_log_debug("Friendly in firing line at distance %0.1f (target at %0.1f)" % [distance_to_hit, distance])
@@ -2623,14 +2847,13 @@ func _is_firing_line_clear_of_friendlies(target_position: Vector2) -> bool:
 ## Check if a bullet fired at the target position would be blocked by cover/obstacles.
 ## Returns true if the shot would likely hit the target, false if blocked by cover.
 func _is_shot_clear_of_cover(target_position: Vector2) -> bool:
-	# Get the actual muzzle position where bullets will spawn
-	var muzzle_position := _get_muzzle_position()
-	var distance := muzzle_position.distance_to(target_position)
+	var direction := (target_position - global_position).normalized()
+	var distance := global_position.distance_to(target_position)
 
 	# Use direct space state to check if obstacles block the shot
 	var space_state := get_world_2d().direct_space_state
 	var query := PhysicsRayQueryParameters2D.new()
-	query.from = muzzle_position  # Start from weapon muzzle
+	query.from = global_position + direction * bullet_spawn_offset  # Start from bullet spawn point
 	query.to = target_position
 	query.collision_mask = 4  # Only check obstacles (layer 3)
 
@@ -2641,7 +2864,7 @@ func _is_shot_clear_of_cover(target_position: Vector2) -> bool:
 
 	# Check if the obstacle is before the target position
 	var hit_position: Vector2 = result["position"]
-	var distance_to_hit := muzzle_position.distance_to(hit_position)
+	var distance_to_hit := global_position.distance_to(hit_position)
 
 	if distance_to_hit < distance - 10.0:  # 10 pixel tolerance
 		_log_debug("Shot blocked by cover at distance %0.1f (target at %0.1f)" % [distance_to_hit, distance])
@@ -2652,7 +2875,7 @@ func _is_shot_clear_of_cover(target_position: Vector2) -> bool:
 
 ## Check if there's an obstacle immediately in front of the enemy that would block bullets.
 ## This prevents shooting into walls that the enemy is flush against or very close to.
-## Uses raycasts from enemy center to muzzle, and from muzzle outward.
+## Uses a single raycast from enemy center to the bullet spawn position.
 func _is_bullet_spawn_clear(direction: Vector2) -> bool:
 	# Fail-open: allow shooting if physics is not ready
 	var world_2d := get_world_2d()
@@ -2662,31 +2885,19 @@ func _is_bullet_spawn_clear(direction: Vector2) -> bool:
 	if space_state == null:
 		return true
 
-	# Get the actual muzzle position where bullets will spawn
-	var muzzle_position := _get_muzzle_position()
+	# Check from enemy center to bullet spawn position plus a small buffer
+	var check_distance := bullet_spawn_offset + 5.0
 
-	# First, check if there's a wall between enemy center and muzzle
 	var query := PhysicsRayQueryParameters2D.new()
 	query.from = global_position
-	query.to = muzzle_position
+	query.to = global_position + direction * check_distance
 	query.collision_mask = 4  # Only check obstacles (layer 3)
 	query.exclude = [get_rid()]
 
 	var result := space_state.intersect_ray(query)
 	if not result.is_empty():
-		_log_debug("Bullet spawn blocked: wall between enemy and muzzle at %.1f" % [
+		_log_debug("Bullet spawn blocked: wall at distance %.1f" % [
 			global_position.distance_to(result["position"])])
-		return false
-
-	# Second, check a small distance beyond the muzzle in the firing direction
-	var check_distance := 10.0  # Small buffer beyond muzzle
-	query.from = muzzle_position
-	query.to = muzzle_position + direction * check_distance
-
-	result = space_state.intersect_ray(query)
-	if not result.is_empty():
-		_log_debug("Bullet spawn blocked: wall immediately in front of muzzle at %.1f" % [
-			muzzle_position.distance_to(result["position"])])
 		return false
 
 	return true
@@ -2748,8 +2959,9 @@ func _find_sidestep_direction_for_clear_shot(direction_to_player: Vector2) -> Ve
 func _should_shoot_at_target(target_position: Vector2) -> bool:
 	# Check if the immediate path to bullet spawn is clear
 	# This prevents shooting into walls the enemy is flush against
-	var direction := (target_position - global_position).normalized()
-	if not _is_bullet_spawn_clear(direction):
+	# Use weapon forward direction since that's where bullets actually spawn and travel
+	var weapon_direction := _get_weapon_forward_direction()
+	if not _is_bullet_spawn_clear(weapon_direction):
 		return false
 
 	# Check if friendlies are in the way
@@ -3420,18 +3632,29 @@ func _shoot() -> void:
 	if not _should_shoot_at_target(target_position):
 		return
 
-	# Get the weapon muzzle position (where bullet spawns)
-	var muzzle_position := _get_muzzle_position()
+	# Calculate bullet spawn position at weapon muzzle first
+	# We need this to calculate the correct bullet direction
+	var weapon_forward := _get_weapon_forward_direction()
+	var bullet_spawn_pos := _get_bullet_spawn_position(weapon_forward)
 
-	# Calculate direction from muzzle to target (not from enemy center)
-	# This ensures bullets fly toward the target from where they visually spawn
-	var direction := (target_position - muzzle_position).normalized()
+	# Calculate bullet direction FROM MUZZLE TO TARGET
+	# This ensures bullets actually fly toward the target, not just in the model's facing direction
+	# The model faces the player (center-to-center), and bullets fly from muzzle to target
+	var direction := (target_position - bullet_spawn_pos).normalized()
 
 	# Create bullet instance
 	var bullet := bullet_scene.instantiate()
+	bullet.global_position = bullet_spawn_pos
 
-	# Set bullet position at the weapon muzzle
-	bullet.global_position = muzzle_position
+	# Debug logging for weapon geometry analysis
+	if debug_logging:
+		var weapon_visual_pos := _weapon_sprite.global_position if _weapon_sprite else Vector2.ZERO
+		var model_rot := _enemy_model.rotation if _enemy_model else 0.0
+		var model_scale := _enemy_model.scale if _enemy_model else Vector2.ONE
+		_log_debug("SHOOT: enemy_pos=%v, target_pos=%v" % [global_position, target_position])
+		_log_debug("  model_rotation=%.2f rad (%.1f deg), model_scale=%v" % [model_rot, rad_to_deg(model_rot), model_scale])
+		_log_debug("  weapon_node_pos=%v, muzzle=%v" % [weapon_visual_pos, bullet_spawn_pos])
+		_log_debug("  direction=%v (angle=%.1f deg) - FROM MUZZLE TO TARGET" % [direction, rad_to_deg(direction.angle())])
 
 	# Set bullet direction (from muzzle to target)
 	bullet.direction = direction
@@ -3440,8 +3663,8 @@ func _shoot() -> void:
 	# This prevents enemies from detecting their own bullets in the threat sphere
 	bullet.shooter_id = get_instance_id()
 	# Set shooter position for distance-based penetration calculation
-	# Use muzzle position for accurate distance calculation
-	bullet.shooter_position = muzzle_position
+	# Use the bullet spawn position (weapon muzzle) for accurate distance calculation
+	bullet.shooter_position = bullet_spawn_pos
 
 	# Add bullet to the scene tree
 	get_tree().current_scene.add_child(bullet)
@@ -3668,10 +3891,10 @@ func on_hit_with_bullet_info(hit_direction: Vector2, caliber_data: Resource, has
 
 ## Shows a brief flash effect when hit.
 func _show_hit_flash() -> void:
-	if not _sprite:
+	if not _enemy_model:
 		return
 
-	_sprite.modulate = hit_flash_color
+	_set_all_sprites_modulate(hit_flash_color)
 
 	await get_tree().create_timer(hit_flash_duration).timeout
 
@@ -3682,12 +3905,23 @@ func _show_hit_flash() -> void:
 
 ## Updates the sprite color based on current health percentage.
 func _update_health_visual() -> void:
-	if not _sprite:
-		return
-
 	# Interpolate color based on health percentage
 	var health_percent := _get_health_percent()
-	_sprite.modulate = full_health_color.lerp(low_health_color, 1.0 - health_percent)
+	var color := full_health_color.lerp(low_health_color, 1.0 - health_percent)
+	_set_all_sprites_modulate(color)
+
+
+## Sets the modulate color on all enemy sprite parts.
+## @param color: The color to apply to all sprites.
+func _set_all_sprites_modulate(color: Color) -> void:
+	if _body_sprite:
+		_body_sprite.modulate = color
+	if _head_sprite:
+		_head_sprite.modulate = color
+	if _left_arm_sprite:
+		_left_arm_sprite.modulate = color
+	if _right_arm_sprite:
+		_right_arm_sprite.modulate = color
 
 
 ## Returns the current health as a percentage (0.0 to 1.0).
@@ -3695,6 +3929,62 @@ func _get_health_percent() -> float:
 	if _max_health <= 0:
 		return 0.0
 	return float(_current_health) / float(_max_health)
+
+
+## Calculates the bullet spawn position at the weapon's muzzle.
+## The muzzle is positioned relative to the weapon mount, offset in the weapon's forward direction.
+## @param direction: The normalized direction the bullet will travel (used for fallback only).
+## @return: The global position where the bullet should spawn.
+func _get_bullet_spawn_position(_direction: Vector2) -> Vector2:
+	# The rifle sprite (m16_rifle_topdown.png) is 64px long with offset (20, 0).
+	# The muzzle (right edge in local space) is at: offset.x + sprite_width/2 = 20 + 32 = 52px
+	# from the WeaponSprite node position.
+	var muzzle_local_offset := 52.0  # Distance from node to muzzle in local +X direction
+	if _weapon_sprite and _enemy_model:
+		# Get the weapon's forward direction from the enemy model rotation.
+		# We use Vector2.from_angle() instead of global_transform.x because the Y flip
+		# (scale.y negative for aiming left) would cause global_transform.x to be mirrored.
+		var weapon_forward := Vector2.from_angle(_enemy_model.rotation)
+		# Calculate muzzle offset accounting for enemy model scale
+		var scaled_muzzle_offset := muzzle_local_offset * enemy_model_scale
+		# Use weapon sprite's global position as base, then offset to reach the muzzle
+		var result := _weapon_sprite.global_position + weapon_forward * scaled_muzzle_offset
+		# Debug: Also compute where the visual muzzle should be using global_transform
+		if debug_logging:
+			var visual_forward := _weapon_sprite.global_transform.x.normalized()
+			var visual_muzzle := _weapon_sprite.global_position + visual_forward * scaled_muzzle_offset
+			_log_debug("  _get_bullet_spawn_position: weapon_forward=%v vs visual_forward=%v" % [weapon_forward, visual_forward])
+			_log_debug("  calculated_muzzle=%v vs visual_muzzle=%v, diff=%v" % [result, visual_muzzle, result - visual_muzzle])
+		return result
+	else:
+		# Fallback to old behavior if weapon sprite or enemy model not found
+		return global_position + _direction * bullet_spawn_offset
+
+
+## Returns the weapon's forward direction in world coordinates.
+## This is the direction the weapon barrel is visually pointing.
+##
+## NOTE: This is used to calculate the muzzle position, NOT the bullet direction.
+## The actual bullet direction is calculated in _shoot() as (target - muzzle).normalized()
+## to ensure bullets fly toward the target, not just in the model's facing direction.
+##
+## IMPORTANT: We calculate direction from the EnemyModel's rotation angle, NOT from
+## global_transform.x. This is because when the enemy model is vertically flipped
+## (scale.y negative for aiming left), global_transform.x becomes reflected/mirrored.
+##
+## @returns: Normalized direction vector the weapon is visually pointing.
+func _get_weapon_forward_direction() -> Vector2:
+	if _enemy_model:
+		# Use the enemy model's rotation to calculate the forward direction.
+		# This correctly handles the vertical flip case (scale.y negative) where
+		# global_transform.x would give an incorrect mirrored direction.
+		# The enemy model rotation is already set to face the player/target.
+		return Vector2.from_angle(_enemy_model.rotation)
+	else:
+		# Fallback: calculate direction to player
+		if _player and is_instance_valid(_player):
+			return (_player.global_position - global_position).normalized()
+		return Vector2.RIGHT  # Default fallback
 
 
 ## Updates the weapon sprite rotation to match the direction the enemy will shoot.
@@ -3727,44 +4017,6 @@ func _update_weapon_sprite_rotation() -> void:
 	# This happens when the angle is greater than 90 degrees or less than -90 degrees
 	var aiming_left := absf(aim_angle) > PI / 2.0
 	_weapon_sprite.flip_v = aiming_left
-
-
-## Returns the weapon muzzle position in world coordinates.
-## The muzzle is at the end of the rifle barrel where bullets should spawn.
-##
-## The weapon sprite (m16_rifle_topdown.png) is 64px wide with offset Vector2(20, 0).
-## The sprite is centered at the node position + offset, so the muzzle (right edge)
-## is at: sprite_position + weapon_forward * (offset.x + sprite_width/2)
-## = sprite_position + weapon_forward * (20 + 32) = sprite_position + weapon_forward * 52
-##
-## However, since the weapon sprite can rotate and flip, we use the weapon's
-## actual forward direction (from its global transform) to calculate the muzzle position.
-func _get_muzzle_position() -> Vector2:
-	if not _weapon_sprite:
-		# Fallback: return position in direction of aim
-		if _player and is_instance_valid(_player):
-			var direction := (_player.global_position - global_position).normalized()
-			return global_position + direction * bullet_spawn_offset
-		return global_position + Vector2.RIGHT * bullet_spawn_offset
-
-	# Calculate the weapon's forward direction in world space.
-	# When the sprite is flipped vertically (flip_v = true), we need to account for this.
-	# The weapon's local +X axis points toward the muzzle (right side of sprite).
-	var weapon_forward: Vector2
-	if _weapon_sprite.flip_v:
-		# When flipped vertically, the local X axis is still correct for rotation,
-		# but we need to use the global transform which accounts for the flip.
-		# However, since flip_v only affects rendering (not the transform),
-		# we calculate the direction from the aim angle directly.
-		var aim_angle := _weapon_sprite.global_rotation
-		weapon_forward = Vector2.from_angle(aim_angle)
-	else:
-		weapon_forward = Vector2.from_angle(_weapon_sprite.global_rotation)
-
-	# The muzzle is 52px from the weapon sprite's position along its forward direction.
-	# (20px offset + 32px half-width of 64px sprite)
-	var muzzle_offset := 52.0
-	return _weapon_sprite.global_position + weapon_forward * muzzle_offset
 
 
 ## Returns the effective detection delay based on difficulty.
@@ -4123,16 +4375,15 @@ func _draw() -> void:
 		var to_player := _player.global_position - global_position
 		draw_line(Vector2.ZERO, to_player, color_to_player, 1.5)
 
-		# Draw muzzle position (where bullets spawn) and check if blocked
+		# Draw bullet spawn point and check if blocked
 		var direction_to_player := to_player.normalized()
-		var muzzle_pos := _get_muzzle_position()
-		var muzzle_local := muzzle_pos - global_position  # Convert to local for drawing
+		var spawn_point := direction_to_player * bullet_spawn_offset
 		if _is_bullet_spawn_clear(direction_to_player):
-			draw_circle(muzzle_local, 5.0, color_bullet_spawn)
+			draw_circle(spawn_point, 5.0, color_bullet_spawn)
 		else:
-			# Draw X for blocked muzzle
-			draw_line(muzzle_local + Vector2(-5, -5), muzzle_local + Vector2(5, 5), color_blocked, 2.0)
-			draw_line(muzzle_local + Vector2(-5, 5), muzzle_local + Vector2(5, -5), color_blocked, 2.0)
+			# Draw X for blocked spawn point
+			draw_line(spawn_point + Vector2(-5, -5), spawn_point + Vector2(5, 5), color_blocked, 2.0)
+			draw_line(spawn_point + Vector2(-5, 5), spawn_point + Vector2(5, -5), color_blocked, 2.0)
 
 	# Draw line to cover position if we have one
 	if _has_valid_cover:
