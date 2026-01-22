@@ -400,6 +400,81 @@ The player's weapon is **integrated into the arm sprites** (player_left_arm.png 
 
 10. **Compare Proportions with Reference:** When adding separate weapon sprites, compare the final rendered size (after scaling) with how weapons appear on reference characters (player). The player's integrated weapon was much smaller than the separate 64px rifle sprite.
 
+### Phase 9: Fourth User Feedback (2026-01-22T11:47:16Z)
+
+User @Jhon-Crow tested the solution again and reported two issues:
+
+1. **"теперь оружие врагов вообще не отображается"**
+   - Translation: Now enemy weapons are not displayed at all
+   - The smaller weapon sprite `m16_topdown_small.png` was not visible
+
+2. **"сломался особый последний шанс (пули игрока перестали останавливаться)"**
+   - Translation: The special last chance is broken (player bullets stopped stopping)
+   - The Last Chance effect was not properly freezing bullets
+
+Attached game log:
+- `game_log_20260122_114716.txt`
+
+### Phase 10: Root Cause Analysis and Fix (2026-01-22)
+
+## Root Cause Analysis (Phase 9-10)
+
+### Issue 7: Enemy Weapons Not Displaying
+
+**Root Cause:** The smaller weapon sprite `m16_topdown_small.png` (32x8 pixels) was being obscured by:
+1. Very small size compared to body parts
+2. z-index of 2 being lower than arms (z-index 4)
+3. Dark color (30, 30, 30 RGB) making it hard to see
+
+The original larger sprite `m16_rifle_topdown.png` (64x16 pixels) was clearly visible.
+
+**Fix Applied:**
+1. Reverted `Enemy.tscn` to use the original larger sprite `m16_rifle_topdown.png`
+2. Restored weapon offset from `Vector2(10, 0)` back to `Vector2(20, 0)`
+3. Updated `_get_bullet_spawn_position()` muzzle offset from 22px back to 44px
+
+### Issue 8: Last Chance Effect Not Freezing Bullets
+
+**Root Cause:** The feature branch `issue-217-6e363ec134f9` was created before recent fixes were merged to main. The branch was missing commits:
+- `154652e` - Fix Mini UZI direction and Last Chance mode bullet freezing
+- `830769a` - Fix shotgun pellets not freezing in last chance mode
+
+These commits added proper detection for pellets and other bullet types in `last_chance_effects_manager.gd`:
+```gdscript
+# Before (missing pellet detection):
+if "bullet" in script_path.to_lower():
+
+# After (with pellet detection):
+if "bullet" in script_path.to_lower() or "pellet" in script_path.to_lower():
+```
+
+**Fix Applied:**
+1. Merged main branch into feature branch to incorporate latest fixes
+2. The Last Chance effect now properly detects and freezes all bullet types
+
+## Updated Summary of All Issues and Fixes
+
+| Issue | Root Cause | Fix |
+|-------|-----------|-----|
+| 1. Enemy smaller than player | Missing 1.3x scale multiplier | Added `enemy_model_scale` export and scale in `_ready()` |
+| 2. No walking animation | Old script references + missing animation code | Updated references, added `_update_walk_animation()` |
+| 3. Weapon at 90° angle | Competing rotation systems | Removed `_update_weapon_sprite_rotation()` call |
+| 4. Bullets from center | Spawning from enemy position | Added `_get_bullet_spawn_position()` using weapon mount |
+| 5. Walking backwards | Enemy sprites face opposite direction (PI offset) | Added PI to rotation angle |
+| 6. M16 too large | Using 64px sprite vs player's integrated smaller rifle | Changed to `m16_topdown_small.png` (32px) |
+| 7. Weapon not visible | Smaller sprite obscured by body parts | Reverted to original larger sprite `m16_rifle_topdown.png` |
+| 8. Last Chance not freezing bullets | Branch missing pellet detection fix from main | Merged main branch with latest fixes |
+
+## Additional Lessons Learned
+
+11. **Test Visual Changes with Actual Gameplay:** The smaller weapon sprite looked correct in isolation but was invisible during actual gameplay due to overlapping body parts and z-index ordering.
+
+12. **Keep Feature Branches Updated:** Long-running feature branches may miss important fixes from main. Regularly merging main ensures all bug fixes are incorporated.
+
+13. **Consider Visual Contrast:** Dark sprites on dark backgrounds or small sprites under other elements may become invisible. Test visual changes at runtime, not just in the editor.
+
+14. **Balance Visual Accuracy vs. Visibility:** Sometimes gameplay clarity is more important than visual accuracy. A larger weapon sprite that's visible is better than a "correctly sized" sprite that can't be seen.
+
 ## Related Files
 
 - [issue-data.json](./issue-data.json) - Original issue data
@@ -411,3 +486,4 @@ The player's weapon is **integrated into the arm sprites** (player_left_arm.png 
 - [logs/game_log_20260122_112258.txt](./logs/game_log_20260122_112258.txt) - Game log from phase 7 testing
 - [logs/game_log_20260122_112342.txt](./logs/game_log_20260122_112342.txt) - Game log from phase 7 testing
 - [logs/game_log_20260122_112428.txt](./logs/game_log_20260122_112428.txt) - Game log from phase 7 testing
+- [logs/game_log_20260122_114716.txt](./logs/game_log_20260122_114716.txt) - Game log from phase 9 testing
