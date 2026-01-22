@@ -27,7 +27,7 @@ public enum ShotgunActionState
 
 /// <summary>
 /// Shotgun reload state for shell-by-shell loading.
-/// Reload sequence: RMB drag UP (open bolt) → [MMB + RMB drag DOWN]×N (load shells) → RMB drag DOWN (close bolt)
+/// Reload sequence: RMB drag UP (open bolt) → [MMB drag DOWN]×N (load shells) → RMB drag DOWN (close bolt)
 /// </summary>
 public enum ShotgunReloadState
 {
@@ -42,8 +42,8 @@ public enum ShotgunReloadState
     WaitingToOpen,
 
     /// <summary>
-    /// Bolt open - ready to load shells with MMB + RMB drag DOWN.
-    /// Can also close immediately with RMB drag DOWN (without MMB).
+    /// Bolt open - ready to load shells with MMB drag DOWN.
+    /// Close bolt with RMB drag DOWN.
     /// </summary>
     Loading,
 
@@ -60,8 +60,8 @@ public enum ShotgunReloadState
 /// Pellets fire in a "cloud" pattern with spatial distribution.
 ///
 /// Shooting sequence: LMB (fire) → RMB drag UP (eject shell) → RMB drag DOWN (chamber)
-/// Reload sequence: RMB drag UP (open bolt) → [MMB + RMB drag DOWN]×N (load shells) → RMB drag DOWN (close bolt)
-/// Note: After opening bolt, can close immediately with RMB drag DOWN (skips loading) if shells present.
+/// Reload sequence: RMB drag UP (open bolt) → [MMB drag DOWN]×N (load shells) → RMB drag DOWN (close bolt)
+/// Note: After opening bolt, can close immediately with RMB drag DOWN (skips loading).
 /// </summary>
 public partial class Shotgun : BaseWeapon
 {
@@ -148,16 +148,20 @@ public partial class Shotgun : BaseWeapon
     private bool _isDragging = false;
 
     /// <summary>
-    /// Whether MMB is currently held (for shell loading).
+    /// Whether MMB is currently held.
     /// </summary>
     private bool _isMiddleMouseHeld = false;
 
     /// <summary>
-    /// Whether MMB was held at any point during the current drag (for shell loading).
-    /// This is needed because users often release MMB and RMB at the same time,
-    /// so we need to track if MMB was held during the drag, not just at release.
+    /// Whether a MMB drag gesture is currently active (for shell loading).
+    /// Shell loading is now done with MMB drag down (not RMB + MMB).
     /// </summary>
-    private bool _wasMiddleMouseHeldDuringDrag = false;
+    private bool _isMiddleMouseDragging = false;
+
+    /// <summary>
+    /// Position where MMB drag started for shell loading gesture detection.
+    /// </summary>
+    private Vector2 _mmbDragStartPosition = Vector2.Zero;
 
     /// <summary>
     /// Whether we're on the tutorial level (infinite shells).
@@ -329,15 +333,12 @@ public partial class Shotgun : BaseWeapon
         // Update aim direction
         UpdateAimDirection();
 
-        // Handle MMB for shell loading during reload
-        // IMPORTANT: This must be called BEFORE HandleDragGestures() so that
-        // _isMiddleMouseHeld is up-to-date when we check it during drag processing.
-        // Previously, this was called AFTER HandleDragGestures(), which caused
-        // MMB presses on the same frame as RMB drag start to be missed.
-        HandleMiddleMouseButton();
-
-        // Handle RMB drag gestures for pump-action and reload
+        // Handle RMB drag gestures for pump-action and reload (bolt open/close)
         HandleDragGestures();
+
+        // Handle MMB drag gestures for shell loading during reload
+        // This is separate from RMB handling - MMB drag DOWN loads shells
+        HandleMiddleMouseDrag();
     }
 
     /// <summary>
@@ -380,7 +381,8 @@ public partial class Shotgun : BaseWeapon
     /// <summary>
     /// Handles RMB drag gestures for pump-action cycling and reload.
     /// Pump: Drag UP = eject shell, Drag DOWN = chamber round
-    /// Reload: Drag UP = open bolt, Drag DOWN = load shell (with MMB) or close bolt
+    /// Reload: Drag UP = open bolt, Drag DOWN = close bolt
+    /// Note: Shell loading is done with MMB drag DOWN (handled in HandleMiddleMouseDrag).
     ///
     /// Supports continuous gestures: hold RMB, drag UP (open bolt), then without
     /// releasing RMB, drag DOWN (close bolt) - all in one continuous movement.
@@ -394,10 +396,6 @@ public partial class Shotgun : BaseWeapon
             {
                 _dragStartPosition = GetGlobalMousePosition();
                 _isDragging = true;
-                // Initialize _wasMiddleMouseHeldDuringDrag based on CURRENT MMB state
-                // This fixes the issue where MMB pressed at the exact same frame as RMB drag start
-                // would be missed because we used to reset to false unconditionally
-                _wasMiddleMouseHeldDuringDrag = _isMiddleMouseHeld;
             }
             else
             {
@@ -411,24 +409,6 @@ public partial class Shotgun : BaseWeapon
                 {
                     // Gesture processed - reset drag start for next gesture
                     _dragStartPosition = currentPosition;
-                    // Reset MMB tracking for the new gesture segment
-                    bool prevMMBState = _wasMiddleMouseHeldDuringDrag;
-                    _wasMiddleMouseHeldDuringDrag = _isMiddleMouseHeld;
-                    if (VerboseInputLogging && prevMMBState != _wasMiddleMouseHeldDuringDrag)
-                    {
-                        GD.Print($"[Shotgun.FIX#243] MMB tracking reset after mid-drag gesture: {prevMMBState} -> {_wasMiddleMouseHeldDuringDrag}");
-                    }
-                }
-            }
-
-            // Track if MMB is held at any point during the drag
-            // This fixes the timing issue where users release both buttons simultaneously
-            if (_isMiddleMouseHeld && !_wasMiddleMouseHeldDuringDrag)
-            {
-                _wasMiddleMouseHeldDuringDrag = true;
-                if (VerboseInputLogging)
-                {
-                    GD.Print("[Shotgun.FIX#243] MMB pressed during drag - tracking set to true");
                 }
             }
         }
@@ -439,11 +419,7 @@ public partial class Shotgun : BaseWeapon
             Vector2 dragVector = dragEnd - _dragStartPosition;
             _isDragging = false;
 
-            GD.Print($"[Shotgun.FIX#243] RMB released - processing drag gesture (wasMMBDuringDrag={_wasMiddleMouseHeldDuringDrag})");
             ProcessDragGesture(dragVector);
-
-            // Reset the flag after processing
-            _wasMiddleMouseHeldDuringDrag = false;
         }
     }
 
@@ -452,9 +428,8 @@ public partial class Shotgun : BaseWeapon
     /// This enables continuous drag-and-drop: hold RMB, drag up, then drag down
     /// all in one fluid motion without releasing RMB.
     ///
-    /// Note: Shell loading (MMB + drag down) intentionally requires releasing RMB
-    /// to preserve the original shell loading behavior. Only bolt open/close
-    /// operations are supported mid-drag.
+    /// Note: Shell loading is done with MMB drag DOWN (separate from RMB gestures).
+    /// RMB gestures only control bolt open/close operations.
     /// </summary>
     /// <param name="dragVector">Current drag vector from start position.</param>
     /// <returns>True if a gesture was processed, false otherwise.</returns>
@@ -576,7 +551,7 @@ public partial class Shotgun : BaseWeapon
                         ReloadState = ShotgunReloadState.Loading;
                         PlayActionOpenSound();
                         EmitSignal(SignalName.ReloadStateChanged, (int)ReloadState);
-                        GD.Print("[Shotgun] Mid-drag bolt opened - continue dragging DOWN to close (or use MMB to load)");
+                        GD.Print("[Shotgun] Mid-drag bolt opened - use MMB drag DOWN to load shells, then RMB drag DOWN to close");
                         gestureProcessed = true;
                     }
                     break;
@@ -584,29 +559,12 @@ public partial class Shotgun : BaseWeapon
                 case ShotgunReloadState.Loading:
                     if (isDragDown)
                     {
-                        // FIX for issue #243: In Loading state with drag DOWN, NEVER process
-                        // mid-drag gesture. Always wait for RMB release to give user time to
-                        // press/hold MMB for shell loading.
-                        //
-                        // Root cause: The mid-drag gesture was processed as soon as drag
-                        // threshold was reached. If user dragged down without MMB held at
-                        // that exact moment, the bolt would close prematurely - even if the
-                        // user intended to hold MMB for shell loading.
-                        //
-                        // With this fix:
-                        // - User opens bolt (RMB drag UP)
-                        // - User can take their time to press MMB
-                        // - User does RMB drag DOWN (with or without MMB)
-                        // - On RMB release, ProcessReloadGesture() handles it correctly:
-                        //   - If MMB is/was held: load shell (bolt stays open)
-                        //   - If MMB was never held: close bolt
-                        //
-                        // This ensures that bolt closing ONLY happens via release-based
-                        // gesture, where MMB state is properly tracked throughout the drag.
-                        bool shouldLoadShell = _wasMiddleMouseHeldDuringDrag || _isMiddleMouseHeld;
-                        // DIAGNOSTIC: Log once per mid-drag detection to verify fix is active
-                        GD.Print($"[Shotgun.FIX#243] Mid-drag DOWN detected (Loading state): MMB tracked={shouldLoadShell}, deferring to RMB release");
-                        return false;
+                        // In Loading state, RMB drag DOWN always closes the bolt.
+                        // Shell loading is done with MMB drag DOWN (separate gesture).
+                        // This allows mid-drag close: open bolt (RMB UP) → close bolt (RMB DOWN)
+                        // without needing to release RMB in between.
+                        CompleteReload();
+                        gestureProcessed = true;
                     }
                     break;
 
@@ -735,8 +693,8 @@ public partial class Shotgun : BaseWeapon
 
     /// <summary>
     /// Processes drag gesture for reload sequence.
-    /// Reload: RMB drag up (open bolt) → [MMB + RMB drag down]×N (load) → RMB drag down (close bolt)
-    /// Note: Can close immediately with RMB drag down (without MMB) if shells are present.
+    /// Reload: RMB drag up (open bolt) → [MMB drag down]×N (load shells) → RMB drag down (close bolt)
+    /// Note: Shell loading is now done with MMB drag down (handled in HandleMiddleMouseDrag).
     /// </summary>
     private void ProcessReloadGesture(bool isDragUp, bool isDragDown)
     {
@@ -749,32 +707,17 @@ public partial class Shotgun : BaseWeapon
                     ReloadState = ShotgunReloadState.Loading;
                     PlayActionOpenSound();
                     EmitSignal(SignalName.ReloadStateChanged, (int)ReloadState);
-                    GD.Print("[Shotgun] Bolt opened for loading - MMB + RMB drag down to load shells, or RMB drag down to close");
+                    GD.Print("[Shotgun] Bolt opened for loading - MMB drag down to load shells, or RMB drag down to close");
                 }
                 break;
 
             case ShotgunReloadState.Loading:
                 if (isDragDown)
                 {
-                    // Use _wasMiddleMouseHeldDuringDrag instead of _isMiddleMouseHeld
-                    // This fixes the timing issue where users release MMB and RMB simultaneously
-                    bool shouldLoadShell = _wasMiddleMouseHeldDuringDrag || _isMiddleMouseHeld;
-
-                    // DIAGNOSTIC: Always log the decision point to verify fix is working
-                    GD.Print($"[Shotgun.FIX#243] RMB release in Loading state: wasMMBDuringDrag={_wasMiddleMouseHeldDuringDrag}, isMMBHeld={_isMiddleMouseHeld} => shouldLoadShell={shouldLoadShell}");
-
-                    if (shouldLoadShell)
-                    {
-                        // Load a shell (MMB + RMB drag down)
-                        GD.Print("[Shotgun.FIX#243] Loading shell (MMB was held during drag)");
-                        LoadShell();
-                    }
-                    else
-                    {
-                        // Close bolt without MMB - finish reload
-                        GD.Print("[Shotgun.FIX#243] Closing bolt (MMB was NOT held during drag)");
-                        CompleteReload();
-                    }
+                    // RMB drag down in Loading state = close bolt
+                    // Shell loading is done with MMB drag down (separate gesture)
+                    GD.Print("[Shotgun] RMB drag down - closing bolt");
+                    CompleteReload();
                 }
                 break;
 
@@ -789,11 +732,79 @@ public partial class Shotgun : BaseWeapon
     }
 
     /// <summary>
-    /// Handles middle mouse button for shell loading.
+    /// Handles MMB (middle mouse button) drag gestures for shell loading.
+    /// When in Loading state, MMB drag DOWN loads a shell into the tube magazine.
+    /// This is separate from RMB gestures which handle bolt open/close.
     /// </summary>
-    private void HandleMiddleMouseButton()
+    private void HandleMiddleMouseDrag()
     {
+        bool wasMiddleMouseHeld = _isMiddleMouseHeld;
         _isMiddleMouseHeld = Input.IsMouseButtonPressed(MouseButton.Middle);
+
+        // Check for MMB press (start drag)
+        if (_isMiddleMouseHeld)
+        {
+            if (!_isMiddleMouseDragging)
+            {
+                // Start new MMB drag
+                _mmbDragStartPosition = GetGlobalMousePosition();
+                _isMiddleMouseDragging = true;
+
+                if (VerboseInputLogging)
+                {
+                    GD.Print($"[Shotgun.MMB] MMB drag started at {_mmbDragStartPosition}");
+                }
+            }
+            else
+            {
+                // Already dragging - check for mid-drag gesture completion
+                Vector2 currentPosition = GetGlobalMousePosition();
+                Vector2 dragVector = currentPosition - _mmbDragStartPosition;
+
+                // Only process in Loading state
+                if (ReloadState == ShotgunReloadState.Loading)
+                {
+                    // Check if drag is long enough and primarily vertical down
+                    if (dragVector.Length() >= MinDragDistance &&
+                        Mathf.Abs(dragVector.Y) > Mathf.Abs(dragVector.X) &&
+                        dragVector.Y > 0) // Down
+                    {
+                        // MMB drag DOWN - load a shell
+                        GD.Print("[Shotgun] MMB drag DOWN - loading shell");
+                        LoadShell();
+
+                        // Reset drag start for next shell
+                        _mmbDragStartPosition = currentPosition;
+                    }
+                }
+            }
+        }
+        else if (_isMiddleMouseDragging)
+        {
+            // MMB released - evaluate the drag gesture
+            Vector2 dragEnd = GetGlobalMousePosition();
+            Vector2 dragVector = dragEnd - _mmbDragStartPosition;
+            _isMiddleMouseDragging = false;
+
+            // Only process in Loading state
+            if (ReloadState == ShotgunReloadState.Loading)
+            {
+                // Check if drag is long enough and primarily vertical down
+                if (dragVector.Length() >= MinDragDistance &&
+                    Mathf.Abs(dragVector.Y) > Mathf.Abs(dragVector.X) &&
+                    dragVector.Y > 0) // Down
+                {
+                    // MMB drag DOWN - load a shell
+                    GD.Print("[Shotgun] MMB drag DOWN (on release) - loading shell");
+                    LoadShell();
+                }
+            }
+
+            if (VerboseInputLogging)
+            {
+                GD.Print($"[Shotgun.MMB] MMB drag ended, vector={dragVector}");
+            }
+        }
     }
 
     #endregion
@@ -833,7 +844,7 @@ public partial class Shotgun : BaseWeapon
         PlayActionOpenSound();
         EmitSignal(SignalName.ReloadStateChanged, (int)ReloadState);
         EmitSignal(SignalName.ReloadStarted);
-        GD.Print("[Shotgun] Bolt opened for loading - MMB + RMB drag DOWN to load shells, or RMB drag DOWN to close");
+        GD.Print("[Shotgun] Bolt opened for loading - MMB drag DOWN to load shells, or RMB drag DOWN to close");
     }
 
     /// <summary>
@@ -1331,7 +1342,7 @@ public partial class Shotgun : BaseWeapon
                 return ReloadState switch
                 {
                     ShotgunReloadState.WaitingToOpen => "RMB drag up to open",
-                    ShotgunReloadState.Loading => "MMB + RMB drag down to load (or RMB down to close)",
+                    ShotgunReloadState.Loading => "MMB drag down to load, RMB down to close",
                     ShotgunReloadState.WaitingToClose => "RMB drag down to close",
                     _ => "Reloading..."
                 };
