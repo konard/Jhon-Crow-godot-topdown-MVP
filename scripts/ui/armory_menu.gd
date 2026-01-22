@@ -34,7 +34,7 @@ const WEAPONS: Dictionary = {
 	},
 	"shotgun": {
 		"name": "Shotgun",
-		"icon_path": "res://assets/sprites/weapons/shotgun.png",
+		"icon_path": "res://assets/sprites/weapons/shotgun_icon.png",
 		"unlocked": true,
 		"description": "Pump-action shotgun - 6-12 pellets per shot, 15° spread, no wall penetration. Press LMB to fire."
 	},
