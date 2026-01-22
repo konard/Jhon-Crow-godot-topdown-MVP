@@ -95,6 +95,36 @@
    - Modified `SetAllSpritesModulate()` to use this color for right arm sprite
    - This mirrors the GDScript fix exactly
 
+### Feedback Session (Session 6) - ARM COLOR MISMATCH FIX
+1. **Owner feedback:**
+   - "теперь повязку видно" (armband is now visible) ✓
+   - "обновлённое предплечье отличается от цвета другой руки, выглядит как что-то чужеродное" (the updated forearm differs from the other arm's color, looks foreign)
+   - "красное добавилось на плече (а не должно)" (red appeared on shoulder, shouldn't have)
+   - "должна добавиться только повязка на предплечье, больше ничего менять не надо" (only armband on forearm should be added, nothing else should change)
+   - Game log attached: `game_log_20260122_140453.txt`
+2. **Root cause:**
+   - Applying `Color(1.0, 0.7, 0.7)` modulate to the **entire right arm sprite** caused ALL pixels (skin, sleeve) to look pink/different
+   - This made the arm look "foreign" compared to the left arm
+3. **Solution implemented:**
+   - Created **separate armband sprite** (`player_armband.png`) containing only the red band pixels
+   - Restored `player_right_arm.png` to original (green sleeve, no red)
+   - Added `Armband` child node to `RightArm` in both Player.tscn files
+   - Both arms now use the same health-based color modulate (identical appearance)
+   - Armband sprite doesn't inherit arm modulate - keeps its bright red color
+
+### Feedback Session (Session 7) - ARMBAND BRIGHTNESS RESTORATION
+1. **Owner feedback:**
+   - "верни предыдущую яркость только красной повязке игрока, всё остальное нормально" (return previous brightness only to the player's red armband, everything else is normal)
+   - Game log attached: `game_log_20260122_142217.txt`
+2. **Root cause:**
+   - After separating the armband into its own sprite, it no longer had the brightness-enhancing modulate
+   - The armband was using default modulate (1.0, 1.0, 1.0, 1.0) - no brightness boost
+   - This made it too dim to be visible during normal gameplay
+3. **Solution implemented:**
+   - Added `modulate = Color(1, 0.7, 0.7, 1)` to the Armband node in both Player.tscn files
+   - This restores the red-emphasizing brightness that made the armband visible
+   - Arms remain identical (both use health color modulate) - only the armband sprite is brightened
+
 ## Root Cause Analysis
 
 ### Why the Player Was Hard to See
@@ -184,6 +214,13 @@ func _saturate_color(color: Color, multiplier: float) -> Color:
 - `docs/case-studies/issue-234/logs/game_log_20260122_132449.txt` - Game log from Session 3
 - `docs/case-studies/issue-234/logs/game_log_20260122_133636.txt` - Game log from Session 4
 - `docs/case-studies/issue-234/logs/game_log_20260122_135613.txt` - Game log from Session 5
+- `docs/case-studies/issue-234/logs/game_log_20260122_140453.txt` - Game log from Session 6
+- `docs/case-studies/issue-234/logs/game_log_20260122_142217.txt` - Game log from Session 7
+- `assets/sprites/characters/player/player_armband.png` - Separate armband sprite (Session 6)
+
+### Scene Files Modified (Session 6 & 7)
+- `scenes/characters/Player.tscn` - Added Armband child node under RightArm with modulate
+- `scenes/characters/csharp/Player.tscn` - Same change for C# version
 
 ## Lessons Learned
 
@@ -196,6 +233,8 @@ func _saturate_color(color: Color, multiplier: float) -> Color:
 7. **CRITICAL: Check modulate colors!** When debugging visibility issues, always check if sprite modulate colors are affecting the expected colors. A blue modulate will effectively mask red pixels!
 8. **Trace through the full rendering pipeline:** The issue wasn't with the PNG, import, or effects - it was with the health color system that affects ALL sprites
 9. **CRITICAL: Check BOTH implementations!** When a project has both GDScript (.gd) and C# (.cs) versions of the same class, BOTH must be updated. The owner's comment "возможно... C#" (possibly C#) was a crucial hint that led to finding the root cause
+10. **Modulate affects ALL pixels in a sprite:** When you need to brighten just ONE part of a sprite (like an armband), you need a SEPARATE sprite for that part. Otherwise, the modulate will affect the entire sprite and make other parts look wrong
+11. **Separate sprites for different color treatments:** Use child sprites when different parts of a character need different color treatments (e.g., armband needs brightness boost, arm needs health color tint)
 
 ## Related Issues
 
