@@ -245,11 +245,61 @@ The cooldown is set after:
 - `CompleteReload()` - When bolt is closed to complete reload
 - Pump-action down gestures - Both mid-drag and release-based
 
+---
+
+### Feedback #4 from @Jhon-Crow (2026-01-22 06:30)
+
+> "патронов на карте здание всё ещё 8 + 24"
+> "всё ещё есть случайное открывание затвора."
+> "проверь, всё ли правильно добавлено/экспортировано, нет ли конфликта между языками."
+
+**Translation:**
+- "Building map still has 8 + 24 shells"
+- "Still experiencing accidental bolt opening"
+- "Check if everything is exported correctly, whether there's a conflict between languages"
+
+### Root Cause Analysis - Shell Count Issue
+
+**Investigation findings:**
+
+The `ShotgunData.tres` resource file correctly shows `MaxReserveAmmo = 12`, but the actual reserve shells were being calculated differently:
+
+1. `BaseWeapon._Ready()` calls `MagazineInventory.Initialize(StartingMagazineCount, WeaponData.MagazineSize, fillAllMagazines: true)`
+2. The default `StartingMagazineCount` in `BaseWeapon.cs` is 4
+3. This created 4 magazines × 8 shells = 32 shells total (8 in tube + 24 reserve)
+
+**The actual issue**: The shotgun was using the magazine-based system from `BaseWeapon` instead of properly using `MaxReserveAmmo` for its reserve shells.
+
+### Resolution - Shell Count Fix
+
+Modified `Shotgun._Ready()` to re-initialize the `MagazineInventory` after `base._Ready()`:
+
+```csharp
+// In Shotgun._Ready():
+if (WeaponData != null)
+{
+    int maxReserve = WeaponData.MaxReserveAmmo;
+    // Create a single "magazine" that acts as the reserve shell pool
+    MagazineInventory.Initialize(1, maxReserve, fillAllMagazines: true);
+    GD.Print($"[Shotgun] Initialized reserve shells: {maxReserve} (from WeaponData.MaxReserveAmmo)");
+}
+```
+
+This properly initializes the reserve shell pool to use `MaxReserveAmmo` (12) instead of the magazine-based calculation (24).
+
+### Accidental Bolt Opening - Ongoing Investigation
+
+The user reports accidental bolt opening still occurs even with 400ms cooldown. Possible causes being investigated:
+- Drag start position reset timing after mid-drag gesture completion
+- Cooldown window may need further tuning
+- Potential race condition between gesture detection and state transitions
+
 ## Logs
 
 - `logs/game_log_20260122_085458.txt` - User testing log (Feedback #1)
 - `logs/game_log_20260122_091126.txt` - User testing log (Feedback #3)
 - `logs/game_log_20260122_091335.txt` - User testing log (Feedback #3)
+- `logs/game_log_20260122_092829.txt` - User testing log (Feedback #4)
 - `logs/solution-draft-log-pr-1769061104361.txt` - AI solution draft log
 
 ## Summary of Changes
@@ -260,3 +310,4 @@ The cooldown is set after:
 | `008f283` | Preserve original shell loading behavior in mid-drag gestures |
 | `afcbcba` | Add cooldown protection to prevent accidental bolt reopening |
 | `31acef1` | Increase bolt close cooldown from 250ms to 400ms |
+| `3aadaea` | Fix shotgun shell count to use MaxReserveAmmo from WeaponData |
