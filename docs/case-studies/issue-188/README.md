@@ -463,3 +463,133 @@ User should rebuild and test the armory menu to verify:
 1. All items (M16, Flashbang, Frag Grenade, Shotgun, locked weapons) are displayed
 2. Clicking Frag Grenade restarts the level and selects it
 3. Both weapon and grenade selections are highlighted correctly
+
+---
+
+## Phase 9: Final Root Cause - C# Player Not Using GrenadeManager (2026-01-22 06:06)
+
+### New Log: `game_log_20260122_060646.txt`
+
+User reported: "похоже граната не берётся" (it seems the grenade is not being picked up/selected)
+
+### Log Analysis
+
+The log shows that:
+1. ✅ Armory menu now works correctly
+2. ✅ Grenade selection is working (`[GrenadeManager] Grenade type changed from Flashbang to Frag Grenade`)
+3. ✅ Level restarts after grenade type change
+4. ❌ **But the grenade thrown is still FlashbangGrenade!**
+
+Key evidence from log:
+```
+[06:06:56] [INFO] [GrenadeManager] Grenade type changed from Flashbang to Frag Grenade
+[06:06:56] [INFO] [GrenadeManager] Restarting level due to grenade type change
+...
+[06:07:21] [INFO] [SoundPropagation] Sound emitted: type=EXPLOSION, source=NEUTRAL (FlashbangGrenade)
+```
+
+The grenade explosion still shows "FlashbangGrenade" even though Frag Grenade was selected!
+
+### Critical Finding: C# Player Script Doesn't Use GrenadeManager
+
+Searching for the log message `[Player.Grenade] Grenade scene loaded` revealed it comes from:
+- **`Scripts/Characters/Player.cs:274`** (C# script)
+- NOT from `scripts/characters/player.gd` (GDScript)
+
+The user is running the **C# version** of the player, which has hardcoded grenade loading:
+
+**Player.cs (BEFORE FIX):**
+```csharp
+// Lines 268-280
+// Preload grenade scene if not set in inspector
+if (GrenadeScene == null)
+{
+    GrenadeScene = GD.Load<PackedScene>("res://scenes/projectiles/FlashbangGrenade.tscn");
+    if (GrenadeScene != null)
+    {
+        LogToFile($"[Player.Grenade] Grenade scene loaded");
+    }
+}
+```
+
+The C# player always loads FlashbangGrenade, ignoring GrenadeManager entirely!
+
+### Solution: Update C# Player to Use GrenadeManager
+
+**Player.cs (AFTER FIX):**
+```csharp
+// Get grenade scene from GrenadeManager (supports grenade type selection)
+// GrenadeManager handles the currently selected grenade type (Flashbang or Frag)
+if (GrenadeScene == null)
+{
+    var grenadeManager = GetNodeOrNull("/root/GrenadeManager");
+    if (grenadeManager != null && grenadeManager.HasMethod("get_current_grenade_scene"))
+    {
+        var sceneVariant = grenadeManager.Call("get_current_grenade_scene");
+        GrenadeScene = sceneVariant.As<PackedScene>();
+        if (GrenadeScene != null)
+        {
+            var grenadeNameVariant = grenadeManager.Call("get_grenade_name", grenadeManager.Get("current_grenade_type"));
+            var grenadeName = grenadeNameVariant.AsString();
+            LogToFile($"[Player.Grenade] Grenade scene loaded from GrenadeManager: {grenadeName}");
+        }
+        else
+        {
+            LogToFile($"[Player.Grenade] WARNING: GrenadeManager returned null grenade scene");
+        }
+    }
+    else
+    {
+        // Fallback to flashbang if GrenadeManager is not available
+        var grenadePath = "res://scenes/projectiles/FlashbangGrenade.tscn";
+        GrenadeScene = GD.Load<PackedScene>(grenadePath);
+        if (GrenadeScene != null)
+        {
+            LogToFile($"[Player.Grenade] Grenade scene loaded from fallback: {grenadePath}");
+        }
+        else
+        {
+            LogToFile($"[Player.Grenade] WARNING: Grenade scene not found at {grenadePath}");
+        }
+    }
+}
+else
+{
+    LogToFile($"[Player.Grenade] Grenade scene already set in inspector");
+}
+```
+
+### Why This Wasn't Caught Earlier
+
+1. **GDScript player.gd** was already updated to use GrenadeManager
+2. The user was running the **C# version** of the game (csharp levels)
+3. The C# Player.cs was never updated when GrenadeManager was implemented
+4. Logs showed "Grenade scene loaded" without specifying the type, hiding the issue
+
+### Files Modified
+
+1. `Scripts/Characters/Player.cs` - Added GrenadeManager integration for grenade type selection
+
+### Diagnostic Improvements
+
+The new logging now shows which grenade type is loaded:
+- `[Player.Grenade] Grenade scene loaded from GrenadeManager: Frag Grenade`
+- `[Player.Grenade] Grenade scene loaded from fallback: res://scenes/projectiles/FlashbangGrenade.tscn`
+- `[Player.Grenade] Grenade scene already set in inspector`
+
+This makes it immediately clear which grenade type the player is using.
+
+### Lessons Learned
+
+1. **Keep GDScript and C# implementations in sync** when adding new features
+2. **Log the actual values/types** not just "scene loaded" - include what was loaded
+3. **Check for multiple player implementations** when debugging player-related issues
+4. **The log message source (file:line)** is critical for tracing issues
+
+### Expected Behavior After Fix
+
+After rebuilding with this fix:
+1. Select "Frag Grenade" in armory menu
+2. Level restarts
+3. Log should show: `[Player.Grenade] Grenade scene loaded from GrenadeManager: Frag Grenade`
+4. Thrown grenade should be FragGrenade with shrapnel mechanics
