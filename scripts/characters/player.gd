@@ -437,9 +437,10 @@ func _detect_and_apply_weapon_pose() -> void:
 ## Modifies base arm positions to create appropriate weapon-holding poses.
 func _apply_weapon_arm_offsets() -> void:
 	# Reset to original scene positions first
-	# Original positions from Player.tscn: LeftArm (24, 6), RightArm (-2, 6)
+	# Original positions from Player.tscn: LeftArm (24, 6), RightArm (0, 6)
+	# RightArm position adjusted from (-2, 6) to (0, 6) to better anchor shoulder joint
 	var original_left_arm_pos := Vector2(24, 6)
-	var original_right_arm_pos := Vector2(-2, 6)
+	var original_right_arm_pos := Vector2(0, 6)
 
 	match _current_weapon_type:
 		WeaponType.SMG:
@@ -494,7 +495,11 @@ func _update_walk_animation(delta: float, input_direction: Vector2) -> void:
 		var head_bob := sin(_walk_anim_time * 2.0) * 0.8 * walk_anim_intensity
 
 		# Arms swing opposite to each other (alternating)
-		var arm_swing := sin(_walk_anim_time) * 3.0 * walk_anim_intensity
+		# Reduced swing amplitude from 3.0 to 1.5 to prevent arm disconnection from body
+		var arm_swing := sin(_walk_anim_time) * 1.5 * walk_anim_intensity
+
+		# Arms follow body bob to stay connected at shoulder joints
+		var arm_bob := body_bob * 0.7
 
 		# Apply offsets to sprites
 		if _body_sprite:
@@ -504,12 +509,12 @@ func _update_walk_animation(delta: float, input_direction: Vector2) -> void:
 			_head_sprite.position = _base_head_pos + Vector2(0, head_bob)
 
 		if _left_arm_sprite:
-			# Left arm swings forward/back (y-axis in top-down)
-			_left_arm_sprite.position = _base_left_arm_pos + Vector2(arm_swing, 0)
+			# Left arm swings forward/back (x-axis) and follows body bob (y-axis)
+			_left_arm_sprite.position = _base_left_arm_pos + Vector2(arm_swing, arm_bob)
 
 		if _right_arm_sprite:
-			# Right arm swings opposite to left arm
-			_right_arm_sprite.position = _base_right_arm_pos + Vector2(-arm_swing, 0)
+			# Right arm swings opposite to left arm and follows body bob
+			_right_arm_sprite.position = _base_right_arm_pos + Vector2(-arm_swing, arm_bob)
 	else:
 		# Return to idle pose smoothly
 		if _is_walking:
