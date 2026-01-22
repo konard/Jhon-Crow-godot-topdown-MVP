@@ -749,7 +749,20 @@ public partial class Player : BaseCharacter
     }
 
     /// <summary>
+    /// Public method to refresh the health visual.
+    /// Called by effects managers (like LastChanceEffectsManager) after they finish
+    /// modifying player sprite colors, to ensure the player returns to correct
+    /// health-based coloring.
+    /// </summary>
+    public void RefreshHealthVisual()
+    {
+        UpdateHealthVisual();
+    }
+
+    /// <summary>
     /// Sets the modulate color on all player sprite parts.
+    /// The armband is a separate sibling sprite (not child of RightArm) that keeps
+    /// its original color, so all body parts use the same health-based color.
     /// </summary>
     /// <param name="color">The color to apply to all sprites.</param>
     private void SetAllSpritesModulate(Color color)
@@ -768,6 +781,9 @@ public partial class Player : BaseCharacter
         }
         if (_rightArmSprite != null)
         {
+            // Right arm uses the same color as other body parts.
+            // The armband is now a separate sibling sprite (Armband node under PlayerModel)
+            // that doesn't inherit this modulate, keeping its bright red color visible.
             _rightArmSprite.Modulate = color;
         }
         // If using old single sprite structure
