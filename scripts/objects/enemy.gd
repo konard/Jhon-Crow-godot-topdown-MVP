@@ -3850,15 +3850,14 @@ func _get_bullet_spawn_position(_direction: Vector2) -> Vector2:
 	# from the WeaponSprite node position.
 	var muzzle_local_offset := 52.0  # Distance from node to muzzle in local +X direction
 	if _weapon_sprite and _enemy_model:
-		# Use the weapon sprite's global transform to get its actual forward direction.
-		# The weapon sprite points RIGHT (+X) in its local space.
-		# global_transform.x gives us the weapon's local +X axis in world coordinates,
-		# accounting for both rotation AND scale (including Y flip).
-		var weapon_global_forward := _weapon_sprite.global_transform.x.normalized()
+		# Get the weapon's forward direction from the enemy model rotation.
+		# We use Vector2.from_angle() instead of global_transform.x because the Y flip
+		# (scale.y negative for aiming left) would cause global_transform.x to be mirrored.
+		var weapon_forward := Vector2.from_angle(_enemy_model.rotation)
 		# Calculate muzzle offset accounting for enemy model scale
 		var scaled_muzzle_offset := muzzle_local_offset * enemy_model_scale
 		# Use weapon sprite's global position as base, then offset to reach the muzzle
-		return _weapon_sprite.global_position + weapon_global_forward * scaled_muzzle_offset
+		return _weapon_sprite.global_position + weapon_forward * scaled_muzzle_offset
 	else:
 		# Fallback to old behavior if weapon sprite or enemy model not found
 		return global_position + _direction * bullet_spawn_offset
@@ -3866,15 +3865,25 @@ func _get_bullet_spawn_position(_direction: Vector2) -> Vector2:
 
 ## Returns the weapon's forward direction in world coordinates.
 ## This is the direction the weapon barrel is actually pointing.
-## Uses the weapon sprite's global transform to account for rotation and scale (including Y flip).
+##
+## IMPORTANT: We calculate direction from the EnemyModel's rotation angle, NOT from
+## global_transform.x. This is because when the enemy model is vertically flipped
+## (scale.y negative for aiming left), global_transform.x becomes reflected/mirrored,
+## which doesn't represent the actual shooting direction.
+##
+## The EnemyModel rotation is set by _update_enemy_model_rotation() to point toward
+## the player (or movement direction). We use Vector2.from_angle() to convert this
+## rotation back to a direction vector, which gives the correct shooting direction
+## regardless of the Y flip state.
+##
 ## @returns: Normalized direction vector the weapon is pointing.
 func _get_weapon_forward_direction() -> Vector2:
-	if _weapon_sprite and _enemy_model:
-		# Use the weapon sprite's global transform to get its actual forward direction.
-		# The weapon sprite points RIGHT (+X) in its local space.
-		# global_transform.x gives us the weapon's local +X axis in world coordinates,
-		# accounting for both rotation AND scale (including Y flip).
-		return _weapon_sprite.global_transform.x.normalized()
+	if _enemy_model:
+		# Use the enemy model's rotation to calculate the forward direction.
+		# This correctly handles the vertical flip case (scale.y negative) where
+		# global_transform.x would give an incorrect mirrored direction.
+		# The enemy model rotation is already set to face the player/target.
+		return Vector2.from_angle(_enemy_model.rotation)
 	else:
 		# Fallback: calculate direction to player
 		if _player and is_instance_valid(_player):

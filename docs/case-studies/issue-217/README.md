@@ -979,6 +979,116 @@ else
 
 31. **Case Sensitivity Matters in Cross-Language Binding:** Godot's property binding between C# (PascalCase convention) and GDScript (snake_case convention) is not always reliable. Explicit method calls bypass this issue entirely.
 
+### Phase 19: Ninth User Feedback (2026-01-22T10:34:45Z)
+
+User @Jhon-Crow tested the solution again and reported:
+
+1. **"враги стреляют мимо, промахиваются примерно на 45 градусов. их линия прицела должна совпадать с линией огня."**
+   - Translation: Enemies miss, off by about 45 degrees. Their aiming line should match their firing line.
+   - Enemy bullets fly ~45 degrees away from where the weapon is visually pointing
+
+Attached game log:
+- `game_log_20260122_133325.txt`
+
+### Phase 20: Root Cause Analysis and Fix (2026-01-22)
+
+## Root Cause Analysis (Phase 19-20)
+
+### Issue 14: Enemies Miss by ~45 Degrees - Aim Line Doesn't Match Fire Line
+
+**Root Cause:** The `_get_weapon_forward_direction()` and `_get_bullet_spawn_position()` functions used `_weapon_sprite.global_transform.x.normalized()` to get the weapon's forward direction. However, this approach fails when the enemy model has **negative Y scale** (for aiming left).
+
+When the enemy aims left (angle > π/2 or < -π/2), the code applies vertical flip by setting:
+```gdscript
+_enemy_model.scale = Vector2(enemy_model_scale, -enemy_model_scale)  # Y is negative
+```
+
+This negative Y scale creates a **reflected coordinate system**. In a reflected coordinate system:
+- The visual appearance is correct (sprite looks right)
+- But `global_transform.x` is **mirrored**, returning the opposite of the expected direction
+- This causes bullets to fly ~45-90 degrees off from where the weapon visually points
+
+**Technical Explanation:**
+
+A 2D transform with negative Y scale creates a "mirrored" or "reflected" coordinate system. The `global_transform` property includes scale information, so:
+
+1. When Y scale is positive (aiming right):
+   - `global_transform.x` = correct weapon forward direction ✓
+
+2. When Y scale is negative (aiming left):
+   - The transform basis vectors are reflected
+   - `global_transform.x` = mirrored direction ✗
+   - Bullets fly in the wrong direction
+
+**Evidence:** The ~45 degree offset is the angle between the intended direction (toward player) and the mirrored direction. The exact offset depends on the enemy's rotation angle.
+
+**Fix Applied:**
+
+Changed both functions to calculate direction from `_enemy_model.rotation` using `Vector2.from_angle()` instead of using `global_transform.x`:
+
+1. Updated `_get_weapon_forward_direction()`:
+```gdscript
+# Before (broken with Y flip):
+return _weapon_sprite.global_transform.x.normalized()
+
+# After (works correctly with Y flip):
+return Vector2.from_angle(_enemy_model.rotation)
+```
+
+2. Updated `_get_bullet_spawn_position()`:
+```gdscript
+# Before (broken with Y flip):
+var weapon_global_forward := _weapon_sprite.global_transform.x.normalized()
+
+# After (works correctly with Y flip):
+var weapon_forward := Vector2.from_angle(_enemy_model.rotation)
+```
+
+**Why This Fix Works:**
+- `_enemy_model.rotation` is the angle set by `_update_enemy_model_rotation()` to face the player/target
+- `Vector2.from_angle(rotation)` creates a unit vector pointing in that direction
+- This approach is **independent of scale**, so it works correctly regardless of Y flip state
+- The player uses the same approach: calculating direction from angle to target, not from transform
+
+**Comparison with Player Code:**
+The player's `_shoot()` function calculates direction directly:
+```gdscript
+var shoot_direction := (mouse_pos - global_position).normalized()
+```
+It does NOT use `global_transform.x`, which explains why the player doesn't have this issue.
+
+## Updated Summary of All Issues and Fixes
+
+| Issue | Root Cause | Fix |
+|-------|-----------|-----|
+| 1. Enemy smaller than player | Missing 1.3x scale multiplier | Added `enemy_model_scale` export and scale in `_ready()` |
+| 2. No walking animation | Old script references + missing animation code | Updated references, added `_update_walk_animation()` |
+| 3. Weapon at 90° angle | Competing rotation systems | Removed `_update_weapon_sprite_rotation()` call |
+| 4. Bullets from center | Spawning from enemy position | Added `_get_bullet_spawn_position()` using weapon mount |
+| 5. Walking backwards | Enemy sprites face opposite direction (PI offset) | Added PI to rotation angle |
+| 6. M16 too large | Using 64px sprite vs player's integrated smaller rifle | Changed to `m16_topdown_small.png` (32px) |
+| 7. Weapon not visible | Smaller sprite obscured by body parts | Reverted to original larger sprite `m16_rifle_topdown.png` |
+| 8. Last Chance not freezing bullets | Branch missing pellet detection fix from main | Merged main branch with latest fixes |
+| 9. Bullets not from weapon muzzle | Direction mismatch and execution order issue | Use weapon's actual rotation for muzzle direction; moved rotation update before shooting |
+| 10. Bullets STILL not from muzzle | Wrong local forward direction (used -X instead of +X) and Y-flip not handled | Use `global_transform.x` for correct world-space forward direction |
+| 11. Player self-damage when shooting upward | C# Bullet properties missing [Export] attribute | Added [Export] to Direction, ShooterId, ShooterPosition in Bullet.cs |
+| 12. Enemy bullets not flying in barrel direction | Bullet direction calculated to player, not weapon forward | Added `_get_weapon_forward_direction()` and updated all shooting functions |
+| 13. Player STILL self-damaging | `Node.Set()` unreliably maps snake_case to PascalCase C# properties | Added explicit setter methods and use `Call()` instead of `Set()` |
+| 14. Enemies miss by ~45 degrees | `global_transform.x` is mirrored when Y scale is negative (aiming left) | Use `Vector2.from_angle(_enemy_model.rotation)` instead of `global_transform.x` |
+
+## Additional Lessons Learned (Phase 19-20)
+
+32. **Negative Scale Affects Transform Basis Vectors:** When using negative scale for sprite flipping, the `global_transform.x` and `global_transform.y` basis vectors are reflected/mirrored. This breaks direction calculations that rely on these vectors.
+
+33. **Use Angle-Based Direction Calculation for Flipped Sprites:** When sprites can be flipped via negative scale, calculate directions using `Vector2.from_angle(rotation)` rather than `global_transform.x`. The rotation property is not affected by scale.
+
+34. **Test All Aim Directions:** Bugs related to coordinate transformations often only manifest in certain directions. Test with enemies facing all directions: up, down, left (with Y flip), right (without Y flip).
+
+35. **Compare Working Code Patterns:** When fixing a bug, compare with similar code that works correctly (e.g., player shooting). The player calculated direction directly from angle, not from transform - this pattern should have been used for enemies too.
+
+36. **Transform Properties Include Scale:** `global_transform.x.normalized()` does NOT just give rotation - it includes scale effects. For direction calculations, either ensure scale is always positive, or use rotation-based calculations that ignore scale.
+
 ## Related Files
 
 - [logs/game_log_20260122_125115.txt](./logs/game_log_20260122_125115.txt) - Game log from phase 17 testing showing shooter_id=0 pattern
+- [game_log_20260122_133325.txt](./game_log_20260122_133325.txt) - Game log from phase 19 testing showing 45-degree aiming offset
