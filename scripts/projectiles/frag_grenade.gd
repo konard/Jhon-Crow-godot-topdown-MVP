@@ -3,13 +3,14 @@ class_name FragGrenade
 ## Offensive (frag) grenade that explodes on impact and releases shrapnel.
 ##
 ## Key characteristics:
-## - Explodes on landing or hitting a wall (no timer delay after impact)
+## - Explodes ONLY on landing or hitting a wall (NO timer - impact-triggered only)
 ## - Smaller explosion radius than flashbang
 ## - Releases 4 shrapnel pieces in all directions (with random deviation)
 ## - Shrapnel ricochets off walls and deals 1 damage each
 ## - Slightly lighter than flashbang (throws a bit farther/easier)
 ##
-## Note: The fuse timer still runs but explosion is triggered immediately on impact.
+## Per issue requirement: "взрывается при приземлении/ударе об стену (без таймера)"
+## Translation: "explodes on landing/hitting a wall (without timer)"
 
 ## Effect radius for the explosion (smaller than flashbang's 400).
 @export var effect_radius: float = 250.0
@@ -49,6 +50,55 @@ func _ready() -> void:
 			FileLogger.info("[FragGrenade] Shrapnel scene loaded from: %s" % shrapnel_path)
 		else:
 			FileLogger.info("[FragGrenade] WARNING: Shrapnel scene not found at: %s" % shrapnel_path)
+
+
+## Override to prevent timer countdown for frag grenades.
+## Frag grenades explode ONLY on impact (landing or wall hit), NOT on a timer.
+## Per issue requirement: "без таймера" = "without timer"
+func activate_timer() -> void:
+	# Set _timer_active to true so landing detection works (line 114 in base class)
+	# But do NOT set _time_remaining - no countdown, no timer-based explosion
+	if _timer_active:
+		FileLogger.info("[FragGrenade] Already activated")
+		return
+	_timer_active = true
+	# Do NOT set _time_remaining - leave it at 0 so timer never triggers explosion
+	# The base class checks `if _time_remaining <= 0: _explode()` only when _timer_active is true
+	# But since _time_remaining starts at 0, we need to set it to a very high value to prevent timer explosion
+	# Actually, better approach: set to infinity-like value so timer never triggers
+	_time_remaining = 999999.0  # Effectively infinite - grenade will only explode on impact
+
+	# Play activation sound (pin pull)
+	if not _activation_sound_played:
+		_activation_sound_played = true
+		_play_activation_sound()
+	FileLogger.info("[FragGrenade] Pin pulled - waiting for impact (no timer, impact-triggered only)")
+
+
+## Override _physics_process to disable blinking (no timer countdown for frag grenades).
+func _physics_process(delta: float) -> void:
+	if _has_exploded:
+		return
+
+	# Apply ground friction to slow down (copied from base class)
+	if linear_velocity.length() > 0:
+		var friction_force := linear_velocity.normalized() * ground_friction * delta
+		if friction_force.length() > linear_velocity.length():
+			linear_velocity = Vector2.ZERO
+		else:
+			linear_velocity -= friction_force
+
+	# Check for landing (grenade comes to near-stop after being thrown)
+	if not _has_landed and _timer_active:
+		var current_speed := linear_velocity.length()
+		var previous_speed := _previous_velocity.length()
+		# Grenade has landed when it was moving fast and now nearly stopped
+		if previous_speed > landing_velocity_threshold and current_speed < landing_velocity_threshold:
+			_on_grenade_landed()
+	_previous_velocity = linear_velocity
+
+	# NOTE: No timer countdown or blink effect for frag grenades
+	# They only explode on impact, not on a timer
 
 
 ## Override throw to mark grenade as thrown.

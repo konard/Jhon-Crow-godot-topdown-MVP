@@ -721,3 +721,119 @@ func _apply_explosion_damage(enemy: Node2D) -> void:
 2. **Follow existing patterns** - `levels_menu.gd` already had the correct unpause logic
 3. **User requirements must be interpreted literally** - "99 damage to all" means flat 99, not scaled
 4. **Log timestamps reveal restart loops** - rapid repeated "scene change detected" indicates a loop
+
+---
+
+## Phase 11: Remove Timer - Impact-Only Explosion (2026-01-22 07:04)
+
+### New Logs: `game_log_20260122_070403.txt` and `game_log_20260122_070520.txt`
+
+User reported: "у этой гранаты не должно быть таймера, должна взрываться при падении/столкновении с препятствием" (this grenade should not have a timer, it should explode on landing/collision with an obstacle)
+
+### Log Analysis
+
+**First Log (`game_log_20260122_070403.txt`)** shows successful impact explosions:
+```
+[07:04:28] [INFO] [FragGrenade] Grenade thrown - impact detection enabled
+[07:04:29] [INFO] [GrenadeBase] Grenade landed at (447.9349, 822.3268)
+[07:04:29] [INFO] [FragGrenade] Impact detected - exploding immediately!
+[07:04:29] [INFO] [GrenadeBase] EXPLODED at (447.9349, 822.3268)!
+```
+
+This shows the impact detection IS working when the grenade is thrown and lands.
+
+**Second Log (`game_log_20260122_070520.txt`)** shows the timer issue:
+```
+[07:05:34] [INFO] [GrenadeBase] Grenade created at (0, 0) (frozen)
+[07:05:34] [INFO] [FragGrenade] Shrapnel scene loaded from: res://scenes/projectiles/Shrapnel.tscn
+[07:05:34] [INFO] [GrenadeBase] Timer activated! 4.0 seconds until explosion
+[07:05:34] [INFO] [Player.Grenade] Timer started, grenade created at (450, 1250)
+...
+[07:05:38] [INFO] [GrenadeBase] EXPLODED at (397.1667, 1250)!
+```
+
+The grenade activated at 07:05:34 and exploded at 07:05:38 - exactly 4 seconds later, via the timer, NOT via impact.
+
+### Critical Finding: Timer Still Active
+
+Looking at the flow:
+1. Player starts Step 1 (G + RMB pressed) - grenade created
+2. Timer activates (4 seconds countdown)
+3. Player doesn't complete the throw (stays in "aiming" mode)
+4. Timer expires after 4 seconds → grenade explodes
+
+The user is correct: **The frag grenade should NOT have a timer at all.** It should ONLY explode on impact (landing or hitting a wall). If the player holds the grenade without throwing it, it should remain "safe" until thrown.
+
+### Original Issue Requirement
+
+From Issue #188:
+> "взрывается при приземлении/ударе об стену (**без таймера**)"
+> Translation: "explodes on landing/hitting a wall (**without timer**)"
+
+The key phrase is "без таймера" - "without timer".
+
+### Solution: Disable Timer for Frag Grenades
+
+**Root Cause**: The base class `GrenadeBase` calls `activate_timer()` which starts a countdown. The frag grenade was inheriting this behavior.
+
+**Fix Applied**: Override `activate_timer()` in `FragGrenade` to NOT start the timer countdown:
+
+```gdscript
+## Override to prevent timer countdown for frag grenades.
+## Frag grenades explode ONLY on impact (landing or wall hit), NOT on a timer.
+## Per issue requirement: "без таймера" = "without timer"
+func activate_timer() -> void:
+    # Set _timer_active to true so landing detection works (line 114 in base class)
+    # But do NOT set _time_remaining - no countdown, no timer-based explosion
+    if _timer_active:
+        FileLogger.info("[FragGrenade] Already activated")
+        return
+    _timer_active = true
+    # Set to very high value so timer never triggers explosion
+    # The grenade will only explode on impact (landing or wall hit)
+    _time_remaining = 999999.0  # Effectively infinite
+
+    # Play activation sound (pin pull)
+    if not _activation_sound_played:
+        _activation_sound_played = true
+        _play_activation_sound()
+    FileLogger.info("[FragGrenade] Pin pulled - waiting for impact (no timer, impact-triggered only)")
+```
+
+Also overrode `_physics_process()` to disable the blinking countdown effect (since there's no countdown).
+
+### Why _timer_active is Still Set to True
+
+The `_timer_active` flag is used by the base class's `_physics_process()` to check for grenade landing:
+
+```gdscript
+# In grenade_base.gd:114
+if not _has_landed and _timer_active:
+    # ... landing detection logic ...
+```
+
+We need `_timer_active = true` so the landing detection works, but we set `_time_remaining = 999999.0` so the timer-based explosion never triggers.
+
+### Files Modified
+
+1. `scripts/projectiles/frag_grenade.gd`:
+   - Updated class documentation to clarify "NO timer"
+   - Overrode `activate_timer()` to disable timer countdown
+   - Overrode `_physics_process()` to disable blinking effect
+
+### Expected Behavior After Fix
+
+1. **Pin Pull**: Player initiates grenade (G + RMB) - sound plays, no countdown starts
+2. **Holding Grenade**: Player can hold the grenade indefinitely without it exploding
+3. **Throw**: Player throws grenade - impact detection enabled
+4. **Impact**: Grenade explodes ONLY when:
+   - It lands on the ground (velocity drops below threshold)
+   - It hits a wall/obstacle (StaticBody2D or TileMap collision)
+5. **No Timer**: The grenade will NEVER explode from a timer countdown
+
+### Lessons Learned
+
+1. **Re-read requirements carefully** - "без таймера" was explicitly stated in the original issue
+2. **Don't assume inherited behavior is desired** - the timer was inherited from GrenadeBase but not wanted for frag grenades
+3. **Different grenade types have different mechanics** - flashbangs use timers, frag grenades use impact triggers
+4. **Override lifecycle methods when needed** - `activate_timer()` override was the right approach
