@@ -1,11 +1,9 @@
 [gd_scene load_steps=4 format=3 uid="uid://casing_scene"]
 
 [ext_resource type="Script" path="res://scripts/effects/casing.gd" id="1_casing"]
+[ext_resource type="Texture2D" uid="uid://casing_rifle_sprite" path="res://assets/sprites/effects/casing_rifle.png" id="2_default_texture"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_casing"]
-size = Vector2(8, 16)
-
-[sub_resource type="PlaceholderTexture2D" id="PlaceholderTexture2D_casing"]
 size = Vector2(8, 16)
 
 [node name="Casing" type="RigidBody2D"]
@@ -20,4 +18,4 @@ script = ExtResource("1_casing")
 shape = SubResource("RectangleShape2D_casing")
 
 [node name="Sprite2D" type="Sprite2D" parent="."]
-texture = SubResource("PlaceholderTexture2D_casing")
+texture = ExtResource("2_default_texture")

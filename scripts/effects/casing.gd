@@ -64,28 +64,39 @@ func _land() -> void:
 
 ## Sets the visual appearance of the casing based on its caliber.
 func _set_casing_appearance() -> void:
-	if caliber_data == null:
-		return
-
 	var sprite = $Sprite2D
 	if sprite == null:
 		return
 
+	# Try to get the casing sprite from caliber data
+	if caliber_data != null and caliber_data is CaliberData:
+		var caliber: CaliberData = caliber_data as CaliberData
+		if caliber.casing_sprite != null:
+			sprite.texture = caliber.casing_sprite
+			# Reset modulate to show actual sprite colors
+			sprite.modulate = Color.WHITE
+			return
+
+	# Fallback: If no sprite in caliber data, use color-based appearance
 	# Default color (rifle casing - brass)
 	var casing_color = Color(0.9, 0.8, 0.4)  # Brass color
 
-	# Check caliber name to determine color
-	if caliber_data.has_method("get"):
-		var caliber_name = caliber_data.get("caliber_name", "")
-		if caliber_name == "buckshot":
+	if caliber_data != null:
+		# Check caliber name to determine color
+		var caliber_name: String = ""
+		if caliber_data is CaliberData:
+			caliber_name = (caliber_data as CaliberData).caliber_name
+		elif caliber_data.has_method("get"):
+			caliber_name = caliber_data.get("caliber_name", "")
+
+		if "buckshot" in caliber_name.to_lower() or "Buckshot" in caliber_name:
 			casing_color = Color(0.8, 0.2, 0.2)  # Red for shotgun
-		elif caliber_name == "9x19mm":
+		elif "9x19" in caliber_name or "9mm" in caliber_name.to_lower():
 			casing_color = Color(0.7, 0.7, 0.7)  # Silver for pistol
 		# Rifle (5.45x39mm) keeps default brass color
 
 	# Apply the color to the sprite
-	if sprite is Sprite2D:
-		sprite.modulate = casing_color
+	sprite.modulate = casing_color
 
 
 ## Called when the casing collides with something (usually the ground).

@@ -406,8 +406,11 @@ public abstract partial class BaseWeapon : Node2D
         casing.GlobalPosition = casingSpawnPosition;
 
         // Calculate ejection direction to the right of the weapon
-        // Get the weapon's right direction (perpendicular to shooting direction)
-        Vector2 weaponRight = new Vector2(direction.Y, -direction.X); // Rotate 90 degrees clockwise
+        // In a top-down view with Y increasing downward:
+        // - If weapon points right (1, 0), right side of weapon is DOWN (0, 1)
+        // - If weapon points up (0, -1), right side of weapon is RIGHT (1, 0)
+        // This is a 90 degree counter-clockwise rotation (perpendicular to shooting direction)
+        Vector2 weaponRight = new Vector2(-direction.Y, direction.X); // Rotate 90 degrees counter-clockwise
 
         // Eject to the right with some randomness
         float randomAngle = (float)GD.RandRange(-0.3f, 0.3f); // ±0.3 radians (~±17 degrees)
