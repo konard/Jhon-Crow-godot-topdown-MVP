@@ -4049,7 +4049,13 @@ func _get_health_percent() -> float:
 
 ## Calculates the bullet spawn position at the weapon's muzzle.
 ## The muzzle is positioned relative to the weapon mount, offset in the weapon's forward direction.
-## @param direction: The normalized direction the bullet will travel (used for fallback only).
+##
+## IMPORTANT FIX (Issue #264 - Session 4):
+## Similar to _get_weapon_forward_direction(), we need to calculate the muzzle position
+## based on the intended aim direction when the player is visible, not from the stale
+## global_transform which may not have updated yet in the same physics frame.
+##
+## @param _direction: The normalized direction the bullet will travel (used for fallback only).
 ## @return: The global position where the bullet should spawn.
 func _get_bullet_spawn_position(_direction: Vector2) -> Vector2:
 	# The rifle sprite (m16_rifle_topdown.png) is 64px long with offset (20, 0).
@@ -4057,20 +4063,29 @@ func _get_bullet_spawn_position(_direction: Vector2) -> Vector2:
 	# from the WeaponSprite node position.
 	var muzzle_local_offset := 52.0  # Distance from node to muzzle in local +X direction
 	if _weapon_sprite and _enemy_model:
-		# Get the weapon's VISUAL forward direction from global_transform.
-		# IMPORTANT: We use global_transform.x because it correctly accounts for the
-		# vertical flip (scale.y negative) that happens when aiming left. The flip
-		# affects where the muzzle visually appears, so we need the transformed direction.
-		# Using Vector2.from_angle(_enemy_model.rotation) would give incorrect results
-		# because it doesn't account for the scale flip.
-		var weapon_forward := _weapon_sprite.global_transform.x.normalized()
+		var weapon_forward: Vector2
+
+		# When player is visible, calculate direction directly to avoid transform delay.
+		# This matches the fix in _get_weapon_forward_direction().
+		if _player and is_instance_valid(_player) and _can_see_player:
+			weapon_forward = (_player.global_position - global_position).normalized()
+		else:
+			# Fallback to transform-based direction when player is not visible.
+			# Get the weapon's VISUAL forward direction from global_transform.
+			# IMPORTANT: We use global_transform.x because it correctly accounts for the
+			# vertical flip (scale.y negative) that happens when aiming left. The flip
+			# affects where the muzzle visually appears, so we need the transformed direction.
+			# Using Vector2.from_angle(_enemy_model.rotation) would give incorrect results
+			# because it doesn't account for the scale flip.
+			weapon_forward = _weapon_sprite.global_transform.x.normalized()
+
 		# Calculate muzzle offset accounting for enemy model scale
 		var scaled_muzzle_offset := muzzle_local_offset * enemy_model_scale
 		# Use weapon sprite's global position as base, then offset to reach the muzzle
 		var result := _weapon_sprite.global_position + weapon_forward * scaled_muzzle_offset
 		if debug_logging:
 			var angle_forward := Vector2.from_angle(_enemy_model.rotation)
-			_log_debug("  _get_bullet_spawn_position: visual_forward=%v vs angle_forward=%v" % [weapon_forward, angle_forward])
+			_log_debug("  _get_bullet_spawn_position: weapon_forward=%v vs angle_forward=%v" % [weapon_forward, angle_forward])
 			_log_debug("  muzzle_position=%v, weapon_pos=%v, offset=%.1f" % [result, _weapon_sprite.global_position, scaled_muzzle_offset])
 		return result
 	else:
@@ -4090,8 +4105,26 @@ func _get_bullet_spawn_position(_direction: Vector2) -> Vector2:
 ## when aiming left. The transform includes all parent transforms, so it gives
 ## the true world-space direction the weapon is pointing.
 ##
-## @returns: Normalized direction vector the weapon is visually pointing.
+## IMPORTANT FIX (Issue #264 - Session 4):
+## In Godot 4, when we set global_rotation on a Node2D, the global_transform of
+## child nodes does NOT update immediately in the same physics frame. This caused
+## bullets to be fired in the wrong direction because _weapon_sprite.global_transform.x
+## would return the OLD direction from the previous frame.
+##
+## The fix is to calculate the expected weapon direction directly from the player's
+## position when we can see the player, rather than reading it back from the transform.
+## This ensures bullets always fly toward the intended target, not the stale transform.
+##
+## @returns: Normalized direction vector the weapon should be pointing.
 func _get_weapon_forward_direction() -> Vector2:
+	# When we can see the player, calculate direction directly to avoid transform delay.
+	# This is the same calculation used in _update_enemy_model_rotation(), ensuring
+	# consistency between the visual aim and the actual bullet direction.
+	if _player and is_instance_valid(_player) and _can_see_player:
+		return (_player.global_position - global_position).normalized()
+
+	# Fallback to transform-based direction when player is not visible.
+	# In this case, the transform should have had time to update across frames.
 	if _weapon_sprite:
 		# Use the weapon sprite's global_transform.x for the true visual forward direction.
 		# This correctly handles the vertical flip case (scale.y negative) because

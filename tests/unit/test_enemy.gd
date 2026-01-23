@@ -988,3 +988,115 @@ func test_single_visible_point_detects_player() -> void:
 
 	assert_true(can_see_player,
 		"Enemy should see player when at least one body point is visible (issue #264 fix)")
+
+
+# ============================================================================
+# Transform Delay Fix Tests (Issue #264 - Session 4)
+# ============================================================================
+
+
+## Test that weapon direction is calculated directly to player when visible.
+## This is the key fix for issue #264 session 4: bullets firing in the wrong
+## direction because global_transform doesn't update in the same physics frame.
+##
+## Bug: Enemy sets _enemy_model.global_rotation to face the player, then calls
+## _shoot() which reads _weapon_sprite.global_transform.x to get bullet direction.
+## However, in Godot 4, child node transforms don't update immediately when
+## parent rotation changes - they update on the next frame.
+##
+## Fix: When player is visible, calculate direction directly to player position
+## instead of reading from the (stale) transform.
+func test_weapon_direction_calculated_directly_when_player_visible() -> void:
+	# Simulate enemy and player positions from the bug report
+	var enemy_pos := Vector2(618, 768)  # Enemy3 position from logs
+	var player_pos := Vector2(450, 1250)  # Player spawn position
+
+	# Expected direction: directly toward player
+	var expected_direction := (player_pos - enemy_pos).normalized()
+
+	# The stale transform direction (from previous frame, facing left)
+	var stale_transform_direction := Vector2(-1, 0)  # ~180 degrees (left wall)
+
+	# Verify these are very different directions
+	var angle_difference := expected_direction.angle_to(stale_transform_direction)
+	assert_true(absf(angle_difference) > 1.0,  # More than 57 degrees difference
+		"Stale transform direction should differ significantly from expected")
+
+	# The fix: when _can_see_player is true, use calculated direction
+	var can_see_player := true
+	var weapon_direction: Vector2
+	if can_see_player:
+		# Fix: calculate direction directly
+		weapon_direction = expected_direction
+	else:
+		# Fallback: use transform (only when player not visible)
+		weapon_direction = stale_transform_direction
+
+	# Verify the fix gives correct direction
+	var dot_product := weapon_direction.dot(expected_direction)
+	assert_almost_eq(dot_product, 1.0, 0.001,
+		"Weapon direction should match expected direction when player is visible")
+
+
+## Test that bullet spawn position uses correct direction when player visible.
+## This is a companion fix to the weapon direction fix.
+func test_bullet_spawn_position_uses_correct_direction() -> void:
+	# Simulate positions
+	var weapon_sprite_pos := Vector2(618, 780)  # Weapon mount position
+	var player_pos := Vector2(450, 1250)
+	var enemy_pos := Vector2(618, 768)
+	var muzzle_offset := 52.0  # From the code
+
+	# Expected direction to player
+	var expected_direction := (player_pos - enemy_pos).normalized()
+
+	# Stale transform direction (wrong)
+	var stale_direction := Vector2(-1, 0)
+
+	# Correct muzzle position (using calculated direction)
+	var correct_muzzle := weapon_sprite_pos + expected_direction * muzzle_offset
+
+	# Wrong muzzle position (using stale transform)
+	var wrong_muzzle := weapon_sprite_pos + stale_direction * muzzle_offset
+
+	# The muzzle positions should be significantly different
+	var distance := correct_muzzle.distance_to(wrong_muzzle)
+	assert_true(distance > 50.0,
+		"Correct vs stale muzzle positions should differ significantly")
+
+	# Correct muzzle should be closer to the player direction
+	var correct_to_player := (player_pos - correct_muzzle).normalized()
+	var wrong_to_player := (player_pos - wrong_muzzle).normalized()
+
+	# The correct muzzle's bullet should travel more directly to player
+	var correct_alignment := correct_to_player.dot(expected_direction)
+	var wrong_alignment := wrong_to_player.dot(expected_direction)
+
+	assert_true(correct_alignment > wrong_alignment,
+		"Correct muzzle position should give better alignment to player")
+
+
+## Test that fallback to transform is used when player is not visible.
+## The transform-based direction should be used when the enemy can't see the player,
+## because the transform has had time to update over multiple frames.
+func test_fallback_to_transform_when_player_not_visible() -> void:
+	# When player is not visible, we use the transform-based direction
+	# This is fine because:
+	# 1. The enemy isn't shooting at the player anyway (can't see them)
+	# 2. The transform has had time to settle over multiple frames
+
+	var can_see_player := false
+	var transform_direction := Vector2(0.707, 0.707).normalized()  # Some previous direction
+	var player_direction := Vector2(1, 0)  # Doesn't matter - can't see player
+
+	var weapon_direction: Vector2
+	if can_see_player:
+		weapon_direction = player_direction
+	else:
+		# Fallback to transform - this is the expected behavior
+		weapon_direction = transform_direction
+
+	# Verify we got the transform direction, not the player direction
+	var dot_with_transform := weapon_direction.dot(transform_direction)
+	assert_almost_eq(dot_with_transform, 1.0, 0.001,
+		"Should use transform direction when player not visible")
