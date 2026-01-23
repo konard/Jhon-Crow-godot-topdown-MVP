@@ -18,6 +18,9 @@ signal death_animation_completed
 ## Duration of the pre-made fall animation in seconds.
 @export var fall_animation_duration: float = 0.8
 
+## Speed multiplier for the death animation (1.0 = normal speed, 0.1 = slow motion).
+@export var animation_speed: float = 1.0
+
 ## Point at which ragdoll activates (0.0-1.0, where 1.0 = end of fall animation).
 ## Set to 0.6 as per requirements (60% of fall time).
 @export var ragdoll_activation_point: float = 0.6
@@ -238,7 +241,7 @@ func _restore_original_transforms() -> void:
 
 ## Update the pre-made fall animation.
 func _update_fall_animation(delta: float) -> void:
-	_animation_timer += delta
+	_animation_timer += delta * animation_speed
 	var progress := clampf(_animation_timer / fall_animation_duration, 0.0, 1.0)
 
 	# Apply animation keyframes
@@ -393,10 +396,10 @@ func _create_ragdoll_body(sprite: Sprite2D, mass: float, collision_radius: float
 	rb.physics_material_override.friction = ragdoll_friction
 	rb.physics_material_override.bounce = 0.0
 
-	# Create collision shape (small circle to prevent jittering)
+	# Create collision shape (circle for ragdoll parts)
 	var collision := CollisionShape2D.new()
 	var shape := CircleShape2D.new()
-	shape.radius = collision_radius * 0.5  # Smaller collision to prevent jitter
+	shape.radius = collision_radius  # Full radius for better collision
 	collision.shape = shape
 	rb.add_child(collision)
 
@@ -413,11 +416,21 @@ func _create_ragdoll_body(sprite: Sprite2D, mass: float, collision_radius: float
 	get_tree().current_scene.add_child(rb)
 	_ragdoll_bodies.append(rb)
 
-	# Reparent sprite to rigid body
-	sprite.get_parent().remove_child(sprite)
-	rb.add_child(sprite)
-	sprite.position = Vector2.ZERO
-	sprite.rotation = 0.0
+	# Create a duplicate sprite for the ragdoll body (don't reparent original)
+	var ragdoll_sprite := Sprite2D.new()
+	ragdoll_sprite.texture = sprite.texture
+	ragdoll_sprite.region_enabled = sprite.region_enabled
+	ragdoll_sprite.region_rect = sprite.region_rect
+	ragdoll_sprite.offset = sprite.offset
+	ragdoll_sprite.flip_h = sprite.flip_h
+	ragdoll_sprite.flip_v = sprite.flip_v
+	ragdoll_sprite.modulate = sprite.modulate
+	ragdoll_sprite.z_index = sprite.z_index
+	ragdoll_sprite.z_as_relative = sprite.z_as_relative
+
+	rb.add_child(ragdoll_sprite)
+	ragdoll_sprite.position = Vector2.ZERO
+	ragdoll_sprite.rotation = 0.0
 
 	return rb
 
@@ -441,7 +454,7 @@ func _create_ragdoll_joint(body_a: RigidBody2D, body_b: RigidBody2D, anchor_offs
 
 ## Update ragdoll phase (check if bodies have come to rest).
 func _update_ragdoll_phase(delta: float) -> void:
-	_animation_timer += delta
+	_animation_timer += delta * animation_speed
 
 	# Check if all bodies have slowed down enough to be considered at rest
 	var all_at_rest := true
@@ -489,15 +502,9 @@ func _cleanup_ragdoll(force_cleanup: bool = false) -> void:
 		_ragdoll_joints.clear()
 		return
 
-	# Restore sprites to character model before cleanup
+	# Clean up ragdoll bodies (ragdoll sprites are duplicates, so just free everything)
 	for rb in _ragdoll_bodies:
 		if is_instance_valid(rb):
-			# Find and restore any sprites
-			for child in rb.get_children():
-				if child is Sprite2D:
-					rb.remove_child(child)
-					if _character_model:
-						_character_model.add_child(child)
 			rb.queue_free()
 
 	_ragdoll_bodies.clear()

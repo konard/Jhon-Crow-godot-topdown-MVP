@@ -246,6 +246,14 @@ func _add_test_enemies() -> void:
 		test_enemy.disable_shooting = true  # Don't shoot
 		test_enemy.destroy_on_death = false  # Don't destroy, keep body for testing
 
+		# Set different animation speeds for testing
+		if i == 0:
+			# Real-time fall
+			test_enemy.get_node("DeathAnimation").animation_speed = 1.0
+		elif i == 1:
+			# Slow-motion fall
+			test_enemy.get_node("DeathAnimation").animation_speed = 0.1
+
 		enemies_node.add_child(test_enemy)
 
 		# Connect signals
