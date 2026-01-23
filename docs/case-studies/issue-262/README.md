@@ -110,35 +110,64 @@ This case study documents the implementation and troubleshooting of bullet casin
 
 ### Problem 3: Missing .NET Assemblies in Export (RESOLVED - Critical Finding)
 
-**Symptom**: Exported Windows build failed to run with missing DLL errors
+**Symptom**: Exported Windows build failed to run with ".NET assemblies not found" error
 
 **Initial Hypothesis**: Need to explicitly enable `dotnet/embed_build_outputs`
 
-**Investigation Findings**:
+**Investigation Findings (Phase 1)**:
 1. Project uses mixed GDScript and C# code
 2. Main branch `export_presets.cfg` does **NOT** have `dotnet/embed_build_outputs` setting
 3. Adding `dotnet/embed_build_outputs=true` or `=false` both failed
-4. Godot 4.3-stable has known issues with .NET assembly embedding in headless exports
+4. Initially believed it was a Godot export configuration issue
 
-**Root Cause - The Real Issue**:
+**Root Cause Discovery (Phase 2) - 2026-01-23**:
 
-The problem was NOT the absence of `dotnet/embed_build_outputs` setting. The actual root causes were:
+After further user feedback showing the same error persisted, a deeper investigation revealed:
 
-1. **Configuration Divergence**: Adding ANY explicit `dotnet/embed_build_outputs` setting caused the export to deviate from the working main branch configuration
+**The ACTUAL root cause was a C# compilation error in Shotgun.cs**:
 
-2. **Godot Default Behavior**: When `dotnet/embed_build_outputs` is **not specified**:
-   - Godot uses its default behavior for the platform
-   - On Windows Desktop, this creates a separate `.NET` folder alongside the exe
-   - This is the standard and expected behavior for .NET projects
+```
+error CS7036: There is no argument given that corresponds to the required parameter 'caliber'
+of 'BaseWeapon.SpawnCasing(Vector2, Resource?)' [GodotTopDownTemplate.csproj]
+```
 
-3. **Known Godot Issue (Issue #98225)**: Using `dotnet/embed_build_outputs=true` in headless exports (like CI/CD) fails to properly embed or generate .NET assemblies
-   - Reported in Godot GitHub repository
-   - Particularly affects Linux-based CI runners exporting for Windows
-   - Embedding may fail silently or incompletely
+**How this caused the ".NET assemblies not found" error**:
 
-**Solution - The Key Insight**:
+1. The `BaseWeapon.SpawnCasing` method was added with signature: `SpawnCasing(Vector2 direction, Resource? caliber)`
+2. The `Shotgun.cs` file called `SpawnCasing(fireDirection)` without the second `caliber` parameter
+3. This caused the C# build to fail with error CS7036
+4. During export, Godot's `dotnet publish` step failed silently (it logs "end" even on failure)
+5. Godot continued the export process without the .NET assemblies
+6. The export artifact only contained the executable (96 MB), missing the `data_GodotTopDownTemplate_windows_x86_64/` folder (~130 MB) with all .NET DLLs
+7. When users ran the game, it failed with ".NET assemblies not found"
 
-**The correct approach was to remove the `dotnet/embed_build_outputs` setting entirely**, matching the main branch configuration. This allows Godot to use its default, well-tested behavior rather than forcing a specific mode that may not work correctly in all export scenarios.
+**Evidence from CI logs**:
+```
+dotnet_publish_project: begin: Publishing .NET project... steps: 1
+    dotnet_publish_project: step 0: Running dotnet publish
+dotnet_publish_project: end
+ERROR: Failed to export project: Failed to build project.
+```
+
+The "dotnet_publish_project: end" message was misleading - the build actually failed.
+
+**Solution - Fix the C# Code**:
+
+Changed in `Scripts/Weapons/Shotgun.cs` line 1168:
+```csharp
+// Before (missing caliber parameter):
+SpawnCasing(fireDirection);
+
+// After (correct):
+SpawnCasing(fireDirection, WeaponData?.Caliber);
+```
+
+**Verification**:
+- Local `dotnet build` succeeded with 0 errors (only warnings)
+- CI build completed successfully
+- Export artifact now contains both:
+  - `Godot-Top-Down-Template.exe` (96.4 MB)
+  - `data_GodotTopDownTemplate_windows_x86_64/` folder with 229 .NET assembly files (~173 MB uncompressed)
 
 ### Problem 4: GDScript Type Inference Errors (RESOLVED)
 
@@ -446,5 +475,19 @@ ls -lh "Windows Desktop.zip"
 
 **Issue**: https://github.com/Jhon-Crow/godot-topdown-MVP/issues/262
 **Pull Request**: https://github.com/Jhon-Crow/godot-topdown-MVP/pull/275
-**Final Commit**: ff28830 (2026-01-23 19:31:46)
+**Final Commit**: b3c9c0e (2026-01-23 20:56:08) - Fix SpawnCasing call in Shotgun.cs
+**Previous Commit**: ff28830 (2026-01-23 19:31:46) - Export presets investigation
 **Status**: RESOLVED ✓
+
+---
+
+## Final Resolution Summary
+
+**The ".NET assemblies not found" error was caused by a C# compilation error (CS7036) in Shotgun.cs, NOT by export_presets.cfg configuration issues.**
+
+The fix was a single line change to pass the missing `caliber` parameter to the `SpawnCasing` method:
+```csharp
+SpawnCasing(fireDirection, WeaponData?.Caliber);
+```
+
+This allowed the .NET project to build successfully, enabling Godot to include the required .NET assemblies folder in the export.
