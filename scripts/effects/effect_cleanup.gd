@@ -1,4 +1,4 @@
-extends GPUParticles2D
+extends Particles2D
 ## Auto-cleanup script for one-shot particle effects.
 ##
 ## Automatically frees the particle effect node after its lifetime expires.
