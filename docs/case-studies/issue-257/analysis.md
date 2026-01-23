@@ -42,6 +42,13 @@ Reference: [Reddit blood effect demo](https://www.reddit.com/r/godot/comments/ff
      - `[PenultimateHit] ready` ✓ (autoload #11)
    - ImpactEffectsManager is specifically failing to load while others succeed
 
+8. **Investigation Round 4** (current):
+   - Created minimal ImpactEffectsManager test version
+   - Temporarily replaced full script with minimal version that only loads essential scenes
+   - If minimal version works, the issue is with script complexity or specific code
+   - If minimal version fails, the issue is with autoload loading itself (Godot engine issue)
+   - Waiting for user to test minimal version and provide new log file
+
 ## Root Cause Analysis
 
 ### Investigation Process
@@ -61,14 +68,16 @@ Reference: [Reddit blood effect demo](https://www.reddit.com/r/godot/comments/ff
 
 ### Issues Identified
 
-1. **ImpactEffectsManager Autoload Not Loading** (CRITICAL):
+1. **ImpactEffectsManager Autoload Not Loading** (CRITICAL - INVESTIGATION ONGOING):
    - The autoload is registered in `project.godot` at `*res://scripts/autoload/impact_effects_manager.gd`
    - But `get_node_or_null("/root/ImpactEffectsManager")` returns `null`
    - This indicates a **silent script load failure**
    - According to [Godot Issue #78230](https://github.com/godotengine/godot/issues/78230):
      - "Autoload scripts compile error are not reported"
      - They fail with confusing "Script does not inherit from Node" message
-   - The script may have a parse-time error that prevents loading
+   - **Investigation Round 4**: Created minimal test version to isolate the issue
+   - If minimal version loads, the problem is with the full script's complexity
+   - If minimal version fails, it's a Godot engine autoload loading issue
 
 2. **Incorrect Wall Collision Layer** (Bug):
    - `WALL_COLLISION_LAYER` was set to `1` (player layer)
@@ -232,3 +241,4 @@ If ImpactEffectsManager is not loading, you would see:
 - `game_log_20260122_194241.txt` - First test, no [ImpactEffects] entries
 - `game_log_20260122_201222.txt` - Second test, still no [ImpactEffects] entries
 - `game_log_20260122_221039.txt` - Third test, [ENEMY] WARNING confirms autoload not found
+- `game_log_20260123_003241.txt` - Fourth test, same issue persists (minimal version not tested yet)
