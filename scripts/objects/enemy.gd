@@ -63,6 +63,9 @@ enum BehaviorMode {
 ## Bullet scene to instantiate when shooting.
 @export var bullet_scene: PackedScene
 
+## Casing scene to instantiate when firing (for ejected bullet casings).
+@export var casing_scene: PackedScene
+
 ## Offset from enemy center for bullet spawn position.
 @export var bullet_spawn_offset: float = 30.0
 
@@ -660,6 +663,10 @@ func _ready() -> void:
 	# Preload bullet scene if not set in inspector
 	if bullet_scene == null:
 		bullet_scene = preload("res://scenes/projectiles/Bullet.tscn")
+
+	# Preload casing scene if not set in inspector
+	if casing_scene == null:
+		casing_scene = preload("res://scenes/effects/Casing.tscn")
 
 	# Initialize walking animation base positions
 	if _body_sprite:
@@ -3786,6 +3793,9 @@ func _shoot() -> void:
 	# Add bullet to the scene tree
 	get_tree().current_scene.add_child(bullet)
 
+	# Spawn casing if casing scene is set
+	_spawn_casing(direction, weapon_forward)
+
 	# Play shooting sound
 	var audio_manager: Node = get_node_or_null("/root/AudioManager")
 	if audio_manager and audio_manager.has_method("play_m16_shot"):
@@ -3815,6 +3825,51 @@ func _play_delayed_shell_sound() -> void:
 	var audio_manager: Node = get_node_or_null("/root/AudioManager")
 	if audio_manager and audio_manager.has_method("play_shell_rifle"):
 		audio_manager.play_shell_rifle(global_position)
+
+
+## Spawns a bullet casing that gets ejected from the weapon.
+## Based on BaseWeapon.cs SpawnCasing method for visual consistency with player weapons.
+## @param shoot_direction: Direction the bullet was fired (used to determine casing ejection direction).
+## @param weapon_forward: The weapon's forward direction (barrel direction).
+func _spawn_casing(shoot_direction: Vector2, weapon_forward: Vector2) -> void:
+	if casing_scene == null:
+		return
+
+	# Calculate casing spawn position (near the weapon, slightly offset)
+	# Use 50% of bullet spawn offset to position casing near weapon muzzle
+	var casing_spawn_position: Vector2 = global_position + weapon_forward * (bullet_spawn_offset * 0.5)
+
+	var casing: RigidBody2D = casing_scene.instantiate()
+	casing.global_position = casing_spawn_position
+
+	# Calculate ejection direction to the right of the weapon
+	# In a top-down view with Y increasing downward:
+	# - If weapon points right (1, 0), right side of weapon is DOWN (0, 1)
+	# - If weapon points up (0, -1), right side of weapon is RIGHT (1, 0)
+	# This is a 90 degree counter-clockwise rotation (perpendicular to shooting direction)
+	var weapon_right: Vector2 = Vector2(-weapon_forward.y, weapon_forward.x)
+
+	# Eject to the right with some randomness
+	var random_angle: float = randf_range(-0.3, 0.3)  # ±0.3 radians (~±17 degrees)
+	var ejection_direction: Vector2 = weapon_right.rotated(random_angle)
+
+	# Add some upward component for realistic ejection
+	ejection_direction = ejection_direction.rotated(randf_range(-0.1, 0.1))
+
+	# Set initial velocity for the casing (increased for faster ejection animation)
+	var ejection_speed: float = randf_range(300.0, 450.0)  # Random speed between 300-450 pixels/sec
+	casing.linear_velocity = ejection_direction * ejection_speed
+
+	# Add some initial spin for realism
+	casing.angular_velocity = randf_range(-15.0, 15.0)
+
+	# Set caliber data on the casing for appearance
+	# Load the 5.45x39mm caliber data for M16 rifle
+	var caliber_data: Resource = load("res://resources/calibers/caliber_545x39.tres")
+	if caliber_data:
+		casing.set("caliber_data", caliber_data)
+
+	get_tree().current_scene.add_child(casing)
 
 
 ## Calculate lead prediction - aims where the player will be, not where they are.
