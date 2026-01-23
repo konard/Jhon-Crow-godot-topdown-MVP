@@ -8,8 +8,8 @@ projects:
 milestone:	
 number:	258
 url:	https://github.com/Jhon-Crow/godot-topdown-MVP/pull/258
-additions:	5172
-deletions:	2
+additions:	5275
+deletions:	13
 auto-merge:	disabled
 --
 ## Summary
@@ -35,6 +35,17 @@ Adds blood splatter effects on floor and walls when bullets hit characters (not 
 - **Fixed WALL_COLLISION_LAYER**: Changed from `1` (player layer) to `4` (obstacles layer 3 bitmask)
   - The original implementation incorrectly targeted the player collision layer instead of the obstacles layer
   - Layer mapping: 1=player(1), 2=enemies(2), 3=obstacles(4), 4=pickups(8), etc.
+
+- **Fixed GPUParticles2D compatibility issue**: Changed all effect scenes to use Particles2D instead of GPUParticles2D
+  - GPUParticles2D does not work in gl_compatibility rendering mode
+  - Updated BloodEffect, DustEffect, and SparksEffect scenes
+  - Updated ImpactEffectsManager casting to Particles2D
+  - This resolves the autoload failing to load silently
+
+- **Fixed effect_cleanup.gd script**: Changed from extending GPUParticles2D to Particles2D
+  - The effect_cleanup.gd script was still extending GPUParticles2D while scenes used Particles2D
+  - This mismatch prevented the ImpactEffectsManager autoload from loading properly
+  - Root cause of blood effects not appearing in-game
 
 - **Added diagnostic logging via FileLogger**
   - Now logs when ImpactEffectsManager is initialized and scenes are loaded
@@ -72,5 +83,3 @@ Full investigation analysis is documented in `docs/case-studies/issue-257/analys
 
 ---
 Fixes #257
-
-Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
