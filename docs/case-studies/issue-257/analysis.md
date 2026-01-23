@@ -404,3 +404,77 @@ After the z_index and wall splatter scale fixes, user tested and reported new is
 - Shell casings: `RectangleShape2D.size = Vector2(4, 14)` from `Casing.tscn`
 - New blood decals: 8x8 texture × 0.8-1.5 scale = 6-12 pixels
 - Blood particles in BloodEffect: `scale_amount_min=0.1`, `scale_amount_max=0.4` (very small)
+
+### Investigation Round 9 (2026-01-24)
+
+After the blood decal size and quantity fixes (Round 8), user tested and reported three issues:
+1. "игра теперь вылетает" (Game now crashes)
+2. "не видно эффекта из main ветки (брызги частицы при попадании пули)" (Blood particle effect from main branch not visible)
+3. "спрайты крови не должны пролетать сквозь стены" (Blood sprites shouldn't pass through walls)
+
+**Log analysis** revealed NO errors or crashes in the logs. The logs ended abruptly during blood effect spawning, but this appeared to be normal game termination rather than crashes. The logs showed:
+- `[ImpactEffects] Blood particle effect instantiated successfully`
+- `[ImpactEffects] Blood decals spawned: 4/8 at simulated particle landing positions`
+
+However, user reported the blood spray particle effect was **not visible**.
+
+**Root cause identified** - CPUParticles2D missing texture:
+
+In Round 6, particle effects were changed from `GPUParticles2D` to `CPUParticles2D` to fix autoload loading issues (Godot 4 renamed `Particles2D` class). However, the conversion introduced a critical bug:
+
+1. **Missing particle texture**:
+   - Original `GPUParticles2D` had: `texture = SubResource("GradientTexture2D_blood")` (12x12 pixels)
+   - Converted `CPUParticles2D` had: **NO texture** - particles were single pixels/invisible
+   - `CPUParticles2D` uses `color_ramp` for gradients but doesn't automatically render visible particles without a texture
+   - `GPUParticles2D` uses `ParticleProcessMaterial` + explicit texture for visible particles
+
+2. **Script type mismatch**:
+   - `effect_cleanup.gd` was changed to `extends CPUParticles2D`
+   - But the effect scenes should have used `GPUParticles2D` for proper rendering
+
+3. **Blood decals passing through walls**:
+   - `_spawn_blood_decals_at_particle_landing()` calculated landing positions using particle physics
+   - But it never checked if a wall was between the origin and landing position
+   - Decals could appear on the other side of walls
+
+**Fixes applied**:
+
+1. **Restored GPUParticles2D with texture** for all effects:
+   - `BloodEffect.tscn`: Restored to `type="GPUParticles2D"` with `GradientTexture2D` (12x12 px)
+   - `DustEffect.tscn`: Restored to `type="GPUParticles2D"` with `GradientTexture2D` (16x16 px)
+   - `SparksEffect.tscn`: Restored to `type="GPUParticles2D"` with `GradientTexture2D` (8x8 px)
+   - `effect_cleanup.gd`: Changed back to `extends GPUParticles2D`
+
+2. **Updated impact_effects_manager.gd**:
+   - Changed all effect instantiation to use `GPUParticles2D` type casting
+   - Updated `_spawn_blood_decals_at_particle_landing()` to:
+     - Accept `GPUParticles2D` parameter instead of `CPUParticles2D`
+     - Extract physics parameters from `ParticleProcessMaterial` (GPUParticles2D's process material)
+     - Added wall collision raycast check before spawning each decal
+
+3. **Wall collision check for blood decals**:
+   ```gdscript
+   # Check if there's a wall between origin and landing position
+   if space_state:
+       var query := PhysicsRayQueryParameters2D.create(origin, landing_pos, WALL_COLLISION_LAYER)
+       query.collide_with_bodies = true
+       query.collide_with_areas = false
+       var result: Dictionary = space_state.intersect_ray(query)
+       if not result.is_empty():
+           # Wall detected between origin and landing - skip this decal
+           decal.queue_free()
+           continue
+   ```
+
+**Technical comparison GPUParticles2D vs CPUParticles2D**:
+
+| Property | GPUParticles2D | CPUParticles2D |
+|----------|----------------|----------------|
+| Physics storage | `process_material: ParticleProcessMaterial` | Direct on node (e.g., `initial_velocity_min`) |
+| Texture | `texture: Texture2D` (required for visibility) | Optional, uses `color` property |
+| Gradient | In `ParticleProcessMaterial.color_ramp` | `color_ramp: Gradient` |
+| Direction | `Vector3` in material | `Vector2` on node |
+| Gravity | `Vector3` in material | `Vector2` on node |
+| gl_compatibility | May have issues | More reliable |
+
+**Key lesson**: When converting between particle types in Godot 4, texture assignment is critical. `GPUParticles2D` requires an explicit `texture` property to render visible particles, while `CPUParticles2D` can render without one (using `color`) but may appear as single pixels.
