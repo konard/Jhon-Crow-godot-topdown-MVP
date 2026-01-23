@@ -58,6 +58,29 @@ In Godot's coordinate system where Y increases downward:
 
 **Root Cause:** The casing appearance system relied on color modulation rather than actual sprite textures, and the caliber matching logic was incomplete.
 
+#### Issue 4: Missing .NET Assemblies in Build
+
+**Root Cause:** The Windows export was configured with `binary_format/embed_pck=true` but was missing the `dotnet/embed_build_outputs=true` setting. This caused the exported .exe to fail at runtime with the error:
+
+```
+.NET assemblies not found
+Unable to find the .NET assemblies directory.
+Make sure the '.../data_GodotTopDownTemplate_windows_x86_64' directory exists
+and contains the .NET assemblies.
+```
+
+**Why This Happens:**
+- When `embed_pck=true` is set alone, Godot embeds game resources (scenes, scripts, assets) into the .exe
+- However, for C#/Mono projects, .NET assemblies (DLL files) are normally placed in a separate `data_*` folder
+- Without `dotnet/embed_build_outputs=true`, these assemblies are not embedded, leaving the .exe unable to find required .NET runtime files
+
+**Solution:** Add `dotnet/embed_build_outputs=true` to the `[preset.0.options]` section in `export_presets.cfg`, right after `binary_format/embed_pck=true`.
+
+**References:**
+- [Godot Issue #94436: Assemblies not being included when building Godot 4.3 C# build](https://github.com/godotengine/godot/issues/94436)
+- [Godot Issue #98225: Using Godot.mono headless export on linux doesn't embed or generate dotnet assemblies](https://github.com/godotengine/godot/issues/98225)
+- [Godot Forum: The godot C# export cannot be found. NET assembly directory](https://forum.godotengine.org/t/the-godot-c-export-cannot-be-found-net-assembly-directory/86926)
+
 ## Solution Implementation
 
 ### 1. Created Casing Sprites
@@ -98,6 +121,10 @@ The `_set_casing_appearance()` function in `scripts/effects/casing.gd` now:
 
 Updated `SpawnCasing()` in `Scripts/AbstractClasses/BaseWeapon.cs` to use correct rotation formula for Godot's coordinate system.
 
+### 6. Fixed Export Configuration
+
+Added `dotnet/embed_build_outputs=true` to `export_presets.cfg` to ensure .NET assemblies are embedded in the exported executable.
+
 ## Files Changed
 
 - `Scripts/AbstractClasses/BaseWeapon.cs` - Fixed ejection direction calculation
@@ -110,13 +137,16 @@ Updated `SpawnCasing()` in `Scripts/AbstractClasses/BaseWeapon.cs` to use correc
 - `assets/sprites/effects/casing_rifle.png` - New sprite (brass)
 - `assets/sprites/effects/casing_pistol.png` - New sprite (silver)
 - `assets/sprites/effects/casing_shotgun.png` - New sprite (red)
+- `export_presets.cfg` - Added dotnet/embed_build_outputs=true setting
 
 ## Timeline
 
 1. **Initial Implementation:** Added basic casing system with placeholder texture
-2. **Feedback Received:** Owner reported pink rectangles and direction issues
-3. **Analysis:** Identified PlaceholderTexture2D and rotation formula issues
-4. **Fix Applied:** Created proper sprites, updated caliber system, fixed physics
+2. **First Feedback:** Owner reported pink rectangles and direction issues
+3. **First Fix:** Created proper sprites, updated caliber system, fixed physics
+4. **Second Feedback:** Owner reported missing .dll folder in exe archive (2026-01-23)
+5. **Root Cause Analysis:** Investigated export configuration and found missing `dotnet/embed_build_outputs` setting
+6. **Second Fix:** Added `dotnet/embed_build_outputs=true` to export_presets.cfg
 
 ## Lessons Learned
 
@@ -124,6 +154,8 @@ Updated `SpawnCasing()` in `Scripts/AbstractClasses/BaseWeapon.cs` to use correc
 2. **Verify coordinate system conventions** - Godot uses Y-down, which affects rotation calculations
 3. **Test with multiple weapon orientations** - Direction-based calculations need testing in all 4 cardinal directions
 4. **Resource-based sprite assignment** - CaliberData is the right place for casing appearance data
+5. **C# export requires both embed settings** - When exporting Godot C# projects with embedded PCK, both `binary_format/embed_pck=true` AND `dotnet/embed_build_outputs=true` are required
+6. **Test actual exported builds** - CI success doesn't mean the exported executable will run correctly on target machines
 
 ## Related Files
 
