@@ -178,6 +178,19 @@ public partial class Shotgun : BaseWeapon
     private bool _wasMiddleMouseHeldDuringDrag = false;
 
     /// <summary>
+    /// Whether a shell was loaded during the current mid-drag gesture.
+    /// This prevents loading multiple shells in one drag motion (Issue #266).
+    ///
+    /// ROOT CAUSE (Issue #266): When TryProcessMidDragGesture loads a shell and resets
+    /// _dragStartPosition, it also resets _wasMiddleMouseHeldDuringDrag = anyMMBDetected.
+    /// Since MMB is still held, this is true. When RMB is released, ProcessReloadGesture
+    /// sees _wasMiddleMouseHeldDuringDrag = true and loads another shell.
+    ///
+    /// Fix: Track if a shell was loaded during mid-drag, and skip loading on RMB release.
+    /// </summary>
+    private bool _shellLoadedDuringMidDrag = false;
+
+    /// <summary>
     /// Whether we're on the tutorial level (infinite shells).
     /// </summary>
     private bool _isTutorialLevel = false;
@@ -572,8 +585,9 @@ public partial class Shotgun : BaseWeapon
 
             ProcessDragGesture(dragVector);
 
-            // Reset the flag after processing
+            // Reset flags after processing
             _wasMiddleMouseHeldDuringDrag = false;
+            _shellLoadedDuringMidDrag = false;  // Issue #266: Reset mid-drag shell load flag
             _dragFrameCount = 0;
         }
     }
@@ -637,23 +651,28 @@ public partial class Shotgun : BaseWeapon
 
                         if (shouldLoadShellMidDrag && ShellsInTube < TubeMagazineCapacity)
                         {
-                            LogToFile($"[Shotgun.FIX#243] Mid-drag MMB+DOWN during pump cycle: transitioning to reload mode");
+                            LogToFile($"[Shotgun.FIX#266] Mid-drag MMB+DOWN during pump cycle: transitioning to reload mode");
 
                             _lastBoltCloseTime = Time.GetTicksMsec() / 1000.0;
 
-                            // Open bolt for loading (skip the Ready state)
+                            // Transition to Loading state (skip the Ready state)
+                            // NOTE: Don't play action open sound here - the bolt is already open
+                            // from the pump UP action. Playing open sound here was causing
+                            // confusion (Issue #266).
                             ReloadState = ShotgunReloadState.Loading;
                             ActionState = ShotgunActionState.Ready;
-                            PlayActionOpenSound();
+                            // PlayActionOpenSound(); // REMOVED: Bolt is already open from pump UP
                             EmitSignal(SignalName.ReloadStateChanged, (int)ReloadState);
                             EmitSignal(SignalName.ActionStateChanged, (int)ActionState);
                             EmitSignal(SignalName.ReloadStarted);
-                            LogToFile("[Shotgun.FIX#243] Mid-drag bolt opened for loading - now loading shell");
+                            LogToFile("[Shotgun.FIX#266] Transitioned to Loading state (bolt already open from pump UP)");
 
                             // Load a shell
                             LoadShell();
+                            // Mark that we loaded a shell during mid-drag (Issue #266 fix)
+                            _shellLoadedDuringMidDrag = true;
 
-                            LogToFile($"[Shotgun.FIX#243] Mid-drag shell loaded during pump cycle - staying in Loading state");
+                            LogToFile($"[Shotgun.FIX#266] Mid-drag shell loaded during pump cycle - staying in Loading state");
                             gestureProcessed = true;
                             break;
                         }
@@ -836,25 +855,29 @@ public partial class Shotgun : BaseWeapon
                     // Transition to reload mode and load shell.
                     if (shouldLoadShell && ShellsInTube < TubeMagazineCapacity)
                     {
-                        LogToFile($"[Shotgun.FIX#243] MMB+DOWN during pump cycle: transitioning to reload mode (wasMMBDuringDrag={_wasMiddleMouseHeldDuringDrag}, isMMBHeld={_isMiddleMouseHeld})");
+                        LogToFile($"[Shotgun.FIX#266] MMB+DOWN during pump cycle: transitioning to reload mode (wasMMBDuringDrag={_wasMiddleMouseHeldDuringDrag}, isMMBHeld={_isMiddleMouseHeld})");
 
-                        // First, complete the pump action (chamber if possible)
                         _lastBoltCloseTime = Time.GetTicksMsec() / 1000.0;
 
-                        // Open bolt for loading (skip the Ready state)
+                        // Transition to Loading state (skip the Ready state)
+                        // NOTE: Don't play action open sound here - the bolt is already open
+                        // from the pump UP action. Playing open sound here was causing
+                        // confusion (Issue #266).
                         ReloadState = ShotgunReloadState.Loading;
                         ActionState = ShotgunActionState.Ready;
-                        PlayActionOpenSound();
+                        // PlayActionOpenSound(); // REMOVED: Bolt is already open from pump UP
                         EmitSignal(SignalName.ReloadStateChanged, (int)ReloadState);
                         EmitSignal(SignalName.ActionStateChanged, (int)ActionState);
                         EmitSignal(SignalName.ReloadStarted);
-                        LogToFile("[Shotgun.FIX#243] Bolt opened for loading - now loading shell");
+                        LogToFile("[Shotgun.FIX#266] Transitioned to Loading state (bolt already open from pump UP)");
 
                         // Load a shell
                         LoadShell();
+                        // Mark that we loaded a shell during mid-drag (Issue #266 fix)
+                        _shellLoadedDuringMidDrag = true;
 
                         // Stay in Loading state for more shells
-                        LogToFile($"[Shotgun.FIX#243] Shell loaded during pump cycle - still in Loading state for more shells");
+                        LogToFile($"[Shotgun.FIX#266] Shell loaded during pump cycle - still in Loading state for more shells");
                         return;
                     }
 
@@ -925,25 +948,35 @@ public partial class Shotgun : BaseWeapon
             case ShotgunReloadState.Loading:
                 if (isDragDown)
                 {
+                    // Issue #266 Fix: Check if a shell was already loaded during mid-drag.
+                    // If so, skip loading another shell on RMB release to prevent multiple
+                    // shells loading in one drag motion.
+                    if (_shellLoadedDuringMidDrag)
+                    {
+                        LogToFile($"[Shotgun.FIX#266] RMB release in Loading state: shell already loaded mid-drag, skipping duplicate load");
+                        // Stay in Loading state for more shells (user can do another drag)
+                        break;
+                    }
+
                     // Use _wasMiddleMouseHeldDuringDrag instead of just _isMiddleMouseHeld
                     // This fixes the timing issue where users release MMB and RMB simultaneously
                     bool shouldLoadShell = _wasMiddleMouseHeldDuringDrag || _isMiddleMouseHeld;
 
                     if (VerboseInputLogging)
                     {
-                        LogToFile($"[Shotgun.FIX#243] RMB release in Loading state: wasMMBDuringDrag={_wasMiddleMouseHeldDuringDrag}, isMMBHeld={_isMiddleMouseHeld} => shouldLoadShell={shouldLoadShell}");
+                        LogToFile($"[Shotgun.FIX#266] RMB release in Loading state: wasMMBDuringDrag={_wasMiddleMouseHeldDuringDrag}, isMMBHeld={_isMiddleMouseHeld} => shouldLoadShell={shouldLoadShell}");
                     }
 
                     if (shouldLoadShell)
                     {
                         // Load a shell (MMB + RMB drag down)
-                        LogToFile("[Shotgun.FIX#243] Loading shell (MMB was held during drag)");
+                        LogToFile("[Shotgun.FIX#266] Loading shell (MMB was held during drag)");
                         LoadShell();
                     }
                     else
                     {
                         // Close bolt without MMB - finish reload
-                        LogToFile("[Shotgun.FIX#243] Closing bolt (MMB was not held)");
+                        LogToFile("[Shotgun.FIX#266] Closing bolt (MMB was not held)");
                         CompleteReload();
                     }
                 }
