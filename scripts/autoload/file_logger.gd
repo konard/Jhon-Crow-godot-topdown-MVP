@@ -15,7 +15,7 @@ var _log_path: String = ""
 var _logging_enabled: bool = true
 
 ## Buffer for log messages before file is ready.
-var _log_buffer: Array[String] = []
+var _log_buffer = []
 
 ## Maximum buffer size before flush.
 const MAX_BUFFER_SIZE: int = 100

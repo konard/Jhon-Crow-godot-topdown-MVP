@@ -40,13 +40,13 @@ const WALL_COLLISION_LAYER: int = 4
 const MAX_BULLET_HOLES: int = 0
 
 ## Active blood decals for cleanup management.
-var _blood_decals: Array[Node2D] = []
+var _blood_decals = []
 
 ## Active bullet holes for cleanup management (visual only).
-var _bullet_holes: Array[Node2D] = []
+var _bullet_holes = []
 
 ## Active penetration collision holes for cleanup management.
-var _penetration_holes: Array[Node2D] = []
+var _penetration_holes = []
 
 ## Penetration hole scene.
 var _penetration_hole_scene: PackedScene = null
@@ -90,8 +90,8 @@ func _preload_effect_scenes() -> void:
 	var blood_decal_path := "res://scenes/effects/BloodDecal.tscn"
 
 	# Track loaded scenes for logging
-	var loaded_scenes: Array[String] = []
-	var missing_scenes: Array[String] = []
+	var loaded_scenes = []
+	var missing_scenes = []
 
 	if ResourceLoader.exists(dust_path):
 		_dust_effect_scene = load(dust_path)
