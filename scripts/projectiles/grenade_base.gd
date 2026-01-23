@@ -37,9 +37,9 @@ class_name GrenadeBase
 ## Multiplier to convert mouse velocity (pixels/second) to throw velocity.
 ## This is the base ratio before mass adjustment.
 ## Lower values = require faster mouse movement for maximum throw (easier to control strength).
-## At 1.2: max throw requires ~708 px/s mouse velocity for 850 px/s throw speed.
-## At 1.0: max throw requires ~850 px/s mouse velocity (heavier grenades).
-@export var mouse_velocity_to_throw_multiplier: float = 1.2
+## At 0.5: max throw requires ~2700 px/s mouse velocity for 1352 px/s throw speed.
+## This allows for a wider range of controllable throw distances.
+@export var mouse_velocity_to_throw_multiplier: float = 0.5
 
 ## Minimum swing distance (in pixels) required for full velocity transfer at grenade's mass.
 ## For a 0.4kg grenade, need ~200px of mouse movement to transfer full velocity.

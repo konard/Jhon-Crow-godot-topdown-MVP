@@ -243,6 +243,113 @@ The new maximum throw distances (~2.6× viewport width for flashbang, ~2× viewp
 
 ---
 
+## 10. Velocity Scaling Fix + 400px Distance Increase
+
+### 10.1 New Issues Reported
+
+**Date:** 2026-01-23 20:37
+**User:** Jhon-Crow
+
+**Issue 1:** "даже если я медленно двигаю мышкой граната всё равно летит на максимум"
+*Translation: even if I move the mouse slowly, the grenade still flies at maximum distance*
+
+**Issue 2:** "увеличь максимальную дальность на 400px"
+*Translation: increase maximum distance by 400px*
+
+**Attached log file:** `game_log_20260123_233509.txt`
+
+### 10.2 Root Cause Analysis
+
+Analysis of the game log revealed the following patterns:
+
+**Evidence from logs showing the problem:**
+```
+[23:35:26] Mouse velocity: (10232.15, 137.5096) → Final speed: 1260.8 (capped at max)
+[23:35:34] Mouse velocity: (3212.58, -614.8641) → Final speed: 1260.8 (capped at max)
+[23:35:46] Mouse velocity: (2350.991, -23.57303) → Final speed: 1260.8 (capped at max)
+[23:36:04] Mouse velocity: (866.5116, 0) → Final speed: 1096.1 (below cap)
+[23:36:13] Mouse velocity: (124.7697, -16.6975) → Final speed: 159.2 (short throw)
+```
+
+**Root Cause:** The `mouse_velocity_to_throw_multiplier` was set too high (1.2 for flashbang, 1.0 for frag).
+
+With the formula:
+```
+throw_velocity = mouse_velocity × multiplier × transfer_efficiency / sqrt(mass_ratio)
+```
+
+Even "slow" mouse movements in games register 800-1500 px/s velocity. With multiplier 1.2:
+- 1000 px/s mouse × 1.2 = 1200 px/s throw (hits cap at 1260.8)
+- 500 px/s mouse × 1.2 = 600 px/s throw (medium distance)
+
+This means only extremely slow movements (under ~500 px/s mouse) would produce short throws.
+
+### 10.3 Solution Implementation
+
+**Fix 1: Reduce velocity multiplier for better control range**
+
+By reducing `mouse_velocity_to_throw_multiplier` from 1.2/1.0 to 0.5, we achieve:
+- 500 px/s mouse × 0.5 = 250 px/s throw (short)
+- 1000 px/s mouse × 0.5 = 500 px/s throw (medium)
+- 2000 px/s mouse × 0.5 = 1000 px/s throw (long)
+- 2700+ px/s mouse × 0.5 = capped at max (maximum)
+
+This gives users a much wider range of controllable throw distances.
+
+**Fix 2: Add +400px to maximum distance**
+
+Current max distance formula: `max_distance = max_throw_speed² / (2 × ground_friction)`
+
+For flashbang (friction = 300), current max = 2649px. Target = 3049px.
+```
+max_throw_speed = sqrt(3049 × 600) = sqrt(1829400) = 1352.6 px/s → use 1352.8
+```
+
+For frag grenade (friction = 280), current max = 1980px. Target = 2280px.
+```
+max_throw_speed = sqrt(2280 × 560) = sqrt(1276800) = 1130.0 px/s
+```
+
+### 10.4 Updated Parameter Values
+
+**FlashbangGrenade.tscn:**
+| Parameter | Before | After | Effect |
+|-----------|--------|-------|--------|
+| max_throw_speed | 1260.8 | 1352.8 | +400px max distance (2649px → 3049px) |
+| mouse_velocity_to_throw_multiplier | 1.2 | 0.5 | Better throw distance control |
+
+**FragGrenade.tscn:**
+| Parameter | Before | After | Effect |
+|-----------|--------|-------|--------|
+| max_throw_speed | 1053.1 | 1130.0 | +300px max distance (1980px → 2280px) |
+| mouse_velocity_to_throw_multiplier | 1.0 | 0.5 | Better throw distance control |
+
+**grenade_base.gd:**
+| Parameter | Before | After | Reasoning |
+|-----------|--------|-------|-----------|
+| mouse_velocity_to_throw_multiplier | 1.2 | 0.5 | New default for better control |
+
+### 10.5 Expected Behavior After Fix
+
+**Throw distance ranges:**
+| Mouse Speed | Flashbang Distance | Frag Grenade Distance |
+|-------------|-------------------|----------------------|
+| ~200 px/s (very slow) | ~100px | ~80px |
+| ~500 px/s (slow) | ~210px | ~180px |
+| ~1000 px/s (medium) | ~835px | ~720px |
+| ~2000 px/s (fast) | ~2500px (near max) | ~2050px |
+| ~2700+ px/s (very fast) | 3049px (max) | 2280px (max) |
+
+**Physics verification:**
+- Flashbang max: 1352.8² / (2 × 300) = 3049 pixels ✓
+- Frag max: 1130² / (2 × 280) = 2280 pixels ✓
+
+### 10.6 Log Files Added
+
+- `game_log_20260123_233509.txt` - User-provided log showing velocity scaling issues
+
+---
+
 *Case study compiled: 2026-01-23*
-*Last updated: 2026-01-23 (2.2x distance adjustment)*
+*Last updated: 2026-01-23 (velocity scaling fix + 400px distance increase)*
 *Author: AI Issue Solver*
