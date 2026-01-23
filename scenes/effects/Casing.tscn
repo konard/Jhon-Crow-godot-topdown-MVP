@@ -4,7 +4,7 @@
 [ext_resource type="Texture2D" uid="uid://casing_rifle_sprite" path="res://assets/sprites/effects/casing_rifle.png" id="2_default_texture"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_casing"]
-size = Vector2(8, 16)
+size = Vector2(4, 14)
 
 [node name="Casing" type="RigidBody2D"]
 collision_layer = 0

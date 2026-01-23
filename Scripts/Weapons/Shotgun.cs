@@ -138,6 +138,11 @@ public partial class Shotgun : BaseWeapon
     private Vector2 _aimDirection = Vector2.Right;
 
     /// <summary>
+    /// Last fire direction (used to eject casing after pump up).
+    /// </summary>
+    private Vector2 _lastFireDirection = Vector2.Right;
+
+    /// <summary>
     /// Position where drag started for gesture detection.
     /// </summary>
     private Vector2 _dragStartPosition = Vector2.Zero;
@@ -635,6 +640,10 @@ public partial class Shotgun : BaseWeapon
                         // Mid-drag pump up - eject shell
                         ActionState = ShotgunActionState.NeedsPumpDown;
                         PlayPumpUpSound();
+
+                        // Spawn casing when pump is pulled back (Issue #285)
+                        SpawnCasing(_lastFireDirection, WeaponData?.Caliber);
+
                         EmitSignal(SignalName.ActionStateChanged, (int)ActionState);
                         EmitSignal(SignalName.PumpActionCycled, "up");
                         GD.Print("[Shotgun] Mid-drag pump UP - shell ejected, continue dragging DOWN to chamber");
@@ -841,6 +850,10 @@ public partial class Shotgun : BaseWeapon
                     // Eject spent shell (pull pump back/up)
                     ActionState = ShotgunActionState.NeedsPumpDown;
                     PlayPumpUpSound();
+
+                    // Spawn casing when pump is pulled back (Issue #285)
+                    SpawnCasing(_lastFireDirection, WeaponData?.Caliber);
+
                     EmitSignal(SignalName.ActionStateChanged, (int)ActionState);
                     EmitSignal(SignalName.PumpActionCycled, "up");
                     LogToFile("[Shotgun.FIX#243] Pump UP - shell ejected, now pump DOWN to chamber (or MMB+DOWN to load)");
@@ -1184,6 +1197,9 @@ public partial class Shotgun : BaseWeapon
         // Use aim direction
         Vector2 fireDirection = _aimDirection;
 
+        // Store fire direction for casing ejection after pump up
+        _lastFireDirection = fireDirection;
+
         // Determine number of pellets (random between min and max)
         int pelletCount = GD.RandRange(MinPellets, MaxPellets);
 
@@ -1197,8 +1213,8 @@ public partial class Shotgun : BaseWeapon
         // Fire all pellets simultaneously with spatial distribution (cloud effect)
         FirePelletsAsCloud(fireDirection, pelletCount, spreadRadians, halfSpread, projectileScene);
 
-        // Spawn casing
-        SpawnCasing(fireDirection, WeaponData?.Caliber);
+        // NOTE: Casing is NOT spawned here for shotgun - it's ejected during pump up action
+        // (see ProcessPumpActionGesture() case ShotgunActionState.NeedsPumpUp)
 
         // Consume shell from tube
         ShellsInTube--;
