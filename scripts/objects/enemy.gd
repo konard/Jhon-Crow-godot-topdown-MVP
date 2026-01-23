@@ -580,42 +580,8 @@ var _in_assault: bool = false
 ## Used to determine if enemy can engage from current position or needs to pursue.
 const CLOSE_COMBAT_DISTANCE: float = 400.0
 
-## --- Grenade Throwing State (per issue #273) ---
-## Whether the enemy is currently in the process of throwing a grenade.
-var _is_throwing_grenade: bool = false
-
-## Timer for grenade throw preparation (time to get into position and aim).
-var _grenade_prep_timer: float = 0.0
-
-## Duration for grenade preparation phase (seconds).
-const GRENADE_PREP_DURATION: float = 0.8
-
-## Target position for the grenade throw.
-var _grenade_target_position: Vector2 = Vector2.ZERO
-
-## Type of grenade being thrown (0=offensive/frag, 1=flashbang).
-var _grenade_type_to_throw: int = 0
-
-## Cooldown timer after throwing a grenade.
-var _grenade_cooldown_timer: float = 0.0
-
-## Duration of cooldown between grenade throws (seconds).
-const GRENADE_COOLDOWN_DURATION: float = 10.0
-
-## Trigger condition tracking - timer for player hidden after suppression.
-var _player_hidden_timer: float = 0.0
-
-## Duration player must be hidden after suppression to trigger grenade (6 seconds per issue).
-const PLAYER_HIDDEN_TRIGGER_DURATION: float = 6.0
-
-## Trigger condition tracking - number of ally deaths witnessed.
-var _witnessed_ally_deaths: int = 0
-
-## Trigger condition tracking - continuous gunfire timer in zone.
-var _continuous_gunfire_timer: float = 0.0
-
-## Duration of continuous gunfire to trigger grenade (10 seconds per issue).
-const CONTINUOUS_GUNFIRE_TRIGGER_DURATION: float = 10.0
+## Grenade thrower component (per issue #273).
+var _grenade_thrower: GrenadeThrowerComponent = null
 
 ## GOAP world state for goal-oriented planning.
 var _goap_world_state: Dictionary = {}
@@ -737,8 +703,18 @@ func _ready() -> void:
 	# Initialize death animation component
 	_init_death_animation()
 
-	# Register for ally death notifications (for grenade trigger condition)
+	# Initialize grenade thrower component (per issue #273)
 	if enable_grenades:
+		_grenade_thrower = GrenadeThrowerComponent.new()
+		_grenade_thrower.enabled = true
+		_grenade_thrower.offensive_grenades = offensive_grenades
+		_grenade_thrower.flashbang_grenades = flashbang_grenades
+		_grenade_thrower.throw_range = grenade_throw_range
+		_grenade_thrower.throw_deviation = grenade_throw_deviation
+		_grenade_thrower.frag_grenade_scene = frag_grenade_scene
+		_grenade_thrower.flashbang_grenade_scene = flashbang_grenade_scene
+		_grenade_thrower.initialize(_log_to_file)
+		add_child(_grenade_thrower)
 		call_deferred("_register_ally_death_listener")
 
 
@@ -753,10 +729,10 @@ func _register_ally_death_listener() -> void:
 
 ## Called when an ally enemy dies (for grenade trigger condition #3).
 func _on_ally_died() -> void:
-	if _can_see_player and _player:
+	if _can_see_player and _player and _grenade_thrower:
 		# Only count if we can see the player (witnessed the kill)
-		_witnessed_ally_deaths += 1
-		_log_to_file("Witnessed ally death #%d" % _witnessed_ally_deaths)
+		_grenade_thrower.register_ally_death()
+		_log_to_file("Witnessed ally death #%d" % _grenade_thrower._witnessed_ally_deaths)
 
 
 ## Initialize health with random value between min and max.
@@ -1103,18 +1079,11 @@ func _physics_process(delta: float) -> void:
 			# Reset failure count when cooldown expires
 			_flank_fail_count = 0
 
-	# Update grenade cooldown timer
-	if _grenade_cooldown_timer > 0.0:
-		_grenade_cooldown_timer -= delta
-		if _grenade_cooldown_timer <= 0.0:
-			_grenade_cooldown_timer = 0.0
-
-	# Update player hidden timer for grenade trigger condition
-	if enable_grenades:
-		if _can_see_player:
-			_player_hidden_timer = 0.0
-		elif _current_state == AIState.SUPPRESSED or _current_state == AIState.IN_COVER:
-			_player_hidden_timer += delta
+	# Update grenade thrower component
+	if _grenade_thrower:
+		_grenade_thrower.update_cooldown(delta)
+		var was_suppression := _current_state == AIState.SUPPRESSED or _current_state == AIState.IN_COVER
+		_grenade_thrower.update_player_hidden_timer(delta, _can_see_player, was_suppression)
 
 	# Check for player visibility and try to find player if not found
 	if _player == null:
@@ -1163,7 +1132,7 @@ func _update_goap_state() -> void:
 	_goap_world_state["can_hit_from_cover"] = _can_hit_player_from_current_position()
 	_goap_world_state["enemies_in_combat"] = _count_enemies_in_combat()
 	_goap_world_state["player_distracted"] = _is_player_distracted()
-	_goap_world_state["has_grenades"] = offensive_grenades > 0 or flashbang_grenades > 0
+	_goap_world_state["has_grenades"] = _grenade_thrower != null and _grenade_thrower.has_grenades()
 	_goap_world_state["is_throwing_grenade"] = _current_state == AIState.THROWING_GRENADE
 
 
@@ -1905,9 +1874,7 @@ func _process_in_cover_state(delta: float) -> void:
 	velocity = Vector2.ZERO
 
 	# Check for grenade throw opportunity (per issue #273)
-	if _should_throw_grenade() and _player:
-		var grenade_type := _get_best_grenade_type()
-		_transition_to_throwing_grenade(_player.global_position, grenade_type)
+	if _check_grenade_throw():
 		return
 
 	# If still under fire, stay suppressed
@@ -2086,10 +2053,7 @@ func _process_suppressed_state(delta: float) -> void:
 	velocity = Vector2.ZERO
 
 	# Check for grenade throw opportunity (per issue #273)
-	# Suppressed enemies can throw grenades to counter player pressure
-	if _should_throw_grenade() and _player:
-		var grenade_type := _get_best_grenade_type()
-		_transition_to_throwing_grenade(_player.global_position, grenade_type)
+	if _check_grenade_throw():
 		return
 
 	# Check if player has flanked us - if we're now visible from player's position,
@@ -2794,190 +2758,49 @@ func _transition_to_retreating() -> void:
 	_find_cover_position()
 
 
+## Check if grenade throw should happen and initiate it. Returns true if transitioned.
+func _check_grenade_throw() -> bool:
+	if not _grenade_thrower or not _player:
+		return false
+	var distance := global_position.distance_to(_player.global_position)
+	var is_suppressed := _current_state == AIState.SUPPRESSED
+	if _grenade_thrower.should_throw(_current_health, _can_see_player, is_suppressed, distance):
+		var grenade_type := _grenade_thrower.get_best_grenade_type()
+		_transition_to_throwing_grenade(_player.global_position, grenade_type)
+		return true
+	return false
+
+
 ## Transition to THROWING_GRENADE state.
-## Prepares to throw a grenade at the target position.
 func _transition_to_throwing_grenade(target_pos: Vector2, grenade_type: int) -> void:
 	_current_state = AIState.THROWING_GRENADE
-	_grenade_target_position = target_pos
-	_grenade_type_to_throw = grenade_type
-	_grenade_prep_timer = 0.0
-	_is_throwing_grenade = true
-	var type_name: String = "frag" if grenade_type == 0 else "flashbang"
-	_log_debug("Entering THROWING_GRENADE state: type=%s, target=%s" % [type_name, target_pos])
-	_log_to_file("Preparing to throw %s grenade at %s" % [type_name, target_pos])
+	if _grenade_thrower:
+		_grenade_thrower.begin_throw(target_pos, grenade_type)
+	_log_debug("Entering THROWING_GRENADE state: target=%s" % target_pos)
 
 
 ## Process THROWING_GRENADE state - prepare and throw grenade at player.
 func _process_throwing_grenade_state(delta: float) -> void:
-	if not _player:
+	if not _player or not _grenade_thrower:
 		_transition_to_idle()
 		return
 
 	# Aim at the target position
-	var direction_to_target := (_grenade_target_position - global_position).normalized()
-	var target_rotation := direction_to_target.angle()
-	rotation = lerp_angle(rotation, target_rotation, rotation_speed * delta)
+	var target_pos := _grenade_thrower.get_target_position()
+	var direction := (target_pos - global_position).normalized()
+	rotation = lerp_angle(rotation, direction.angle(), rotation_speed * delta)
 
-	# Preparation phase - aim at target
-	_grenade_prep_timer += delta
-
-	if _grenade_prep_timer >= GRENADE_PREP_DURATION:
-		# Throw the grenade
-		_execute_grenade_throw()
-
-		# Start cooldown
-		_grenade_cooldown_timer = GRENADE_COOLDOWN_DURATION
-		_is_throwing_grenade = false
-
-		# Transition to seeking cover after throw (per issue: seek safety after throw)
+	# Update prep and execute when ready
+	if _grenade_thrower.update_throw_prep(delta):
+		var grenade := _grenade_thrower.execute_throw(global_position)
+		if grenade:
+			get_tree().current_scene.add_child(grenade)
+			GrenadeThrowerComponent.activate_thrown_grenade(grenade)
+		# Transition to seeking cover after throw
 		if enable_cover:
 			_transition_to_seeking_cover()
 		else:
 			_transition_to_combat()
-
-
-## Execute the actual grenade throw.
-func _execute_grenade_throw() -> void:
-	var grenade_scene: PackedScene = null
-
-	if _grenade_type_to_throw == 0:
-		# Offensive/frag grenade
-		if offensive_grenades <= 0:
-			_log_to_file("Cannot throw frag grenade - none left")
-			return
-		offensive_grenades -= 1
-
-		if frag_grenade_scene:
-			grenade_scene = frag_grenade_scene
-		else:
-			grenade_scene = preload("res://scenes/projectiles/FragGrenade.tscn")
-	else:
-		# Flashbang grenade
-		if flashbang_grenades <= 0:
-			_log_to_file("Cannot throw flashbang - none left")
-			return
-		flashbang_grenades -= 1
-
-		if flashbang_grenade_scene:
-			grenade_scene = flashbang_grenade_scene
-		else:
-			grenade_scene = preload("res://scenes/projectiles/FlashbangGrenade.tscn")
-
-	if grenade_scene == null:
-		_log_to_file("ERROR: No grenade scene available")
-		return
-
-	# Instantiate the grenade
-	var grenade: RigidBody2D = grenade_scene.instantiate()
-	if grenade == null:
-		_log_to_file("ERROR: Failed to instantiate grenade")
-		return
-
-	# Apply throw deviation (±5° per issue requirement)
-	var direction_to_target := (_grenade_target_position - global_position).normalized()
-	var deviation_radians := deg_to_rad(randf_range(-grenade_throw_deviation, grenade_throw_deviation))
-	var deviated_direction := direction_to_target.rotated(deviation_radians)
-
-	# Calculate throw distance (clamped to throw range)
-	var distance_to_target := global_position.distance_to(_grenade_target_position)
-	var actual_distance := minf(distance_to_target, grenade_throw_range)
-
-	# Position grenade at enemy location
-	grenade.global_position = global_position + deviated_direction * 30.0  # Offset from center
-
-	# Add to scene
-	get_tree().current_scene.add_child(grenade)
-
-	# Throw the grenade (uses drag_distance to control throw power)
-	# drag_distance is roughly distance / 2 for the grenade's throw calculation
-	var drag_distance := actual_distance * 0.5
-	if grenade.has_method("throw_grenade"):
-		grenade.throw_grenade(deviated_direction, drag_distance)
-		# Activate the grenade timer/fuse
-		if grenade.has_method("activate_timer"):
-			grenade.activate_timer()
-
-	var type_name: String = "frag" if _grenade_type_to_throw == 0 else "flashbang"
-	_log_to_file("Threw %s grenade: target=%s, deviation=%.1f°, distance=%.0f" % [
-		type_name,
-		_grenade_target_position,
-		rad_to_deg(deviation_radians),
-		actual_distance
-	])
-
-
-## Check if a grenade throw should be triggered based on the issue #273 conditions.
-## Returns true if conditions are met and we have grenades available.
-func _should_throw_grenade() -> bool:
-	# Must have grenades enabled and available
-	if not enable_grenades:
-		return false
-
-	if offensive_grenades <= 0 and flashbang_grenades <= 0:
-		return false
-
-	# Must not be on cooldown
-	if _grenade_cooldown_timer > 0.0:
-		return false
-
-	# Must not already be throwing
-	if _is_throwing_grenade:
-		return false
-
-	# Must have a valid player target
-	if not _player:
-		return false
-
-	# Check distance to player (must be within throw range)
-	var distance_to_player := global_position.distance_to(_player.global_position)
-	if distance_to_player > grenade_throw_range:
-		return false
-
-	# Trigger conditions from issue #273:
-	# 1. Player suppressed enemies then hid for 6+ seconds
-	if _player_hidden_timer >= PLAYER_HIDDEN_TRIGGER_DURATION:
-		_log_to_file("Grenade trigger: player hidden for %.1fs after suppression" % _player_hidden_timer)
-		return true
-
-	# 2. Player is chasing a suppressed thrower (enemy is suppressed and player approaching)
-	if _current_state == AIState.SUPPRESSED and _can_see_player:
-		_log_to_file("Grenade trigger: suppressed and player visible (being chased)")
-		return true
-
-	# 3. Thrower witnessed player kill 2+ enemies
-	if _witnessed_ally_deaths >= 2:
-		_log_to_file("Grenade trigger: witnessed %d ally deaths" % _witnessed_ally_deaths)
-		return true
-
-	# 4. Thrower heard reload/empty magazine sound but can't see player
-	# (This is handled in the sound listener callback)
-
-	# 5. Continuous gunfire for 10 seconds in zone
-	if _continuous_gunfire_timer >= CONTINUOUS_GUNFIRE_TRIGGER_DURATION:
-		_log_to_file("Grenade trigger: continuous gunfire for %.1fs" % _continuous_gunfire_timer)
-		return true
-
-	# 6. Thrower has 1 HP or less (critical health desperation throw)
-	if _current_health <= 1:
-		_log_to_file("Grenade trigger: critical health (%d HP)" % _current_health)
-		return true
-
-	return false
-
-
-## Get the best grenade type for the current tactical situation.
-## Returns 0 for offensive (frag), 1 for flashbang.
-func _get_best_grenade_type() -> int:
-	# Prefer offensive grenade when player is in cover or at distance
-	# (flush them out)
-	if offensive_grenades > 0:
-		return 0  # Frag grenade
-
-	# Fallback to flashbang if no frag grenades
-	if flashbang_grenades > 0:
-		return 1  # Flashbang
-
-	return 0  # Default (shouldn't happen if _should_throw_grenade passed)
 
 
 ## Check if the enemy is visible from the player's position.
@@ -4508,13 +4331,11 @@ func _reset() -> void:
 	_flank_last_position = Vector2.ZERO
 	_flank_fail_count = 0
 	_flank_cooldown_timer = 0.0
-	# Reset grenade state variables
-	_is_throwing_grenade = false
-	_grenade_prep_timer = 0.0
-	_grenade_cooldown_timer = 0.0
-	_player_hidden_timer = 0.0
-	_witnessed_ally_deaths = 0
-	_continuous_gunfire_timer = 0.0
+	# Reset grenade thrower component
+	if _grenade_thrower:
+		_grenade_thrower.reset()
+		_grenade_thrower.offensive_grenades = offensive_grenades
+		_grenade_thrower.flashbang_grenades = flashbang_grenades
 	# Reset sound detection state
 	_last_known_player_position = Vector2.ZERO
 	_pursuing_vulnerability_sound = false
