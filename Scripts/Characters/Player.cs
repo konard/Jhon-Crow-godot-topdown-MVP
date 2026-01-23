@@ -2655,7 +2655,7 @@ public partial class Player : BaseCharacter
 
         // Constants from grenade_base.gd for velocity-based throwing
         const float GrenadeMass = 0.36f; // Default flashbang mass
-        const float MouseVelocityMultiplier = 3.5f;
+        const float MouseVelocityMultiplier = 1.5f; // Reduced from 3.5 for better throw control
         const float MinSwingDistance = 180.0f;
         const float MinThrowSpeed = 100.0f;
         const float MaxThrowSpeed = 2500.0f;
