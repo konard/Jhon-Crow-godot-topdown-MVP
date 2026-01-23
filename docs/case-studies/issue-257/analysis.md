@@ -42,12 +42,23 @@ Reference: [Reddit blood effect demo](https://www.reddit.com/r/godot/comments/ff
      - `[PenultimateHit] ready` ✓ (autoload #11)
    - ImpactEffectsManager is specifically failing to load while others succeed
 
-8. **Investigation Round 4** (current):
+8. **Investigation Round 4** (commit `d157ef6`):
    - Created minimal ImpactEffectsManager test version
    - Temporarily replaced full script with minimal version that only loads essential scenes
-   - If minimal version works, the issue is with script complexity or specific code
-   - If minimal version fails, the issue is with autoload loading itself (Godot engine issue)
-   - Waiting for user to test minimal version and provide new log file
+   - Minimal version was deployed to test if autoload loading was the issue
+
+9. **User Testing Round 5** (game_log_20260123_214856.txt, game_log_20260123_214912.txt):
+   - User reported "спрайтов крови не видно" (blood sprites are not visible)
+   - **CRITICAL FINDING**: Log shows `[INFO] [ImpactEffects] spawn_blood_effect called at (689.5863, 752.3096)`
+   - This means the minimal ImpactEffectsManager IS LOADING and being called
+   - BUT the minimal version has an INCOMPLETE `spawn_blood_effect()` function!
+   - The function only logs but does NOT actually spawn blood effects or decals
+
+10. **Investigation Round 5** (current):
+    - Root cause identified: `project.godot` points to `minimal_impact_effects_manager.gd`
+    - The minimal version was created for debugging but never reverted back to the full version
+    - The minimal `spawn_blood_effect()` function only has logging, no actual effect spawning code
+    - Fix: Changed `project.godot` to use `impact_effects_manager.gd` instead of `minimal_impact_effects_manager.gd`
 
 ## Root Cause Analysis
 
@@ -68,16 +79,31 @@ Reference: [Reddit blood effect demo](https://www.reddit.com/r/godot/comments/ff
 
 ### Issues Identified
 
-1. **ImpactEffectsManager Autoload Not Loading** (CRITICAL - INVESTIGATION ONGOING):
-   - The autoload is registered in `project.godot` at `*res://scripts/autoload/impact_effects_manager.gd`
-   - But `get_node_or_null("/root/ImpactEffectsManager")` returns `null`
-   - This indicates a **silent script load failure**
-   - According to [Godot Issue #78230](https://github.com/godotengine/godot/issues/78230):
-     - "Autoload scripts compile error are not reported"
-     - They fail with confusing "Script does not inherit from Node" message
-   - **Investigation Round 4**: Created minimal test version to isolate the issue
-   - If minimal version loads, the problem is with the full script's complexity
-   - If minimal version fails, it's a Godot engine autoload loading issue
+1. **Minimal ImpactEffectsManager Left in Place** (CRITICAL - RESOLVED):
+   - During Investigation Round 4, a minimal test version was created to debug autoload loading
+   - `project.godot` was changed to point to `minimal_impact_effects_manager.gd`
+   - **The minimal version was never reverted to the full version**
+   - The minimal `spawn_blood_effect()` function only logs calls, it doesn't actually spawn effects:
+     ```gdscript
+     func spawn_blood_effect(position: Vector2, hit_direction: Vector2, caliber_data: Resource = null, is_lethal: bool = true) -> void:
+         _log_info("spawn_blood_effect called at %s" % position)
+         print("[ImpactEffectsManager] spawn_blood_effect called")
+         # MISSING: actual blood effect spawning code!
+     ```
+   - Fix: Changed `project.godot` line 22 from:
+     ```
+     ImpactEffectsManager="*res://scripts/autoload/minimal_impact_effects_manager.gd"
+     ```
+     to:
+     ```
+     ImpactEffectsManager="*res://scripts/autoload/impact_effects_manager.gd"
+     ```
+
+2. **Previous Issue - ImpactEffectsManager Autoload Not Loading** (RESOLVED):
+   - The original autoload was registered in `project.godot` at `*res://scripts/autoload/impact_effects_manager.gd`
+   - But `get_node_or_null("/root/ImpactEffectsManager")` was returning `null`
+   - Root cause was script compilation errors preventing the autoload from loading
+   - Fixed by resolving type annotation issues in impact_effects_manager.gd
 
 2. **Incorrect Wall Collision Layer** (Bug):
    - `WALL_COLLISION_LAYER` was set to `1` (player layer)
@@ -242,3 +268,16 @@ If ImpactEffectsManager is not loading, you would see:
 - `game_log_20260122_201222.txt` - Second test, still no [ImpactEffects] entries
 - `game_log_20260122_221039.txt` - Third test, [ENEMY] WARNING confirms autoload not found
 - `game_log_20260123_003241.txt` - Fourth test, same issue persists (minimal version not tested yet)
+- `game_log_20260123_214856.txt` - Fifth test, shows `spawn_blood_effect called` but no effects spawned (minimal version)
+- `game_log_20260123_214912.txt` - Fifth test (continued), same behavior (minimal version)
+
+## Root Cause Summary
+
+The blood sprites were not visible because of a configuration oversight:
+
+1. During debugging (Investigation Round 4), a minimal test version of ImpactEffectsManager was created
+2. `project.godot` was pointed to `minimal_impact_effects_manager.gd` for testing
+3. The minimal version was successfully deployed and tested
+4. **BUT the switch back to the full version was never made**
+5. The minimal `spawn_blood_effect()` only logs the call, it doesn't instantiate blood particles or decals
+6. User's game was building with minimal version, so blood effects were logged but never actually created

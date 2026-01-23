@@ -60,15 +60,17 @@ var _file_logger: Node = null
 
 func _ready() -> void:
 	# CRITICAL: First line diagnostic - if this doesn't appear, script failed to load
-	print("[ImpactEffectsManager] _ready() STARTING...")
+	print("[ImpactEffectsManager] _ready() STARTING - FULL VERSION...")
 
 	# Get FileLogger reference - print diagnostic if it fails
 	_file_logger = get_node_or_null("/root/FileLogger")
 	if _file_logger == null:
 		print("[ImpactEffectsManager] WARNING: FileLogger not found at /root/FileLogger")
+	else:
+		print("[ImpactEffectsManager] FileLogger found successfully")
 
 	_preload_effect_scenes()
-	_log_info("ImpactEffectsManager ready - scenes loaded")
+	_log_info("ImpactEffectsManager ready - FULL VERSION with blood effects enabled")
 
 
 ## Logs to FileLogger and always prints to console for diagnostics.
@@ -203,23 +205,23 @@ func spawn_dust_effect(position: Vector2, surface_normal: Vector2, caliber_data:
 ## @param caliber_data: Optional caliber data for effect scaling.
 ## @param is_lethal: Whether the hit was lethal (affects intensity and decal spawning).
 func spawn_blood_effect(position: Vector2, hit_direction: Vector2, caliber_data: Resource = null, is_lethal: bool = true) -> void:
-	_log_info("spawn_blood_effect at %s, dir=%s, lethal=%s" % [position, hit_direction, is_lethal])
+	_log_info("spawn_blood_effect called at %s, dir=%s, lethal=%s" % [position, hit_direction, is_lethal])
 
 	if _debug_effects:
 		print("[ImpactEffectsManager] spawn_blood_effect at ", position, " dir=", hit_direction, " lethal=", is_lethal)
 
 	if _blood_effect_scene == null:
 		_log_info("ERROR: _blood_effect_scene is null - cannot spawn blood effect")
-		if _debug_effects:
-			print("[ImpactEffectsManager] ERROR: _blood_effect_scene is null")
+		print("[ImpactEffectsManager] ERROR: _blood_effect_scene is null - blood effect NOT spawned")
 		return
 
 	var effect: Particles2D = _blood_effect_scene.instantiate() as Particles2D
 	if effect == null:
 		_log_info("ERROR: Failed to instantiate blood effect from scene")
-		if _debug_effects:
-			print("[ImpactEffectsManager] ERROR: Failed to instantiate blood effect")
+		print("[ImpactEffectsManager] ERROR: Failed to instantiate blood effect - casting failed")
 		return
+
+	_log_info("Blood particle effect instantiated successfully")
 
 	effect.global_position = position
 
@@ -329,14 +331,20 @@ func _add_effect_to_scene(effect: Node2D) -> void:
 ## @param hit_direction: Direction the blood was traveling (affects rotation).
 ## @param intensity: Scale multiplier for decal size.
 func _spawn_blood_decal(position: Vector2, hit_direction: Vector2, intensity: float = 1.0) -> void:
+	_log_info("_spawn_blood_decal called at %s, intensity=%s" % [position, intensity])
+
 	if _blood_decal_scene == null:
 		_log_info("Blood decal scene is null - skipping floor decal")
+		print("[ImpactEffectsManager] ERROR: _blood_decal_scene is null - floor decal NOT spawned")
 		return
 
 	var decal := _blood_decal_scene.instantiate() as Node2D
 	if decal == null:
 		_log_info("Failed to instantiate blood decal")
+		print("[ImpactEffectsManager] ERROR: Failed to instantiate blood decal - casting failed")
 		return
+
+	_log_info("Blood decal instantiated successfully")
 
 	# Position slightly offset in hit direction (blood travels before landing)
 	decal.global_position = position + hit_direction.normalized() * randf_range(10.0, 30.0)
