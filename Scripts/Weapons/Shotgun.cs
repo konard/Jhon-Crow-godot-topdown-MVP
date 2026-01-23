@@ -1165,7 +1165,7 @@ public partial class Shotgun : BaseWeapon
         FirePelletsAsCloud(fireDirection, pelletCount, spreadRadians, halfSpread, projectileScene);
 
         // Spawn casing
-        SpawnCasing(fireDirection);
+        SpawnCasing(fireDirection, WeaponData?.Caliber);
 
         // Consume shell from tube
         ShellsInTube--;
