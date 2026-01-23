@@ -178,3 +178,101 @@ _shoot()  # Now weapon direction matches → aim check passes!
   - Updated distraction attack priority code (lines ~1379-1386)
   - Updated vulnerability attack priority code (lines ~1467-1474)
 - `tests/unit/test_enemy.gd`: Added tests for model rotation synchronization
+
+---
+
+## Update: Wall Corner Visibility Fix (2026-01-23)
+
+### New Problem Identified
+
+After implementing the previous fixes, user reported:
+1. "Enemies shoot better and more actively now" ✓ (aim tolerance and model sync fixes working)
+2. **NEW**: "When player is right next to a wall in a passage, enemies don't see them even when very close"
+3. "Sometimes they aim incorrectly (slightly wrong angle)"
+
+### Game Log Analysis
+
+From `game_log_20260123_221826.txt`:
+
+```
+[22:19:01] [ENEMY] [Enemy1] Player vulnerable (reloading) but cannot attack: close=true (dist=91), can_see=false
+[22:19:01] [ENEMY] [Enemy2] Player vulnerable (reloading) but cannot attack: close=true (dist=84), can_see=false
+[22:24:16] [ENEMY] [Enemy1] Player vulnerable (reloading) but cannot attack: close=true (dist=86), can_see=false
+[22:24:16] [ENEMY] [Enemy3] Player vulnerable (reloading) but cannot attack: close=true (dist=172), can_see=false
+```
+
+The logs show enemies that are **very close** to the player (84-172 pixels) but `can_see=false`.
+
+### Root Cause: Single-Point Raycast Visibility Check
+
+The `_check_player_visibility()` function was using a **single raycast from the enemy center to the player's center**. When the player stands near a wall corner in a narrow passage:
+
+```
+                 Wall
+                  │
+    ┌─────────────┤
+    │             │
+    │   Enemy ────┼─ Raycast blocked by corner
+    │      →      │
+    │             │ Player (center blocked, but corners visible)
+    │             ├──┐
+    │             │▓▓│ ← Player body partly visible
+    │             ├──┘
+    └─────────────┤
+                  │
+```
+
+The raycast hits the wall corner before reaching the player's center, even though parts of the player's body are clearly visible to the enemy.
+
+### Solution: Multi-Point Visibility Check
+
+The fix uses multiple raycasts to different points on the player's body (center + 4 diagonal corners):
+
+```gdscript
+# Before (single-point check - problematic):
+var direction_to_player := (_player.global_position - global_position).normalized()
+_raycast.target_position = direction_to_player * raycast_length
+_raycast.force_raycast_update()
+if _raycast.is_colliding():
+    var collider := _raycast.get_collider()
+    if collider == _player:
+        _can_see_player = true
+
+# After (multi-point check - robust):
+var check_points := _get_player_check_points(_player.global_position)
+for point in check_points:
+    if _is_player_point_visible_to_enemy(point):
+        _can_see_player = true  # Any visible point = player visible
+```
+
+This approach was already used in `_is_visible_from_player()` (checking if player can see enemy) and `_calculate_player_visibility_ratio()`. The fix simply applies the same pattern to `_check_player_visibility()`.
+
+### Technical Details
+
+**Player check points** (from `_get_player_check_points()`):
+- Center: `player.global_position`
+- 4 corners at diagonal offsets: `±10 * 0.707` pixels (player radius 14, diagonal ≈ 10)
+
+**Visibility calculation**:
+- If **any** point is visible → `_can_see_player = true`
+- `_player_visibility_ratio` = (visible points) / (total points)
+
+### Files Modified
+
+- `scripts/objects/enemy.gd`:
+  - Modified `_check_player_visibility()` to use multi-point visibility check
+  - Uses existing `_get_player_check_points()` and `_is_player_point_visible_to_enemy()` functions
+
+### Research Sources
+
+The multi-point visibility approach is a well-known pattern for handling raycast visibility near corners:
+- [Godot Documentation: Ray-casting](https://docs.godotengine.org/en/stable/tutorials/physics/ray-casting.html)
+- [KCC Blog: Visibility with Ray-casting in Godot 3.0](https://kidscancode.org/blog/2018/03/godot3_visibility_raycasts/)
+- [GitHub Issue: Raycasts clips through edges/corners](https://github.com/godotengine/godot/issues/84108)
+
+### Testing
+
+After implementing the fix:
+1. Verify enemies can see players standing near wall corners
+2. Verify enemies attack players in narrow passages
+3. Verify no regression in normal visibility detection

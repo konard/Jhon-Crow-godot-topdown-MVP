@@ -3642,6 +3642,7 @@ func _get_wall_avoidance_weight(direction: Vector2) -> float:
 ## If detection_range is 0 or negative, uses unlimited detection range (line-of-sight only).
 ## This allows the enemy to see the player even outside the viewport if there's no obstacle.
 ## Also updates the continuous visibility timer and visibility ratio for lead prediction control.
+## Uses multi-point visibility check to handle player near wall corners (issue #264).
 func _check_player_visibility() -> void:
 	var was_visible := _can_see_player
 	_can_see_player = false
@@ -3664,29 +3665,25 @@ func _check_player_visibility() -> void:
 		_continuous_visibility_timer = 0.0
 		return
 
-	# Point raycast at player - use actual distance to player for the raycast length
-	var direction_to_player := (_player.global_position - global_position).normalized()
-	var raycast_length := distance_to_player + 10.0  # Add small buffer to ensure we reach player
-	_raycast.target_position = direction_to_player * raycast_length
-	_raycast.force_raycast_update()
+	# Check multiple points on the player's body (center + corners) to handle
+	# cases where player is near a wall corner. A single raycast to the center
+	# might hit the wall, but parts of the player's body could still be visible.
+	# This fixes the issue where enemies couldn't see players standing close to
+	# walls in narrow passages (issue #264).
+	var check_points := _get_player_check_points(_player.global_position)
+	var visible_count := 0
 
-	# Check if raycast hit something
-	if _raycast.is_colliding():
-		var collider := _raycast.get_collider()
-		# If we hit the player, we can see them
-		if collider == _player:
+	for point in check_points:
+		if _is_player_point_visible_to_enemy(point):
+			visible_count += 1
+			# If any part of the player is visible, we can see them
 			_can_see_player = true
-		# If we hit a wall/obstacle before the player, we can't see them
-	else:
-		# No collision between us and player - we have clear line of sight
-		_can_see_player = true
+			# Continue checking to calculate visibility ratio
 
-	# Update continuous visibility timer and visibility ratio
+	# Calculate visibility ratio based on how many points are visible
 	if _can_see_player:
+		_player_visibility_ratio = float(visible_count) / float(check_points.size())
 		_continuous_visibility_timer += get_physics_process_delta_time()
-		# Calculate what fraction of the player's body is visible
-		# This is used to determine if lead prediction should be enabled
-		_player_visibility_ratio = _calculate_player_visibility_ratio()
 	else:
 		# Lost line of sight - reset the timer and visibility ratio
 		_continuous_visibility_timer = 0.0
