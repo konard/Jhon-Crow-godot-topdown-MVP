@@ -2,7 +2,7 @@
 
 ## Overview
 
-**Issue:** Enemies should not see actions during special last chance - if the player hid from view, enemies should not know where they went, should perceive it as teleportation.
+**Issue:** Enemies should not see actions during special last chance - if the player hid from view, enemies should not know where they went, should perceive it as teleportation. After the last chance effect ends, enemies should search for the player at their **last remembered position** (before the teleport), not immediately know where the player moved to.
 
 **Related PR:** PR #316 - Enemy memory system implementation
 
@@ -20,6 +20,11 @@ The enemy memory system was implemented with:
   - Gunshot sound: 0.7
   - Reload/empty click: 0.6
   - Intel from other enemies: source confidence * 0.9
+- Confidence thresholds:
+  - HIGH (>0.8): Direct pursuit
+  - MEDIUM (0.5-0.8): Cautious approach
+  - LOW (0.3-0.5): Search mode
+  - LOST (<0.05): Return to patrol
 
 ### 2. Last Chance Effect Implementation
 
@@ -41,133 +46,172 @@ The first fix implemented:
 
 User reported that even with the fix, enemies in PURSUING state still behave as if they know where the player is, going exactly to them after the last chance effect ends.
 
-## Root Cause Analysis (Revised)
+### 5. Second Round of Analysis (game_log_20260124_212430.txt)
+
+User feedback (translated from Russian):
+> "After last chance, enemies should transition to search state and search for the player sequentially, starting from where they remembered the player before the last chance. Currently some enemies remain aggressive and easily find the player."
+
+## Root Cause Analysis (Final)
 
 ### The Core Problem
 
-The initial fix only reset the memory, but there are **multiple code paths** that give enemies access to the player's position:
+The previous fixes were incomplete. There were **multiple code paths** that allowed enemies to regain knowledge of the player's position almost immediately:
 
-#### Code Path 1: `_can_see_player` Check
-In `_get_target_position()` (enemy.gd:3127):
-```gdscript
-func _get_target_position() -> Vector2:
-    # If we can see the player, use their actual position
-    if _can_see_player and _player:
-        return _player.global_position  # <-- PROBLEM: Bypasses memory!
+#### Code Path 1: Sound Propagation Bypass
+The `on_sound_heard_with_intensity()` function was NOT blocked during the confusion period. This meant:
+1. Memory is reset at time T
+2. Confusion timer starts (0.5s)
+3. Nearby enemy (Enemy7) can still see player after 0.5s
+4. Enemy7 shoots at player
+5. Gunshot sounds propagate to other enemies (Enemy8, Enemy9, Enemy10)
+6. Other enemies receive sound and update their memory (confidence 0.7 for gunshots)
+7. With 0.7 confidence (MEDIUM), they immediately transition to PURSUING
+
+From `game_log_20260124_212430.txt`:
 ```
-
-When the last chance effect ends:
-1. Memory is reset ✓
-2. But `_check_player_visibility()` runs in the next physics frame
-3. If player is in line-of-sight, `_can_see_player` becomes `true`
-4. `_get_target_position()` returns `_player.global_position` directly
-5. Enemy immediately knows new player position!
-
-#### Code Path 2: Fallback to Direct Player Position
-In `_get_target_position()` (enemy.gd:3141):
-```gdscript
-    # Last resort: if player exists, use their position (even if can't see them)
-    if _player:
-        return _player.global_position  # <-- PROBLEM: Always accessible!
-```
-
-Even if memory is reset, this fallback still provides the player's real position.
-
-#### Code Path 3: Direct Player Reference in PURSUING
-In `_process_pursuing_state()` (enemy.gd:2342):
-```gdscript
-    # Use navigation-based pathfinding to move toward player
-    _move_to_target_nav(_player.global_position, combat_move_speed)  # <-- PROBLEM!
-```
-
-The approach phase uses `_player.global_position` directly, not `_get_target_position()`.
-
-### Evidence from New Logs
-
-From `game_log_20260124_205037.txt`:
-```
-[20:50:45] [ENEMY] [Enemy1] Memory reset (last chance teleport effect)
+[21:24:44] [ENEMY] [Enemy8] Memory reset (last chance teleport effect)
+[21:24:44] [ENEMY] [Enemy8] Confusion applied for 0.5 seconds
 ...
-[20:50:45] [INFO] [LastChance] Reset memory for 10 enemies (player teleport effect)
-[20:50:45] [INFO] [LastChance] All process modes restored
-...
-[20:50:46] [ENEMY] [Enemy3] State: COMBAT -> PURSUING
-[20:50:46] [ENEMY] [Enemy4] State: COMBAT -> PURSUING
-[20:50:46] [ENEMY] [Enemy2] State: COMBAT -> PURSUING
-[20:50:47] [ENEMY] [Enemy4] FLANKING started: target=(1298.44, 1515.316), ...
+[21:24:45] [ENEMY] [Enemy7] Player distracted - priority attack triggered
+[21:24:46] [ENEMY] [Enemy8] Memory: high confidence (0.89) - transitioning to PURSUING
+[21:24:46] [ENEMY] [Enemy9] Memory: medium confidence (0.80) - transitioning to PURSUING
+[21:24:47] [ENEMY] [Enemy10] Memory: medium confidence (0.70) - transitioning to PURSUING
 ```
 
-Enemies immediately transition to PURSUING and start FLANKING toward the player's **new** position (1298.44, 1515.316), not their old remembered position.
+#### Code Path 2: Priority Attack Bypass
+The "player distracted" priority attack check and the vulnerability attack check did NOT check for confusion timer. This allowed enemies who could see the player to immediately attack.
 
-## Proposed Solution (Revised)
+#### Code Path 3: Complete Memory Reset
+The memory was being completely reset (confidence = 0), which caused enemies to:
+1. Transition to IDLE
+2. Lose all knowledge of where the player WAS
+3. Then re-detect the player through normal means
 
-### Required Changes
+The user wanted enemies to **remember where the player was** and go **search that location**.
 
-1. **Reset `_can_see_player` on memory reset**
-   - Prevents immediate re-acquisition via visibility check
+### The Actual Desired Behavior
 
-2. **Add a "confusion" cooldown period**
-   - After memory reset, enemies cannot re-acquire player for a brief period (e.g., 0.5-1.0 seconds)
-   - This simulates the "teleportation confusion" effect
+According to the user:
+1. **Before last chance**: Enemies remember player's position
+2. **After last chance**: Enemies should transition to **SEARCH mode**
+3. **In search mode**: Enemies investigate the **OLD remembered position** (where they last saw the player before the teleport)
+4. Enemies should NOT immediately know the player's NEW position
 
-3. **Transition to IDLE state on memory reset**
-   - Enemies in PURSUING/COMBAT should transition to IDLE
-   - They must re-detect the player through normal means (visibility, sound)
+## Final Fix Implementation
 
-4. **Fix `_get_target_position()` fallback**
-   - Remove or condition the fallback that uses `_player.global_position` when player is not seen and memory is empty
+### Changes Made
 
-5. **Fix direct player references in PURSUING**
-   - The approach phase should use `_get_target_position()` instead of `_player.global_position`
+1. **Extended confusion duration from 0.5s to 2.0s**
+   - Gives player more time to escape and reposition
+   - Enemies cannot see or hear anything during this period
 
-### Implementation Details
+2. **Added sound blocking during confusion**
+   - `on_sound_heard_with_intensity()` now checks `_memory_reset_confusion_timer`
+   - Prevents enemies from rebuilding memory via sound propagation
 
-Update `reset_memory()` in `enemy.gd`:
+3. **Preserved old position with LOW confidence**
+   - Instead of completely resetting memory, save the old `suspected_position`
+   - Set confidence to 0.35 (LOW confidence, between 0.3 and 0.5)
+   - This puts enemies in "search mode" - they investigate but don't attack aggressively
+
+4. **Transition to PURSUING (search mode) instead of IDLE**
+   - Enemies now transition to PURSUING state
+   - PURSUING state uses memory system to navigate to suspected position
+   - Enemies will go to where they LAST SAW the player, not the new position
+
+5. **Blocked priority attacks during confusion**
+   - "Player distracted" priority attack blocked during confusion
+   - Vulnerability priority attack (reload/empty) blocked during confusion
+
+### Code Changes in `enemy.gd`
+
 ```gdscript
+## Timer for memory reset confusion effect (Issue #318). Blocks visibility and sounds after teleport.
+var _memory_reset_confusion_timer: float = 0.0
+const MEMORY_RESET_CONFUSION_DURATION: float = 2.0  ## Extended to 2s for better player escape window
+
+## Reset enemy memory for last chance teleport effect (Issue #318).
+## Preserves the LAST KNOWN position with LOW confidence so enemies search there.
 func reset_memory() -> void:
-    # Reset memory
-    if _memory != null:
-        _memory.reset()
-        _log_to_file("Memory reset (last chance teleport effect)")
+    # Save the old suspected position BEFORE resetting
+    var old_position := Vector2.ZERO
+    var had_target := false
+    if _memory != null and _memory.has_target():
+        old_position = _memory.suspected_position
+        had_target = true
 
-    # Reset legacy position
-    _last_known_player_position = Vector2.ZERO
-
-    # Reset intel sharing timer
-    _intel_share_timer = 0.0
-
-    # CRITICAL: Reset visibility state to prevent immediate re-acquisition
+    # Reset visibility and detection states
     _can_see_player = false
     _continuous_visibility_timer = 0.0
+    _intel_share_timer = 0.0
+    _pursuing_vulnerability_sound = false
 
-    # Apply confusion cooldown (prevents seeing player for a brief moment)
+    # Apply confusion timer - blocks both visibility AND sound reception
     _memory_reset_confusion_timer = MEMORY_RESET_CONFUSION_DURATION
 
-    # Transition active enemies to IDLE to require re-detection
-    if _current_state in [AIState.PURSUING, AIState.COMBAT, AIState.ASSAULT, AIState.FLANKING]:
+    # If we had a target position, set LOW confidence so enemy searches there
+    if had_target and old_position != Vector2.ZERO:
+        _memory.suspected_position = old_position
+        _memory.confidence = 0.35  # Low confidence - search mode
+        _last_known_player_position = old_position
+        _transition_to_pursuing()  # Search mode
+    else:
+        # No previous target - just reset to IDLE
+        _memory.reset()
+        _last_known_player_position = Vector2.ZERO
         _transition_to_idle()
+
+## Sound handler - block during confusion
+func on_sound_heard_with_intensity(...) -> void:
+    if _memory_reset_confusion_timer > 0.0:
+        return  # Ignore sounds during confusion
+
+## Priority attack - block during confusion
+var is_confused: bool = _memory_reset_confusion_timer > 0.0
+if is_distraction_enabled and not is_confused and _can_see_player and _player:
+    # Priority attack code...
 ```
 
-## Files Changed
+## Expected Behavior After Fix
 
-1. `scripts/objects/enemy.gd`:
-   - Update `reset_memory()` method to reset visibility and state
-   - Add `_memory_reset_confusion_timer` variable
-   - Update `_check_player_visibility()` to check confusion timer
-   - Update `_get_target_position()` to handle empty memory properly
-
-2. `scripts/autoload/last_chance_effects_manager.gd`:
-   - Already has `_reset_all_enemy_memory()` call (no changes needed)
+When last chance effect ends:
+1. All enemies save their current suspected position
+2. Visibility is reset (`_can_see_player = false`)
+3. Confusion timer starts (2.0 seconds)
+4. During confusion:
+   - Enemies cannot see the player
+   - Enemies cannot hear sounds
+   - Priority attacks are blocked
+5. Memory is set to LOW confidence (0.35) with the OLD position
+6. Enemies transition to PURSUING (search mode)
+7. Enemies navigate to the OLD remembered position
+8. After reaching that position and not finding the player:
+   - If they can see the player, they transition to COMBAT
+   - If not, they transition to patrol/guard behavior (IDLE)
 
 ## Test Plan
 
 - [x] Enemy updates memory when player is visible before last chance
 - [x] During last chance effect, enemy memory is frozen (no updates)
-- [x] When last chance ends, enemy memory is reset
-- [ ] **NEW: When last chance ends, enemy `_can_see_player` is reset**
-- [ ] **NEW: When last chance ends, enemies in PURSUING/COMBAT/FLANKING transition to IDLE**
-- [ ] **NEW: Enemies search their OLD remembered position (before reset)**
-- [ ] Enemies do NOT know player's new position after reset
-- [ ] Enemies must re-acquire player through visual contact or sound
-- [ ] Multiple enemies all have memory reset
-- [ ] Enemy-to-enemy intel sharing does not override reset (timer reset)
+- [x] When last chance ends, enemy memory is preserved with LOW confidence
+- [x] When last chance ends, enemy `_can_see_player` is reset
+- [x] When last chance ends, enemies transition to PURSUING (search mode)
+- [x] Sounds are blocked during confusion period
+- [x] Priority attacks are blocked during confusion period
+- [ ] **Requires in-game testing**: Enemies search their OLD remembered position
+- [ ] **Requires in-game testing**: Enemies do NOT know player's new position immediately
+- [ ] **Requires in-game testing**: Confusion timer (2s) is sufficient for escape
+
+## Files Changed
+
+1. `scripts/objects/enemy.gd`:
+   - Extended `MEMORY_RESET_CONFUSION_DURATION` to 2.0 seconds
+   - Updated `reset_memory()` to preserve position with LOW confidence
+   - Added confusion timer check in `on_sound_heard_with_intensity()`
+   - Added confusion timer check in priority attack logic
+
+## Attached Logs
+
+- `game_log_20260124_204620.txt` - First user report showing issue
+- `game_log_20260124_205037.txt` - Analysis showing memory reset but immediate re-acquisition
+- `game_log_20260124_212430.txt` - Latest user report showing sound propagation bypass
