@@ -12,7 +12,9 @@ enum AIState {
 	RETREATING, ## Retreating to cover while possibly shooting
 	PURSUING,   ## Moving cover-to-cover toward player (when far and can't hit)
 	ASSAULT,    ## Coordinated multi-enemy assault (rush player after 5s wait)
-	SEARCHING   ## Methodically searching area where player was last seen (Issue #322)
+	SEARCHING,  ## Methodically searching area where player was last seen (Issue #322)
+	THROWING_GRENADE,  ## Preparing and throwing a grenade (Issue #304)
+	READY_TO_THROW  ## Ready to throw grenade, waiting for optimal conditions (Issue #304)
 }
 
 ## Retreat behavior modes based on damage taken.
@@ -42,16 +44,9 @@ enum BehaviorMode {
 ## Detection range (0=unlimited, line-of-sight only).
 @export var detection_range: float = 0.0
 
-## Field of view angle in degrees.
-## Enemy can only see targets within this cone centered on their facing direction.
-## Set to 0 or negative to disable FOV check (360 degree vision).
-## Default is 100 degrees as requested in issue #66.
+## FOV angle in degrees (0 or negative = 360° vision). Default 100° per issue #66.
 @export var fov_angle: float = 100.0
-
-## Whether FOV checking is enabled for this specific enemy.
-## This is combined with the global ExperimentalSettings.fov_enabled setting.
-## Both must be true for FOV to be active.
-## Note: The global setting in ExperimentalSettings is disabled by default.
+## Enable FOV check for this enemy (combined with global ExperimentalSettings.fov_enabled).
 @export var fov_enabled: bool = true
 
 ## Time between shots (0.1s = 10 rounds/sec).
@@ -159,6 +154,21 @@ enum BehaviorMode {
 ## Scale multiplier for enemy model (1.3 matches player size).
 @export var enemy_model_scale: float = 1.3
 
+## Enable grenade throwing behavior (Issue #304).
+@export var enable_grenades: bool = false
+## Number of offensive (frag) grenades this enemy carries.
+@export var offensive_grenades: int = 0
+## Number of flashbang grenades this enemy carries.
+@export var flashbang_grenades: int = 0
+## Maximum grenade throw range in pixels.
+@export var grenade_throw_range: float = 400.0
+## Grenade throw accuracy deviation in degrees (±5°).
+@export var grenade_throw_deviation: float = 5.0
+## Frag grenade scene to instantiate when throwing.
+@export var frag_grenade_scene: PackedScene
+## Flashbang grenade scene to instantiate when throwing.
+@export var flashbang_grenade_scene: PackedScene
+
 signal hit  ## Enemy hit
 signal died  ## Enemy died
 signal died_with_info(is_ricochet_kill: bool, is_penetration_kill: bool)  ## Death with kill info
@@ -184,13 +194,10 @@ const AIM_TOLERANCE_DOT: float = 0.866  ## cos(30°) - aim tolerance (issue #254
 @onready var _debug_label: Label = $DebugLabel  ## Debug state label
 @onready var _nav_agent: NavigationAgent2D = $NavigationAgent2D  ## Pathfinding
 
-## HitArea for bullet collision detection.
-## Used to disable collision when enemy dies so bullets pass through.
+## HitArea for bullet collision (disabled on death so bullets pass through).
 @onready var _hit_area: Area2D = $HitArea
 
-## HitCollisionShape for physically disabling collision on death.
-## Disabling the shape is more reliable than just toggling monitorable/monitoring
-## due to Godot engine limitations (see issue #62506, #100687).
+## HitCollisionShape - disabled on death (more reliable than toggle, issue #62506).
 @onready var _hit_collision_shape: CollisionShape2D = $HitArea/HitCollisionShape
 
 var _original_hit_area_layer: int = 0  ## Original collision layer (restore on respawn)
@@ -254,20 +261,16 @@ var _threat_reaction_timer: float = 0.0
 ## Whether the threat reaction delay has elapsed (enemy can react to bullets).
 var _threat_reaction_delay_elapsed: bool = false
 
-## Memory of bullets that have passed through the threat sphere recently.
-## This allows the enemy to react even after fast-moving bullets have exited.
+## Memory timer for bullets that passed through threat sphere.
 var _threat_memory_timer: float = 0.0
 
-## Duration to remember that a bullet passed through the threat sphere.
-## This should be longer than the reaction delay to ensure enemies can complete
-## their reaction even after bullets have passed through quickly.
+## Duration to remember bullets passing through threat sphere (longer than reaction delay).
 const THREAT_MEMORY_DURATION: float = 0.5
 
 ## Current retreat mode determined by damage taken.
 var _retreat_mode: RetreatMode = RetreatMode.FULL_HP
 
-## Number of hits taken during the current retreat/combat encounter.
-## Resets when enemy enters IDLE state or finishes retreating.
+## Hits taken in current encounter (resets on IDLE or retreat complete).
 var _hits_taken_in_encounter: int = 0
 
 ## Timer for periodic turning to cover during FULL_HP retreat.
@@ -303,15 +306,13 @@ const RETREAT_BURST_ARC: float = 0.4
 ## Current angle offset within burst arc.
 var _retreat_burst_angle_offset: float = 0.0
 
-## Whether enemy is in "alarm" mode (was suppressed/retreating and hasn't calmed down).
-## This persists until the enemy reaches safety in cover or returns to idle.
+## Alarm mode: was suppressed/retreating, persists until safe or idle.
 var _in_alarm_mode: bool = false
 
 ## Whether the enemy needs to fire a cover burst (when leaving cover while in alarm).
 var _cover_burst_pending: bool = false
 
-## --- Combat Cover Cycling (come out, shoot 2-3s, go back) ---
-## Timer for how long the enemy has been shooting while out of cover.
+## Timer for exposed shooting phase in combat cover cycle.
 var _combat_shoot_timer: float = 0.0
 
 ## Duration to shoot while out of cover (2-3 seconds, randomized).
@@ -320,15 +321,13 @@ var _combat_shoot_duration: float = 2.5
 ## Whether the enemy is currently in the "exposed shooting" phase of combat.
 var _combat_exposed: bool = false
 
-## Whether the enemy is in the "approaching player" phase of combat.
-## In this phase, the enemy moves toward the player to get into direct contact.
+## In approach phase: moving toward player for direct contact.
 var _combat_approaching: bool = false
 
 ## Timer for the approach phase of combat.
 var _combat_approach_timer: float = 0.0
 
-## Timer tracking total time spent in COMBAT state this cycle.
-## Used to prevent rapid state thrashing when visibility flickers.
+## Total time in COMBAT state (prevents thrashing on visibility flicker).
 var _combat_state_timer: float = 0.0
 
 ## Maximum time to spend approaching player before starting to shoot (seconds).
@@ -340,12 +339,10 @@ const COMBAT_DIRECT_CONTACT_DISTANCE: float = 250.0
 ## Min COMBAT time before PURSUING (prevents thrashing at wall edges).
 const COMBAT_MIN_DURATION_BEFORE_PURSUE: float = 0.5
 
-## --- Pursuit State (cover-to-cover movement) ---
 ## Timer for waiting at cover during pursuit.
 var _pursuit_cover_wait_timer: float = 0.0
 
-## Duration to wait at each cover during pursuit (1-2 seconds, reduced for faster pursuit).
-const PURSUIT_COVER_WAIT_DURATION: float = 1.5
+const PURSUIT_COVER_WAIT_DURATION: float = 1.5  ## Wait time at each cover during pursuit
 
 ## Current pursuit target cover position.
 var _pursuit_next_cover: Vector2 = Vector2.ZERO
@@ -353,37 +350,30 @@ var _pursuit_next_cover: Vector2 = Vector2.ZERO
 ## Whether the enemy has a valid pursuit cover target.
 var _has_pursuit_cover: bool = false
 
-## The obstacle (collider) of the current cover position.
-## Used to detect and penalize selecting another position on the same obstacle.
+## Current cover obstacle (to penalize selecting same obstacle again).
 var _current_cover_obstacle: Object = null
 
-## Whether the enemy is in approach phase (moving toward player without cover).
-## This happens when at the last cover before the player with no better cover available.
+## Approach phase: at last cover, moving toward player without better cover.
 var _pursuit_approaching: bool = false
 
 ## Timer for approach phase during pursuit.
 var _pursuit_approach_timer: float = 0.0
 
-## Timer tracking total time spent in PURSUING state this cycle.
-## Used to prevent rapid state thrashing when visibility flickers.
+## Total time in PURSUING state (prevents thrashing on visibility flicker).
 var _pursuing_state_timer: float = 0.0
 
 ## Maximum time to approach during pursuit before transitioning to COMBAT (seconds).
 const PURSUIT_APPROACH_MAX_TIME: float = 3.0
 
-## Minimum time in PURSUING state before allowing transition to COMBAT.
-## This prevents rapid state thrashing when visibility flickers at edges of walls/obstacles.
+## Min PURSUING time before COMBAT (prevents thrashing at wall edges).
 const PURSUING_MIN_DURATION_BEFORE_COMBAT: float = 0.3
 
-## Minimum distance progress required for a valid pursuit cover (as fraction of current distance).
-## Covers that don't make at least this much progress toward the player are skipped.
+## Min distance progress fraction for valid pursuit cover (skip covers that don't get closer).
 const PURSUIT_MIN_PROGRESS_FRACTION: float = 0.10  # Must get at least 10% closer
 
-## Penalty applied to cover positions on the same obstacle as current cover.
-## This prevents enemies from shuffling along the same wall repeatedly.
+## Penalty for covers on same obstacle (prevents shuffling along same wall).
 const PURSUIT_SAME_OBSTACLE_PENALTY: float = 4.0
 
-## --- Flanking State (cover-to-cover movement toward flank target) ---
 ## Timer for waiting at cover during flanking.
 var _flank_cover_wait_timer: float = 0.0
 
@@ -432,8 +422,7 @@ var _flank_cooldown_timer: float = 0.0
 ## Duration to wait after flanking failures before allowing retry (seconds).
 const FLANK_COOLDOWN_DURATION: float = 5.0
 
-## --- Assault State (coordinated multi-enemy rush) ---
-## Timer for assault wait period (5 seconds before rushing).
+## Timer for assault wait period (5s before coordinated rush).
 var _assault_wait_timer: float = 0.0
 
 ## Duration to wait at cover before assault (5 seconds).
@@ -466,13 +455,10 @@ const SEARCH_WAYPOINT_SPACING: float = 75.0  ## Spacing between waypoints
 var _search_visited_zones: Dictionary = {}  ## Tracks visited positions (key=snapped pos, val=true)
 const SEARCH_ZONE_SNAP_SIZE: float = 50.0  ## Grid size for snapping positions to zones
 
-## Flag tracking if enemy has ever left IDLE state (Issue #330).
-## Once an enemy leaves IDLE (due to combat contact, sound detection, etc.),
-## it should NEVER return to IDLE - it must search infinitely until finding the player.
+## Once enemy leaves IDLE, never return to IDLE - search until player found (Issue #330).
 var _has_left_idle: bool = false
 
-## Distance threshold for "close" vs "far" from player.
-## Used to determine if enemy can engage from current position or needs to pursue.
+## Close combat distance threshold (engage vs pursue decision).
 const CLOSE_COMBAT_DISTANCE: float = 400.0
 
 ## GOAP world state for goal-oriented planning.
@@ -484,17 +470,13 @@ var _detection_timer: float = 0.0
 ## Whether the detection delay has elapsed.
 var _detection_delay_elapsed: bool = false
 
-## Continuous visibility timer - tracks how long the player has been continuously visible.
-## Resets when line of sight is lost.
+## Tracks continuous player visibility time (resets on LOS loss).
 var _continuous_visibility_timer: float = 0.0
 
-## Current visibility ratio of the player (0.0 to 1.0).
-## Represents what fraction of the player's body is visible to the enemy.
-## Used to determine if lead prediction should be enabled.
+## Player visibility ratio (0-1), used for lead prediction enable.
 var _player_visibility_ratio: float = 0.0
 
-## --- Clear Shot Movement (move out from cover to get clear shot) ---
-## Target position to move to for getting a clear shot.
+## Clear shot movement target position.
 var _clear_shot_target: Vector2 = Vector2.ZERO
 
 ## Whether we're currently moving to find a clear shot position.
@@ -509,22 +491,13 @@ const CLEAR_SHOT_MAX_TIME: float = 3.0
 ## Distance to move when exiting cover to find a clear shot.
 const CLEAR_SHOT_EXIT_DISTANCE: float = 60.0
 
-## --- Sound-Based Detection ---
-## Last known position of a sound source (e.g., player or enemy gunshot).
-## Used when the enemy hears a sound but can't see the player, to investigate the location.
+## Last known sound source position - used to investigate when player not visible.
 var _last_known_player_position: Vector2 = Vector2.ZERO
 
-## Flag indicating we heard a vulnerability sound (reload/empty click) and should pursue
-## to that position even without line of sight to the player.
+## Pursuing reload/empty click sound position regardless of LOS.
 var _pursuing_vulnerability_sound: bool = false
 
-## --- Enemy Memory System (Issue #297) ---
-## Memory system that tracks suspected player position with confidence level.
-## Confidence ranges from 0.0 (no information) to 1.0 (direct visual contact).
-## The memory influences AI behavior:
-## - High confidence (>0.8): Direct pursuit to suspected position
-## - Medium confidence (0.5-0.8): Cautious approach with cover checks
-## - Low confidence (<0.5): Return to patrol/guard behavior
+## Memory system (Issue #297): player position with confidence 0-1.
 var _memory: EnemyMemory = null
 
 ## Confidence values for different detection sources.
@@ -534,32 +507,37 @@ const SOUND_RELOAD_CONFIDENCE: float = 0.6
 const SOUND_EMPTY_CLICK_CONFIDENCE: float = 0.6
 const INTEL_SHARE_FACTOR: float = 0.9  ## Confidence reduction when sharing intel
 
-## Communication range for enemy-to-enemy information sharing.
-## 660px with direct line of sight, 300px without line of sight.
+## Intel share range: 660px with LOS, 300px without.
 const INTEL_SHARE_RANGE_LOS: float = 660.0
 const INTEL_SHARE_RANGE_NO_LOS: float = 300.0
 
-## Timer for periodic intel sharing (to avoid per-frame overhead).
-var _intel_share_timer: float = 0.0
+var _intel_share_timer: float = 0.0  ## Periodic intel sharing timer
 const INTEL_SHARE_INTERVAL: float = 0.5  ## Share intel every 0.5 seconds
 
 ## Memory reset confusion timer (Issue #318): blocks visibility after teleport.
 var _memory_reset_confusion_timer: float = 0.0
 const MEMORY_RESET_CONFUSION_DURATION: float = 2.0  ## Extended to 2s for better player escape window
 
-## --- Score Tracking ---
-## Whether the last hit that killed this enemy was from a ricocheted bullet.
+## Killed by ricochet bullet (for score tracking).
 var _killed_by_ricochet: bool = false
 
 ## Whether the last hit that killed this enemy was from a bullet that penetrated a wall.
 var _killed_by_penetration: bool = false
 
-## --- Status Effects ---
-## Whether the enemy is currently blinded (cannot see the player).
+## Blinded status (cannot see player).
 var _is_blinded: bool = false
 
 ## Whether the enemy is currently stunned (cannot move or act).
 var _is_stunned: bool = false
+
+## Grenade system (Issue #304).
+var _grenade_thrower: GrenadeThrowerComponent = null
+## Target position for current grenade throw.
+var _grenade_throw_target: Vector2 = Vector2.ZERO
+## Whether we're waiting for grenade explosion (for coordinated assault).
+var _waiting_for_grenade_explosion: bool = false
+## Position of last grenade explosion (for post-throw assault).
+var _grenade_explosion_position: Vector2 = Vector2.ZERO
 
 ## Last hit direction (used for death animation).
 var _last_hit_direction: Vector2 = Vector2.RIGHT
@@ -628,6 +606,10 @@ func _ready() -> void:
 	# Initialize death animation component
 	_init_death_animation()
 
+	# Initialize grenade system (Issue #304)
+	if enable_grenades:
+		_init_grenade_thrower()
+
 ## Initialize health with random value between min and max.
 func _initialize_health() -> void:
 	_max_health = randi_range(min_health, max_health)
@@ -689,9 +671,7 @@ func _setup_threat_sphere() -> void:
 	_threat_sphere.area_entered.connect(_on_threat_area_entered)
 	_threat_sphere.area_exited.connect(_on_threat_area_exited)
 
-## Register this enemy as a listener for in-game sound propagation.
-## This allows the enemy to react to sounds like gunshots even when not in direct combat.
-## Uses call_deferred to ensure SoundPropagation autoload is fully initialized.
+## Register as sound listener (call_deferred for autoload init).
 func _register_sound_listener() -> void:
 	call_deferred("_deferred_register_sound_listener")
 
@@ -803,11 +783,7 @@ func on_sound_heard_with_intensity(sound_type: int, position: Vector2, source_ty
 		# Clear the aggressive pursuit flag - no longer pursuing vulnerable player
 		_pursuing_vulnerability_sound = false
 
-		# React to reload completion - transition to cautious/defensive mode after a short delay.
-		# The 200ms delay gives enemies a brief reaction time before becoming cautious,
-		# making the transition feel more natural and giving player a small window.
-		# Enemies who were pursuing the vulnerable player should now become more cautious.
-		# This makes completing reload a way to "reset" aggressive enemy behavior.
+		# Become cautious after 200ms when player completes reload
 		if _current_state in [AIState.PURSUING, AIState.COMBAT, AIState.ASSAULT]:
 			var state_before_delay := _current_state
 			_log_to_file("Reload complete sound heard - waiting 200ms before cautious transition from %s" % AIState.keys()[_current_state])
@@ -921,7 +897,6 @@ func _on_debug_mode_toggled(enabled: bool) -> void:
 	_update_debug_label()
 	queue_redraw()  # Redraw to show/hide FOV cone
 
-
 ## Find the player node in the scene tree.
 func _find_player() -> void:
 	# Try to find the player by group first
@@ -976,12 +951,7 @@ func _physics_process(delta: float) -> void:
 	_update_goap_state()
 	_update_suppression(delta)
 
-	# Update enemy model rotation BEFORE processing AI state (which may shoot).
-	# This ensures the weapon is correctly positioned when bullets are created.
-	# Note: We don't call _update_weapon_sprite_rotation() anymore because:
-	# 1. The EnemyModel rotation already rotates the weapon correctly
-	# 2. The previous _update_weapon_sprite_rotation() was using the Enemy's rotation
-	#    instead of EnemyModel's rotation, causing the weapon to be offset by 90 degrees
+	# Update model rotation before AI state (ensures weapon position for bullets)
 	_update_enemy_model_rotation()
 
 	# Process AI state machine (may trigger shooting)
@@ -1057,17 +1027,7 @@ func _update_enemy_model_rotation() -> void:
 	else:
 		_enemy_model.scale = Vector2(enemy_model_scale, enemy_model_scale)
 
-## Forces the enemy model to face a specific direction immediately.
-## Used for priority attacks where we need to aim and shoot in the same frame.
-##
-## Unlike _update_enemy_model_rotation(), this function:
-## 1. Takes a specific direction to face (doesn't derive it from player position)
-## 2. Is called immediately before shooting in priority attack code
-##
-## This ensures the weapon sprite's transform matches the intended aim direction
-## so that _get_weapon_forward_direction() returns the correct vector for aim checks.
-##
-## @param direction: The direction to face (normalized).
+## Forces model to face direction immediately for priority attacks (Issue #264).
 func _force_model_to_face_direction(direction: Vector2) -> void:
 	if not _enemy_model:
 		return
@@ -1083,22 +1043,7 @@ func _force_model_to_face_direction(direction: Vector2) -> void:
 		_enemy_model.global_rotation = target_angle
 		_enemy_model.scale = Vector2(enemy_model_scale, enemy_model_scale)
 
-## DEPRECATED: This function is no longer used.
-##
-## Previously used to calculate an aim direction that would compensate for the weapon's
-## offset from the enemy center. This caused issues because:
-## 1. The model rotation was different from the bullet direction
-## 2. The weapon would visually point in a different direction than bullets fly
-##
-## The new approach is simpler:
-## 1. Model faces the player (center-to-center direction)
-## 2. Bullets spawn from muzzle and fly FROM MUZZLE TO TARGET
-## 3. This ensures the weapon visually points where bullets go
-##
-## Kept for reference in case the iterative offset approach is needed elsewhere.
-##
-## @param target_pos: The position to aim at (typically the player's position).
-## @return: The direction vector the model should face for the weapon to point at target.
+## DEPRECATED: No longer used. Model now faces player directly, bullets spawn from muzzle.
 func _calculate_aim_direction_from_weapon(target_pos: Vector2) -> Vector2:
 	# WeaponMount is at local position (0, 6) in EnemyModel
 	# This offset needs to be accounted for when calculating aim direction
@@ -1146,9 +1091,7 @@ func _calculate_aim_direction_from_weapon(target_pos: Vector2) -> Vector2:
 
 	return current_direction
 
-## Updates the walking animation based on enemy movement state.
-## Creates a natural bobbing motion for body parts during movement.
-## @param delta: Time since last frame.
+## Updates walking animation (body bobbing during movement).
 func _update_walk_animation(delta: float) -> void:
 	var is_moving := velocity.length() > 10.0
 
@@ -1375,20 +1318,14 @@ func _process_ai_state(delta: float) -> void:
 			# and _shoot() would fail the aim tolerance check. (Fix for issue #264)
 			_force_model_to_face_direction(direction_to_player)
 
-			# Shoot with priority - still respects weapon fire rate cooldown
-			# The weapon cannot physically fire faster than its fire rate
+			# Priority shot - respects fire rate cooldown
 			_shoot()
-			_shoot_timer = 0.0  # Reset shoot timer after vulnerability shot
-
-			# Ensure detection delay is bypassed for any subsequent normal shots
+			_shoot_timer = 0.0
 			_detection_delay_elapsed = true
-
-			# Transition to COMBAT if not already in a combat-related state
 			if _current_state == AIState.IDLE:
 				_transition_to_combat()
-				_detection_delay_elapsed = true  # Re-set after transition resets it
-
-			# Return early - we've taken the highest priority action
+				_detection_delay_elapsed = true
+			# Return early - highest priority action taken
 			return
 
 	# SECOND PRIORITY: If player is vulnerable but NOT close, pursue them aggressively
@@ -1431,6 +1368,10 @@ func _process_ai_state(delta: float) -> void:
 			_process_assault_state(delta)
 		AIState.SEARCHING:
 			_process_searching_state(delta)
+		AIState.THROWING_GRENADE:
+			_process_throwing_grenade_state(delta)
+		AIState.READY_TO_THROW:
+			_process_ready_to_throw_state(delta)
 
 	if previous_state != _current_state:
 		state_changed.emit(_current_state)
@@ -1469,10 +1410,7 @@ func _process_idle_state(delta: float) -> void:
 		BehaviorMode.GUARD:
 			_process_guard(delta)
 
-## Process COMBAT state - combat cycle: exit cover -> exposed shooting -> return to cover.
-## Phase 1 (approaching): Move toward player to get into direct contact range.
-## Phase 2 (exposed): Stand and shoot for 2-3 seconds.
-## Phase 3: Return to cover via SEEKING_COVER state.
+## COMBAT state: approach player → shoot 2-3s exposed → return to cover.
 func _process_combat_state(delta: float) -> void:
 	# Track time in COMBAT state (for preventing rapid state thrashing)
 	_combat_state_timer += delta
@@ -1749,12 +1687,7 @@ func _process_seeking_cover_state(_delta: float) -> void:
 		_shoot()
 		_shoot_timer = 0.0
 
-## Process IN_COVER state - taking cover from enemy fire.
-## Decides next action based on:
-## 1. If under fire -> suppressed
-## 2. If player is close (can exit cover for direct contact) -> COMBAT
-## 3. If player is far but can hit from current position -> COMBAT (stay and shoot)
-## 4. If player is far and can't hit -> PURSUING (move cover-to-cover)
+## Process IN_COVER state. Under fire->suppressed, close->COMBAT, far+hit->shoot, far+nohit->PURSUING.
 func _process_in_cover_state(delta: float) -> void:
 	velocity = Vector2.ZERO
 
@@ -1835,9 +1768,7 @@ func _process_in_cover_state(delta: float) -> void:
 		_log_debug("Lost sight of player from cover, transitioning to PURSUING")
 		_transition_to_pursuing()
 
-## Process FLANKING state - attempting to flank the player using cover-to-cover movement.
-## Uses intermediate cover positions to navigate around obstacles instead of walking
-## directly toward the flank target.
+## FLANKING state: cover-to-cover movement toward flank position.
 func _process_flanking_state(delta: float) -> void:
 	# Update state timer
 	_flank_state_timer += delta
@@ -2123,12 +2054,7 @@ func _process_pursuing_state(delta: float) -> void:
 		_transition_to_retreating()
 		return
 
-	# NOTE: ASSAULT state transition removed per issue #169
-	# Enemies now stay in PURSUING instead of transitioning to coordinated assault
-
-	# If can see player and can hit them from current position, engage
-	# But only after minimum time has elapsed to prevent rapid state thrashing
-	# when visibility flickers at wall/obstacle edges
+	# Engage if can see and hit player (after min time to prevent thrashing)
 	if _can_see_player and _player:
 		var can_hit := _can_hit_player_from_current_position()
 		if can_hit and _pursuing_state_timer >= PURSUING_MIN_DURATION_BEFORE_COMBAT:
@@ -2252,10 +2178,7 @@ func _process_pursuing_state(delta: float) -> void:
 	if _has_pursuit_cover:
 		var distance: float = global_position.distance_to(_pursuit_next_cover)
 
-		# Check if we've reached the pursuit cover
-		# Note: We only check distance here, NOT visibility from player.
-		# If we checked visibility, the enemy would immediately consider themselves
-		# "at cover" even before moving, since they start hidden from player.
+		# Reached pursuit cover (only check distance, not visibility)
 		if distance < 15.0:
 			_log_debug("Reached pursuit cover at distance %.1f" % distance)
 			_has_pursuit_cover = false
@@ -2507,9 +2430,7 @@ func _shoot_with_inaccuracy() -> void:
 	if _current_ammo <= 0 and _reserve_ammo > 0:
 		_start_reload()
 
-## Shoot a burst shot with arc spread for ONE_HIT retreat.
-## Bullets fly in barrel direction with added arc spread.
-## Enemy must be properly aimed before shooting (within AIM_TOLERANCE_DOT).
+## Burst shot with arc spread for ONE_HIT retreat (must be aimed first).
 func _shoot_burst_shot() -> void:
 	if bullet_scene == null or _player == null:
 		return
@@ -2590,7 +2511,6 @@ func _transition_to_idle() -> void:
 	# Reset idle scanning state for GUARD enemies
 	_idle_scan_timer = 0.0
 	_idle_scan_targets.clear()  # Will be re-initialized in _process_guard
-
 
 ## Transition to COMBAT state.
 func _transition_to_combat() -> void:
@@ -2797,10 +2717,7 @@ func _transition_to_retreating() -> void:
 	# Find cover position for retreating
 	_find_cover_position()
 
-## Check if the enemy is visible from the player's position.
-## Uses raycasting from player to enemy to determine if there are obstacles blocking line of sight.
-## This is the inverse of _can_see_player - it checks if the PLAYER can see the ENEMY.
-## Checks multiple points on the enemy body (center and corners) to account for enemy size.
+## Returns true if player can see enemy (raycast check, multiple body points).
 func _is_visible_from_player() -> bool:
 	if _player == null:
 		return false
@@ -2866,9 +2783,7 @@ func _is_point_visible_from_player(point: Vector2) -> bool:
 		else:
 			return true
 
-## Check if a specific position would make the enemy visible from the player's position.
-## Checks all enemy body points (center and corners) to account for enemy size.
-## Used to validate cover positions before moving to them.
+## Returns true if enemy at given position would be visible to player.
 func _is_position_visible_from_player(pos: Vector2) -> bool:
 	if _player == null:
 		return true  # Assume visible if no player
@@ -2882,10 +2797,7 @@ func _is_position_visible_from_player(pos: Vector2) -> bool:
 
 	return false
 
-## Check if a target position is visible from the enemy's perspective.
-## Uses raycast to verify there are no obstacles between enemy and the target position.
-## This is used to validate lead prediction targets - enemies should only aim at
-## positions they can actually see.
+## Returns true if enemy has line-of-sight to target position (for lead prediction).
 func _is_position_visible_to_enemy(target_pos: Vector2) -> bool:
 	var distance := global_position.distance_to(target_pos)
 
@@ -2915,8 +2827,7 @@ func _is_position_visible_to_enemy(target_pos: Vector2) -> bool:
 	return true
 
 ## Get multiple check points on the player's body for visibility testing.
-## Returns center and 4 corner points offset by the player's radius.
-## The player has a collision radius of 16 pixels (from Player.tscn).
+## Returns center + 4 corner points for player body (radius 16px).
 func _get_player_check_points(center: Vector2) -> Array[Vector2]:
 	# Player collision radius is 16, sprite is 32x32
 	# Use a slightly smaller radius to be conservative
@@ -2934,8 +2845,7 @@ func _get_player_check_points(center: Vector2) -> Array[Vector2]:
 
 	return points
 
-## Check if a single point on the player is visible from the enemy's position.
-## Uses direct space state query to check for obstacles blocking line of sight.
+## Raycast from enemy to point, returns true if no obstacles.
 func _is_player_point_visible_to_enemy(point: Vector2) -> bool:
 	var distance := global_position.distance_to(point)
 
@@ -2963,9 +2873,7 @@ func _is_player_point_visible_to_enemy(point: Vector2) -> bool:
 
 	return true
 
-## Calculate what fraction of the player's body is visible to the enemy.
-## Returns a value from 0.0 (completely hidden) to 1.0 (fully visible).
-## Checks multiple points on the player's body (center + corners).
+## Returns 0.0-1.0 based on how much of player body is visible.
 func _calculate_player_visibility_ratio() -> float:
 	if _player == null:
 		return 0.0
@@ -3043,9 +2951,7 @@ func _is_shot_clear_of_cover(target_position: Vector2) -> bool:
 
 	return true
 
-## Check if there's an obstacle immediately in front of the enemy that would block bullets.
-## This prevents shooting into walls that the enemy is flush against or very close to.
-## Uses a single raycast from enemy center to the bullet spawn position.
+## Returns true if no obstacle blocks path from enemy to bullet spawn point.
 func _is_bullet_spawn_clear(direction: Vector2) -> bool:
 	# Fail-open: allow shooting if physics is not ready
 	var world_2d := get_world_2d()
@@ -3119,11 +3025,8 @@ func _find_sidestep_direction_for_clear_shot(direction_to_player: Vector2) -> Ve
 
 	return Vector2.ZERO  # No clear sidestep direction found
 
-## Check if the enemy should shoot at the target (bullet spawn, friendly fire, cover).
+## Check if enemy should shoot (bullet spawn clear, no friendlies in way).
 func _should_shoot_at_target(target_position: Vector2) -> bool:
-	# Check if the immediate path to bullet spawn is clear
-	# This prevents shooting into walls the enemy is flush against
-	# Use weapon forward direction since that's where bullets actually spawn and travel
 	var weapon_direction := _get_weapon_forward_direction()
 	if not _is_bullet_spawn_clear(weapon_direction):
 		return false
@@ -3132,7 +3035,6 @@ func _should_shoot_at_target(target_position: Vector2) -> bool:
 	if not _is_firing_line_clear_of_friendlies(target_position):
 		return false
 
-	# Check if cover blocks the shot
 	if not _is_shot_clear_of_cover(target_position):
 		return false
 
@@ -3167,9 +3069,7 @@ func _can_hit_player_from_current_position() -> bool:
 	# Check if the shot would be blocked by cover
 	return _is_shot_clear_of_cover(_player.global_position)
 
-## Count the number of enemies currently in combat-related states.
-## Includes COMBAT, PURSUING, ASSAULT, IN_COVER (if can see player).
-## Used to determine if multi-enemy assault should be triggered.
+## Count enemies in combat states (COMBAT, PURSUING, ASSAULT, IN_COVER+visible).
 func _count_enemies_in_combat() -> int:
 	var count := 0
 	var enemies := get_tree().get_nodes_in_group("enemies")
@@ -3200,12 +3100,7 @@ func _count_enemies_in_combat() -> int:
 func is_in_combat_engagement() -> bool:
 	return _can_see_player and _current_state in [AIState.COMBAT, AIState.IN_COVER, AIState.ASSAULT]
 
-## Find cover position closer to the player for pursuit.
-## Used during PURSUING state to move cover-to-cover toward the player.
-## Improvements for issue #93:
-## - Penalizes covers on the same obstacle to avoid shuffling along walls
-## - Requires minimum progress toward player to skip insignificant moves
-## - Verifies the path to cover is clear (no walls blocking)
+## Find cover position closer to player for PURSUING state (cover-to-cover movement).
 func _find_pursuit_cover_toward_player() -> void:
 	# Use memory-based target position instead of direct player position (Issue #297)
 	# This allows pursuing toward a suspected position even when player is not visible
@@ -3243,12 +3138,7 @@ func _find_pursuit_cover_toward_player() -> void:
 			# Cover position is offset from collision point along normal
 			var cover_pos := collision_point + collision_normal * 35.0
 
-			# For pursuit, we want cover that is:
-			# 1. Closer to the player than we currently are (with minimum progress)
-			# 2. Hidden from the player (or mostly hidden)
-			# 3. Not too far from our current position
-			# 4. Preferably on a different obstacle than current cover
-			# 5. Reachable (no walls blocking the path)
+			# Pursuit cover: closer to player, hidden, reachable, different obstacle
 
 			var cover_distance_to_player := cover_pos.distance_to(player_pos)
 			var cover_distance_from_me := global_position.distance_to(cover_pos)
@@ -3280,12 +3170,7 @@ func _find_pursuit_cover_toward_player() -> void:
 			if _current_cover_obstacle != null and collider == _current_cover_obstacle:
 				same_obstacle_penalty = PURSUIT_SAME_OBSTACLE_PENALTY
 
-			# Score calculation:
-			# Higher score for positions that are:
-			# - Hidden from player (priority)
-			# - Closer to player
-			# - Not too far from current position
-			# - On a different obstacle than current cover
+			# Score: hidden + closer to player - distance from self - same obstacle penalty
 			var hidden_score: float = 5.0 if is_hidden else 0.0
 			var approach_score: float = progress / CLOSE_COMBAT_DISTANCE
 			var distance_penalty: float = cover_distance_from_me / COVER_CHECK_DISTANCE
@@ -3384,9 +3269,7 @@ func _find_cover_closest_to_player() -> void:
 		# Fall back to normal cover finding
 		_find_cover_position()
 
-## Find a valid cover position relative to the player.
-## The cover position must be hidden from the player's line of sight.
-## Enhanced: Now validates that the cover position is reachable (no walls blocking path).
+## Find reachable cover position hidden from player's line of sight.
 func _find_cover_position() -> void:
 	if _player == null:
 		_has_valid_cover = false
@@ -3418,20 +3301,12 @@ func _find_cover_position() -> void:
 			# Using 35 pixels to provide some margin for the enemy's collision shape
 			var cover_pos := collision_point + collision_normal * 35.0
 
-			# CRITICAL: Verify we can actually reach this cover position
-			# This prevents selecting cover positions on the opposite side of walls
+			# Verify reachable and check if hidden from player
 			if not _can_reach_position(cover_pos):
 				continue
-
-			# First priority: Check if this position is actually hidden from player
 			var is_hidden := not _is_position_visible_from_player(cover_pos)
-
-			# Only consider hidden positions unless we have no choice
+			# Score: hidden priority, distance, position relative to player
 			if is_hidden or not found_hidden_cover:
-				# Score based on:
-				# 1. Whether position is hidden (highest priority)
-				# 2. Distance from enemy (closer is better)
-				# 3. Position relative to player (behind cover from player's view)
 				var hidden_score: float = 10.0 if is_hidden else 0.0  # Heavy weight for hidden positions
 
 				var distance_score := 1.0 - (global_position.distance_to(cover_pos) / COVER_CHECK_DISTANCE)
@@ -3574,14 +3449,8 @@ func _find_flank_cover_toward_target() -> void:
 
 			# Check if we can reach this cover (has clear path)
 			if not _has_clear_path_to(cover_pos):
-				# Even if direct path is blocked, we might be able to reach
-				# via another intermediate cover, but skip for now
 				continue
-
-			# Score calculation:
-			# Higher score for positions that are:
-			# - Closer to flank target (priority)
-			# - Not too far from current position
+			# Score: closer to flank target - distance from self
 			var approach_score: float = (my_distance_to_target - cover_distance_to_target) / flank_distance
 			var distance_penalty: float = cover_distance_from_me / COVER_CHECK_DISTANCE
 
@@ -3599,9 +3468,7 @@ func _find_flank_cover_toward_target() -> void:
 	else:
 		_has_flank_cover = false
 
-## Check if there's a wall ahead in the given direction and return avoidance direction.
-## Returns Vector2.ZERO if no wall detected, otherwise returns a vector to avoid the wall.
-## Enhanced version uses 8 raycasts with distance-weighted avoidance for better navigation.
+## Returns wall avoidance vector (8 raycasts with distance weighting) or ZERO.
 func _check_wall_ahead(direction: Vector2) -> Vector2:
 	if _wall_raycasts.is_empty():
 		return Vector2.ZERO
@@ -3611,12 +3478,7 @@ func _check_wall_ahead(direction: Vector2) -> Vector2:
 	var closest_wall_distance: float = WALL_CHECK_DISTANCE
 	var hit_count: int = 0
 
-	# Raycast angles: spread from -90 to +90 degrees relative to movement direction
-	# Index 0: center (0°)
-	# Index 1-3: left side (-20°, -45°, -70°)
-	# Index 4-6: right side (+20°, +45°, +70°)
-	# Index 7: rear check for wall sliding (-180°)
-	# IMPORTANT: Use explicit Array[float] type to avoid type inference errors
+	# Raycast angles: 0°, ±20°, ±45°, ±70°, rear 180° for wall sliding
 	var angles: Array[float] = [0.0, -0.35, -0.79, -1.22, 0.35, 0.79, 1.22, PI]
 
 	var raycast_count: int = mini(WALL_CHECK_COUNT, _wall_raycasts.size())
@@ -3688,7 +3550,6 @@ func _get_wall_avoidance_weight(direction: Vector2) -> float:
 	var normalized_distance: float = clampf(closest_distance / WALL_CHECK_DISTANCE, 0.0, 1.0)
 	return lerpf(WALL_AVOIDANCE_MIN_WEIGHT, WALL_AVOIDANCE_MAX_WEIGHT, normalized_distance)
 
-
 ## Check if target is within FOV cone. FOV uses _enemy_model.global_rotation for facing.
 func _is_position_in_fov(target_pos: Vector2) -> bool:
 	var experimental_settings: Node = get_node_or_null("/root/ExperimentalSettings")
@@ -3701,7 +3562,6 @@ func _is_position_in_fov(target_pos: Vector2) -> bool:
 	var angle_to_target := rad_to_deg(acos(clampf(dot, -1.0, 1.0)))
 	var in_fov := angle_to_target <= fov_angle / 2.0
 	return in_fov
-
 
 ## Check if the player is visible using multi-point raycast. Updates visibility timer.
 func _check_player_visibility() -> void:
@@ -3736,11 +3596,7 @@ func _check_player_visibility() -> void:
 		_continuous_visibility_timer = 0.0
 		return
 
-	# Check multiple points on the player's body (center + corners) to handle
-	# cases where player is near a wall corner. A single raycast to the center
-	# might hit the wall, but parts of the player's body could still be visible.
-	# This fixes the issue where enemies couldn't see players standing close to
-	# walls in narrow passages (issue #264).
+	# Check center + corners to handle players near wall corners (issue #264)
 	var check_points := _get_player_check_points(_player.global_position)
 	var visible_count := 0
 
@@ -3854,7 +3710,6 @@ func reset_memory() -> void:
 			else:
 				_log_to_file("State reset: %s -> IDLE (no target)" % AIState.keys()[_current_state])
 				_transition_to_idle()
-
 
 ## Check if there is a clear line of sight to a position (enemy-to-enemy comms).
 func _has_line_of_sight_to_position(target_pos: Vector2) -> bool:
@@ -4023,9 +3878,7 @@ func _spawn_casing(shoot_direction: Vector2, weapon_forward: Vector2) -> void:
 
 	# Calculate ejection direction to the right of the weapon
 	# In a top-down view with Y increasing downward:
-	# - If weapon points right (1, 0), right side of weapon is DOWN (0, 1)
-	# - If weapon points up (0, -1), right side of weapon is RIGHT (1, 0)
-	# This is a 90 degree counter-clockwise rotation (perpendicular to shooting direction)
+	# Perpendicular to weapon direction for casing ejection
 	var weapon_right: Vector2 = Vector2(-weapon_forward.y, weapon_forward.x)
 
 	# Eject to the right with some randomness
@@ -4098,10 +3951,7 @@ func _calculate_lead_prediction() -> Vector2:
 		# Update distance for next iteration
 		distance = global_position.distance_to(predicted_pos)
 
-	# CRITICAL: Validate that the predicted position is actually visible to the enemy.
-	# If the predicted position is behind cover (e.g., player is running toward cover exit),
-	# we should NOT aim there - it would feel like the enemy is "cheating" by knowing
-	# where the player will emerge. Fall back to player's current visible position.
+	# Don't aim at predicted position if blocked (feels like cheating)
 	if not _is_position_visible_to_enemy(predicted_pos):
 		_log_debug("Lead prediction blocked: predicted position %s is not visible, using current position %s" % [predicted_pos, player_pos])
 		return player_pos
@@ -4153,7 +4003,6 @@ func _process_guard(delta: float) -> void:
 		if _idle_scan_targets.size() > 0:
 			_idle_scan_target_index = (_idle_scan_target_index + 1) % _idle_scan_targets.size()
 
-
 ## Initialize scan targets - detects passages using raycasts.
 func _initialize_idle_scan_targets() -> void:
 	_idle_scan_targets.clear()
@@ -4189,7 +4038,6 @@ func _initialize_idle_scan_targets() -> void:
 		_idle_scan_targets = [0.0, PI]
 	_idle_scan_target_index = randi() % _idle_scan_targets.size()
 
-
 ## Called when a bullet enters the threat sphere.
 func _on_threat_area_entered(area: Area2D) -> void:
 	if "shooter_id" in area and area.shooter_id == get_instance_id():
@@ -4198,21 +4046,17 @@ func _on_threat_area_entered(area: Area2D) -> void:
 	_threat_memory_timer = THREAT_MEMORY_DURATION
 	_log_debug("Bullet entered threat sphere, starting reaction delay...")
 
-
 ## Called when a bullet exits the threat sphere.
 func _on_threat_area_exited(area: Area2D) -> void:
 	_bullets_in_threat_sphere.erase(area)
-
 
 ## Called when the enemy is hit (by bullet.gd).
 func on_hit() -> void:
 	on_hit_with_info(Vector2.RIGHT, null)
 
-
 ## Called when the enemy is hit with extended hit information.
 func on_hit_with_info(hit_direction: Vector2, caliber_data: Resource) -> void:
 	on_hit_with_bullet_info(hit_direction, caliber_data, false, false)
-
 
 ## Called when the enemy is hit with full bullet information.
 func on_hit_with_bullet_info(hit_direction: Vector2, caliber_data: Resource, has_ricocheted: bool, has_penetrated: bool) -> void:
@@ -4311,16 +4155,7 @@ func _get_health_percent() -> float:
 		return 0.0
 	return float(_current_health) / float(_max_health)
 
-## Calculates the bullet spawn position at the weapon's muzzle.
-## The muzzle is positioned relative to the weapon mount, offset in the weapon's forward direction.
-##
-## IMPORTANT FIX (Issue #264 - Session 4):
-## Similar to _get_weapon_forward_direction(), we need to calculate the muzzle position
-## based on the intended aim direction when the player is visible, not from the stale
-## global_transform which may not have updated yet in the same physics frame.
-##
-## @param _direction: The normalized direction the bullet will travel (used for fallback only).
-## @return: The global position where the bullet should spawn.
+## Gets bullet spawn position at muzzle, using intended aim direction when player visible (Issue #264).
 func _get_bullet_spawn_position(_direction: Vector2) -> Vector2:
 	# The rifle sprite (m16_rifle_topdown.png) is 64px long with offset (20, 0).
 	# The muzzle (right edge in local space) is at: offset.x + sprite_width/2 = 20 + 32 = 52px
@@ -4334,13 +4169,7 @@ func _get_bullet_spawn_position(_direction: Vector2) -> Vector2:
 		if _player and is_instance_valid(_player) and _can_see_player:
 			weapon_forward = (_player.global_position - global_position).normalized()
 		else:
-			# Fallback to transform-based direction when player is not visible.
-			# Get the weapon's VISUAL forward direction from global_transform.
-			# IMPORTANT: We use global_transform.x because it correctly accounts for the
-			# vertical flip (scale.y negative) that happens when aiming left. The flip
-			# affects where the muzzle visually appears, so we need the transformed direction.
-			# Using Vector2.from_angle(_enemy_model.rotation) would give incorrect results
-			# because it doesn't account for the scale flip.
+			# Fallback: use global_transform.x (accounts for vertical flip when aiming left)
 			weapon_forward = _weapon_sprite.global_transform.x.normalized()
 
 		# Calculate muzzle offset accounting for enemy model scale
@@ -4640,6 +4469,10 @@ func _get_state_name(state: AIState) -> String:
 			return "ASSAULT"
 		AIState.SEARCHING:
 			return "SEARCHING"
+		AIState.THROWING_GRENADE:
+			return "THROWING_GRENADE"
+		AIState.READY_TO_THROW:
+			return "READY_TO_THROW"
 		_:
 			return "UNKNOWN"
 
@@ -4888,7 +4721,6 @@ func _draw() -> void:
 		# Draw small filled circle at center
 		draw_circle(to_suspected, 5.0, confidence_color)
 
-
 ## Draw FOV cone for debug visualization.
 func _draw_fov_cone(fill_color: Color, edge_color: Color) -> void:
 	var half_fov := deg_to_rad(fov_angle / 2.0)
@@ -4907,16 +4739,7 @@ func _draw_fov_cone(fill_color: Color, edge_color: Color) -> void:
 		var a2 := -half_fov + (float(i + 1) / arc_segments) * 2 * half_fov
 		draw_line(Vector2.from_angle(a1) * cone_length, Vector2.from_angle(a2) * cone_length, edge_color, 1.5)
 
-
-## Check if the player is "distracted" (not aiming at the enemy).
-## A player is considered distracted if they can see the enemy but their aim direction
-## is more than 23 degrees away from the direction toward the enemy.
-## This allows enemies to attack with highest priority when the player is not focused on them.
-##
-## Returns true if:
-## 1. The enemy can see the player (player is in line of sight)
-## 2. The player's aim direction (toward their mouse cursor) deviates more than 23 degrees
-##    from the direction toward the enemy
+## Returns true if player aim deviates >23° from enemy direction (allows priority attack).
 func _is_player_distracted() -> bool:
 	# Player must be visible for this check to be relevant
 	if not _can_see_player or _player == null:
@@ -4961,9 +4784,7 @@ func _is_player_distracted() -> bool:
 
 	return is_distracted
 
-## Set a navigation target and get the direction to follow the path.
-## Uses NavigationAgent2D for proper pathfinding around obstacles.
-## Returns the direction to move, or Vector2.ZERO if navigation is not available.
+## Get nav direction to target using NavigationAgent2D pathfinding.
 func _get_nav_direction_to(target_pos: Vector2) -> Vector2:
 	if _nav_agent == null:
 		# Fall back to direct movement if no navigation agent
@@ -4983,9 +4804,7 @@ func _get_nav_direction_to(target_pos: Vector2) -> Vector2:
 	var direction: Vector2 = (next_pos - global_position).normalized()
 	return direction
 
-## Move toward a target position using NavigationAgent2D pathfinding.
-## This is the primary movement function that should be used instead of direct velocity assignment.
-## Returns true if movement was applied, false if target was reached or navigation unavailable.
+## Primary movement function using NavigationAgent2D pathfinding.
 func _move_to_target_nav(target_pos: Vector2, speed: float) -> bool:
 	var direction: Vector2 = _get_nav_direction_to(target_pos)
 
@@ -5058,3 +4877,124 @@ func is_blinded() -> bool:
 ## Check if the enemy is currently stunned.
 func is_stunned() -> bool:
 	return _is_stunned
+
+## --- Grenade System Functions (Issue #304) ---
+
+## Initialize grenade thrower component.
+func _init_grenade_thrower() -> void:
+	_grenade_thrower = GrenadeThrowerComponent.new()
+	_grenade_thrower.enabled = true
+	_grenade_thrower.offensive_grenades = offensive_grenades
+	_grenade_thrower.flashbang_grenades = flashbang_grenades
+	_grenade_thrower.throw_range = grenade_throw_range
+	_grenade_thrower.throw_deviation = grenade_throw_deviation
+	_grenade_thrower.frag_grenade_scene = frag_grenade_scene
+	_grenade_thrower.flashbang_grenade_scene = flashbang_grenade_scene
+	_grenade_thrower.initialize(_log_to_file)
+	add_child(_grenade_thrower)
+	_grenade_thrower.notify_allies_of_grenade.connect(_on_grenade_notification)
+	_grenade_thrower.grenade_exploded.connect(_on_grenade_exploded)
+	_log_to_file("Grenade system initialized: off=%d, flash=%d" % [offensive_grenades, flashbang_grenades])
+
+## Configure grenade system after _ready() - called by level scripts.
+func configure_grenades(enabled: bool, offensive: int, flashbangs: int = 0) -> void:
+	enable_grenades = enabled
+	offensive_grenades = offensive
+	flashbang_grenades = flashbangs
+	if enabled and _grenade_thrower == null:
+		_init_grenade_thrower()
+	elif enabled and _grenade_thrower != null:
+		_grenade_thrower.enabled = true
+		_grenade_thrower.offensive_grenades = offensive
+		_grenade_thrower.flashbang_grenades = flashbangs
+	elif not enabled and _grenade_thrower != null:
+		_grenade_thrower.enabled = false
+	_log_to_file("Grenades configured: enable=%s, off=%d, flash=%d" % [enabled, offensive, flashbangs])
+
+## Handle grenade notification from ally (evacuate from blast zone).
+func _on_grenade_notification(target_pos: Vector2, blast_radius: float) -> void:
+	var dist := global_position.distance_to(target_pos)
+	if dist < blast_radius * 1.2:
+		_log_to_file("Evacuating from grenade blast zone at %s" % target_pos)
+		_grenade_explosion_position = target_pos
+		_waiting_for_grenade_explosion = true
+
+## Handle grenade explosion (trigger assault if was waiting).
+func _on_grenade_exploded(explosion_pos: Vector2) -> void:
+	if _waiting_for_grenade_explosion:
+		_waiting_for_grenade_explosion = false
+		_log_to_file("Grenade exploded - ready for assault")
+
+## Check if enemy should throw a grenade and transition to throwing state.
+func _check_grenade_throw() -> bool:
+	if not enable_grenades or _grenade_thrower == null:
+		return false
+	if not _grenade_thrower.has_grenades():
+		return false
+	if _current_state == AIState.THROWING_GRENADE or _current_state == AIState.READY_TO_THROW:
+		return false
+	if not _player:
+		return false
+	var dist := global_position.distance_to(_player.global_position)
+	var target_pos := _player.global_position
+	if _grenade_thrower.should_throw(_current_health, _can_see_player, _current_state == AIState.SUPPRESSED, dist, global_position, target_pos):
+		if _grenade_thrower.is_throw_path_clear(global_position, target_pos):
+			_grenade_throw_target = target_pos
+			return true
+	return false
+
+## Process THROWING_GRENADE state - execute grenade throw.
+func _process_throwing_grenade_state(delta: float) -> void:
+	if not _grenade_thrower:
+		_set_state(AIState.COMBAT)
+		return
+	velocity = Vector2.ZERO
+	if _grenade_thrower.update_throw_prep(delta):
+		var grenade := _grenade_thrower.execute_throw(global_position)
+		if grenade:
+			var game_world := get_tree().current_scene
+			if game_world:
+				game_world.add_child(grenade)
+				GrenadeThrowerComponent.activate_thrown_grenade(grenade)
+				_log_to_file("Threw grenade at %s" % _grenade_throw_target)
+		_set_state(AIState.COMBAT if _can_see_player else AIState.IN_COVER)
+
+## Process READY_TO_THROW state - waiting for optimal throw conditions.
+func _process_ready_to_throw_state(delta: float) -> void:
+	if not _grenade_thrower or not _grenade_thrower.has_grenades():
+		_set_state(AIState.IDLE)
+		return
+	# Check if we should throw now
+	if _check_grenade_throw():
+		var grenade_type := _grenade_thrower.get_best_grenade_type()
+		_grenade_thrower.begin_throw(_grenade_throw_target, grenade_type)
+		_set_state(AIState.THROWING_GRENADE)
+		return
+	# If player becomes visible and close, transition to combat
+	if _can_see_player and _player:
+		var dist := global_position.distance_to(_player.global_position)
+		if dist < 300.0:
+			_set_state(AIState.COMBAT)
+			return
+	# Update grenade thrower timers
+	_grenade_thrower.update_cooldown(delta)
+
+## Transition to THROWING_GRENADE state.
+func _transition_to_throwing_grenade(target_pos: Vector2) -> void:
+	if not _grenade_thrower:
+		return
+	_grenade_throw_target = target_pos
+	var grenade_type := _grenade_thrower.get_best_grenade_type()
+	_grenade_thrower.begin_throw(target_pos, grenade_type)
+	_set_state(AIState.THROWING_GRENADE)
+	_log_to_file("Transitioning to THROWING_GRENADE at %s" % target_pos)
+
+## Transition to READY_TO_THROW state.
+func _transition_to_ready_to_throw() -> void:
+	_set_state(AIState.READY_TO_THROW)
+	_log_to_file("Transitioning to READY_TO_THROW")
+
+## Register ally death for grenade trigger (2+ deaths trigger).
+func _register_ally_death_for_grenade() -> void:
+	if _can_see_player and _grenade_thrower:
+		_grenade_thrower.register_ally_death()
