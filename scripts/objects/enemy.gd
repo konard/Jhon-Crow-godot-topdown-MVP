@@ -629,6 +629,10 @@ const INTEL_SHARE_RANGE_NO_LOS: float = 300.0
 var _intel_share_timer: float = 0.0
 const INTEL_SHARE_INTERVAL: float = 0.5  ## Share intel every 0.5 seconds
 
+## Timer for memory reset confusion effect (Issue #318). Blocks visibility and sounds after teleport.
+var _memory_reset_confusion_timer: float = 0.0
+const MEMORY_RESET_CONFUSION_DURATION: float = 2.0  ## Extended to 2s for better player escape window
+
 ## --- Score Tracking ---
 ## Whether the last hit that killed this enemy was from a ricocheted bullet.
 var _killed_by_ricochet: bool = false
@@ -817,10 +821,9 @@ func on_sound_heard(sound_type: int, position: Vector2, source_type: int, source
 ## - source_node: The node that produced the sound (can be null)
 ## - intensity: Sound intensity from 0.0 to 1.0 based on inverse square law
 func on_sound_heard_with_intensity(sound_type: int, position: Vector2, source_type: int, source_node: Node2D, intensity: float) -> void:
-	# Only react if alive
-	if not _is_alive:
+	# Only react if alive and not confused from memory reset (Issue #318 - block sounds during confusion)
+	if not _is_alive or _memory_reset_confusion_timer > 0.0:
 		return
-
 	# Calculate distance to sound for logging
 	var distance := global_position.distance_to(position)
 
@@ -1059,6 +1062,10 @@ func _physics_process(delta: float) -> void:
 			_flank_cooldown_timer = 0.0
 			# Reset failure count when cooldown expires
 			_flank_fail_count = 0
+
+	# Update memory reset confusion timer (Issue #318)
+	if _memory_reset_confusion_timer > 0.0:
+		_memory_reset_confusion_timer = maxf(0.0, _memory_reset_confusion_timer - delta)
 
 	# Check for player visibility and try to find player if not found
 	if _player == null:
@@ -1424,43 +1431,26 @@ func _process_ai_state(delta: float) -> void:
 
 	var previous_state := _current_state
 
-	# HIGHEST PRIORITY: If player is distracted (aim > 23° away from enemy),
-	# immediately shoot from ANY state. This is the highest priority action
-	# that bypasses ALL other state logic including timers.
-	# The enemy must seize the opportunity when the player is not focused on them.
-	# NOTE: This behavior is ONLY enabled in Hard difficulty mode.
+	# HIGHEST PRIORITY: Player distracted (aim > 23° away) - shoot immediately (Hard mode only)
+	# NOTE: Disabled during memory reset confusion period (Issue #318)
 	var difficulty_manager: Node = get_node_or_null("/root/DifficultyManager")
 	var is_distraction_enabled: bool = difficulty_manager != null and difficulty_manager.is_distraction_attack_enabled()
-	if is_distraction_enabled and _goap_world_state.get("player_distracted", false) and _can_see_player and _player:
+	var is_confused: bool = _memory_reset_confusion_timer > 0.0
+	if is_distraction_enabled and not is_confused and _goap_world_state.get("player_distracted", false) and _can_see_player and _player:
 		# Check if we have a clear shot (no wall blocking bullet spawn)
 		var direction_to_player := (_player.global_position - global_position).normalized()
 		var has_clear_shot := _is_bullet_spawn_clear(direction_to_player)
 
 		if has_clear_shot and _can_shoot() and _shoot_timer >= shoot_cooldown:
-			# Log the distraction attack
 			_log_to_file("Player distracted - priority attack triggered")
-
-			# Aim at player immediately - both body rotation and model rotation
 			rotation = direction_to_player.angle()
-			# CRITICAL: Force the model to face the player immediately so that
-			# _get_weapon_forward_direction() returns the correct aim direction.
-			# Without this, the weapon transform would still reflect the old direction
-			# and _shoot() would fail the aim tolerance check. (Fix for issue #264)
-			_force_model_to_face_direction(direction_to_player)
-
-			# Shoot with priority - still respects weapon fire rate cooldown
-			# This is a high priority action but the weapon cannot physically fire faster
+			_force_model_to_face_direction(direction_to_player)  # Fix issue #264: ensure correct aim
 			_shoot()
-			_shoot_timer = 0.0  # Reset shoot timer after distraction shot
-
-			# Ensure detection delay is bypassed for any subsequent normal shots
+			_shoot_timer = 0.0
 			_detection_delay_elapsed = true
-
-			# Transition to COMBAT if not already in a combat-related state
-			# This ensures proper follow-up behavior after the distraction shot
 			if _current_state == AIState.IDLE:
 				_transition_to_combat()
-				_detection_delay_elapsed = true  # Re-set after transition resets it
+				_detection_delay_elapsed = true
 
 			# Return early - we've taken the highest priority action
 			# The state machine will continue normally in the next frame
@@ -1492,7 +1482,8 @@ func _process_ai_state(delta: float) -> void:
 			var reason: String = "reloading" if player_reloading else "ammo_empty"
 			_log_to_file("Player vulnerable (%s) but cannot attack: close=%s (dist=%.0f), can_see=%s" % [reason, player_close, distance_to_player, _can_see_player])
 
-	if player_is_vulnerable and _can_see_player and _player and player_close:
+	# Issue #318: Also block vulnerability attacks during confusion period
+	if player_is_vulnerable and not is_confused and _can_see_player and _player and player_close:
 		# Check if we have a clear shot (no wall blocking bullet spawn)
 		var direction_to_player := (_player.global_position - global_position).normalized()
 		var has_clear_shot := _is_bullet_spawn_clear(direction_to_player)
@@ -2338,8 +2329,13 @@ func _process_pursuing_state(delta: float) -> void:
 					_pursuit_approaching = false
 					return
 
-			# Use navigation-based pathfinding to move toward player
-			_move_to_target_nav(_player.global_position, combat_move_speed)
+			# Use navigation to move toward target position (Issue #318)
+			var target_pos := _get_target_position()
+			if target_pos != global_position:
+				_move_to_target_nav(target_pos, combat_move_speed)
+			else:
+				_pursuit_approaching = false
+				_transition_to_idle()  # No valid target
 		return
 
 	# Check if we're waiting at cover
@@ -3122,26 +3118,15 @@ func _is_player_close() -> bool:
 		return false
 	return global_position.distance_to(_player.global_position) <= CLOSE_COMBAT_DISTANCE
 
-## Get the best known target position to move toward (Issue #297).
-## Priority: 1. Direct player position (if visible), 2. Memory suspected position, 3. Last known position
+## Get target position: visible player > memory > last known > stay in place (Issue #297, #318).
 func _get_target_position() -> Vector2:
-	# If we can see the player, use their actual position
 	if _can_see_player and _player:
 		return _player.global_position
-
-	# If memory has a target with reasonable confidence, use that
 	if _memory and _memory.has_target():
 		return _memory.suspected_position
-
-	# Fallback to legacy last known position
 	if _last_known_player_position != Vector2.ZERO:
 		return _last_known_player_position
-
-	# Last resort: if player exists, use their position (even if can't see them)
-	if _player:
-		return _player.global_position
-
-	return global_position  # Stay in place if no target
+	return global_position  # No valid target - stay in place
 
 ## Check if the enemy can hit the player from their current position.
 ## Returns true if there's a clear line of fire to the player.
@@ -3701,6 +3686,11 @@ func _check_player_visibility() -> void:
 		_continuous_visibility_timer = 0.0
 		return
 
+	# If confused from memory reset, cannot see player (Issue #318)
+	if _memory_reset_confusion_timer > 0.0:
+		_continuous_visibility_timer = 0.0
+		return
+
 	if _player == null or not _raycast:
 		_continuous_visibility_timer = 0.0
 		return
@@ -3804,6 +3794,38 @@ func receive_intel_from_ally(ally_memory: EnemyMemory) -> void:
 		])
 		# Update legacy position for compatibility
 		_last_known_player_position = _memory.suspected_position
+
+
+## Reset enemy memory for last chance teleport effect (Issue #318). Preserves old position
+## with LOW confidence so enemies search there instead of immediately knowing player's new position.
+func reset_memory() -> void:
+	# Save old position before resetting - enemies will search here
+	var old_position := _memory.suspected_position if _memory != null and _memory.has_target() else Vector2.ZERO
+	var had_target := old_position != Vector2.ZERO
+	# Reset visibility, detection states, and apply confusion timer (blocks vision AND sounds)
+	_can_see_player = false
+	_continuous_visibility_timer = 0.0
+	_intel_share_timer = 0.0
+	_pursuing_vulnerability_sound = false
+	_memory_reset_confusion_timer = MEMORY_RESET_CONFUSION_DURATION
+	_log_to_file("Memory reset: confusion=%.1fs, had_target=%s" % [MEMORY_RESET_CONFUSION_DURATION, had_target])
+	if had_target:
+		# Set LOW confidence (0.35) - puts enemy in search mode at old position
+		if _memory != null:
+			_memory.suspected_position = old_position
+			_memory.confidence = 0.35
+			_memory.last_updated = Time.get_ticks_msec()
+		_last_known_player_position = old_position
+		_log_to_file("Search mode: %s -> PURSUING at %s" % [AIState.keys()[_current_state], old_position])
+		_transition_to_pursuing()
+	else:
+		if _memory != null:
+			_memory.reset()
+		_last_known_player_position = Vector2.ZERO
+		if _current_state in [AIState.PURSUING, AIState.COMBAT, AIState.ASSAULT, AIState.FLANKING]:
+			_log_to_file("State reset: %s -> IDLE (no target)" % AIState.keys()[_current_state])
+			_transition_to_idle()
+
 
 ## Check if there is a clear line of sight to a position.
 ## Used for enemy-to-enemy communication range checking.

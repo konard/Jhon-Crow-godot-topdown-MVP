@@ -80,6 +80,14 @@ class MockEnemy:
 	var _reload_timer: float = 0.0
 	var _hits_taken: int = 0
 
+	## Memory state (Issue #297, #318)
+	var _memory: EnemyMemory = null
+	var _last_known_player_position: Vector2 = Vector2.ZERO
+	var _intel_share_timer: float = 0.0
+	var _memory_reset_confusion_timer: float = 0.0
+	const MEMORY_RESET_CONFUSION_DURATION: float = 0.5
+	var _continuous_visibility_timer: float = 0.0
+
 	## Patrol state
 	var _patrol_points: Array[Vector2] = []
 	var _current_patrol_index: int = 0
@@ -105,6 +113,9 @@ class MockEnemy:
 		_reserve_ammo = magazine_size * (total_magazines - 1)
 		_is_alive = true
 		_current_state = AIState.IDLE
+		_memory = EnemyMemory.new()
+		_last_known_player_position = Vector2.ZERO
+		_intel_share_timer = 0.0
 
 
 	func get_current_health() -> int:
@@ -294,6 +305,51 @@ class MockEnemy:
 			return _initial_position
 		_current_patrol_index = (_current_patrol_index + 1) % _patrol_points.size()
 		return _patrol_points[_current_patrol_index]
+
+
+	## Update memory with player position (called when enemy can see player).
+	func update_memory(player_pos: Vector2, confidence: float = 1.0) -> void:
+		if _memory != null:
+			_memory.update_position(player_pos, confidence)
+			_last_known_player_position = player_pos
+
+
+	## Reset enemy memory - called when player "teleports" during last chance effect (Issue #318).
+	## This makes the enemy forget the player's last known position, forcing them to
+	## re-acquire the player through visual contact or sound detection.
+	## Also resets visibility state and applies a confusion period to prevent immediate re-acquisition.
+	func reset_memory() -> void:
+		if _memory != null:
+			_memory.reset()
+
+		# Also reset the legacy last known position
+		_last_known_player_position = Vector2.ZERO
+
+		# Reset the intel sharing timer to prevent immediate re-acquisition from allies
+		_intel_share_timer = 0.0
+
+		# CRITICAL: Reset visibility state to prevent immediate re-acquisition (Issue #318)
+		_can_see_player = false
+		_continuous_visibility_timer = 0.0
+
+		# Apply confusion cooldown
+		_memory_reset_confusion_timer = MEMORY_RESET_CONFUSION_DURATION
+
+		# Transition active combat/pursuit states to IDLE to require re-detection
+		if _current_state in [AIState.PURSUING, AIState.COMBAT, AIState.ASSAULT, AIState.FLANKING]:
+			_current_state = AIState.IDLE
+
+
+	func has_memory_target() -> bool:
+		return _memory != null and _memory.has_target()
+
+
+	func get_memory_position() -> Vector2:
+		return _memory.suspected_position if _memory != null else Vector2.ZERO
+
+
+	func get_memory_confidence() -> float:
+		return _memory.confidence if _memory != null else 0.0
 
 
 var enemy: MockEnemy
@@ -1100,3 +1156,93 @@ func test_fallback_to_transform_when_player_not_visible() -> void:
 	var dot_with_transform := weapon_direction.dot(transform_direction)
 	assert_almost_eq(dot_with_transform, 1.0, 0.001,
 		"Should use transform direction when player not visible")
+
+
+# ============================================================================
+# Enemy Memory Tests (Issue #297, #318)
+# ============================================================================
+
+
+## Test that enemy memory starts empty.
+func test_enemy_memory_starts_empty() -> void:
+	assert_false(enemy.has_memory_target(),
+		"Enemy memory should start with no target")
+	assert_eq(enemy.get_memory_position(), Vector2.ZERO,
+		"Memory position should be zero initially")
+	assert_eq(enemy.get_memory_confidence(), 0.0,
+		"Memory confidence should be zero initially")
+
+
+## Test that enemy memory updates when player is visible.
+func test_enemy_memory_updates_on_visual_contact() -> void:
+	var player_pos := Vector2(500, 300)
+	enemy.update_memory(player_pos, 1.0)
+
+	assert_true(enemy.has_memory_target(),
+		"Enemy should have a memory target after seeing player")
+	assert_eq(enemy.get_memory_position(), player_pos,
+		"Memory position should match player position")
+	assert_eq(enemy.get_memory_confidence(), 1.0,
+		"Memory confidence should be 1.0 for visual contact")
+
+
+## Test that reset_memory clears all memory state (Issue #318).
+## This is critical for the "last chance" teleport effect where enemies
+## must forget where the player was so they don't pursue the old position.
+func test_reset_memory_clears_memory_state() -> void:
+	# First, give the enemy a valid memory of the player
+	var old_player_pos := Vector2(500, 300)
+	enemy.update_memory(old_player_pos, 1.0)
+
+	# Verify memory is set
+	assert_true(enemy.has_memory_target(),
+		"Enemy should have memory before reset")
+	assert_eq(enemy.get_memory_position(), old_player_pos,
+		"Memory position should be set before reset")
+
+	# Reset memory (simulates last chance teleport effect ending)
+	enemy.reset_memory()
+
+	# Verify memory is cleared
+	assert_false(enemy.has_memory_target(),
+		"Enemy should have no memory target after reset")
+	assert_eq(enemy.get_memory_confidence(), 0.0,
+		"Memory confidence should be zero after reset")
+	assert_eq(enemy._last_known_player_position, Vector2.ZERO,
+		"Legacy last known position should be cleared after reset")
+	assert_eq(enemy._intel_share_timer, 0.0,
+		"Intel share timer should be reset to prevent immediate re-acquisition")
+
+
+## Test that enemy must re-acquire player after memory reset (Issue #318).
+## This verifies the core fix: enemies don't know where the player went
+## during the "last chance" effect and must find them again.
+func test_enemy_must_reacquire_player_after_memory_reset() -> void:
+	# Setup: Enemy sees player at position A
+	var original_pos := Vector2(100, 100)
+	enemy.update_memory(original_pos, 1.0)
+	assert_true(enemy.has_memory_target(), "Should have memory before reset")
+
+	# Action: Reset memory (player "teleported" during last chance)
+	enemy.reset_memory()
+
+	# Verify: Enemy has no knowledge of player location
+	assert_false(enemy.has_memory_target(),
+		"Enemy should not know player location after reset")
+
+	# Action: Player moves to new position (not visible to enemy yet)
+	var new_pos := Vector2(800, 600)
+	# Enemy cannot see player, so memory stays empty
+
+	# Verify: Enemy still doesn't know where player is
+	assert_false(enemy.has_memory_target(),
+		"Enemy should not magically know player's new position")
+
+	# Action: Enemy sees player at new position
+	enemy.update_memory(new_pos, 1.0)
+
+	# Verify: NOW enemy knows where player is
+	assert_true(enemy.has_memory_target(),
+		"Enemy should have memory after re-acquiring player")
+	assert_eq(enemy.get_memory_position(), new_pos,
+		"Memory should contain NEW player position, not old one")

@@ -568,6 +568,11 @@ func _end_last_chance_effect() -> void:
 	_is_effect_active = false
 	_log("Ending last chance effect")
 
+	# CRITICAL: Reset enemy memory BEFORE unfreezing time (Issue #318)
+	# This ensures enemies forget the player's position during the freeze,
+	# treating the player's movement as a "teleport" they couldn't see
+	_reset_all_enemy_memory()
+
 	# Restore normal time
 	_unfreeze_time()
 
@@ -931,6 +936,27 @@ func _unfreeze_casings() -> void:
 			_log("Unfroze bullet casing: %s" % casing.name)
 
 	_frozen_casings.clear()
+
+
+## Resets memory for all enemies when the last chance effect ends (Issue #318).
+## This ensures enemies don't know where the player moved during the time freeze,
+## treating the player's movement as a "teleport" they couldn't observe.
+## Enemies must re-acquire the player through visual contact or sound detection.
+func _reset_all_enemy_memory() -> void:
+	var enemies := get_tree().get_nodes_in_group("enemies")
+	var reset_count := 0
+
+	for enemy in enemies:
+		if not is_instance_valid(enemy):
+			continue
+
+		# Call the reset_memory method on each enemy that has it
+		if enemy.has_method("reset_memory"):
+			enemy.reset_memory()
+			reset_count += 1
+
+	if reset_count > 0:
+		_log("Reset memory for %d enemies (player teleport effect)" % reset_count)
 
 
 ## Called when a node is added to the scene tree during time freeze.
