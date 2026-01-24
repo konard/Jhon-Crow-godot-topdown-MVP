@@ -109,8 +109,8 @@ script = ExtResource("1_enemy")  # GDScript
 
 ## Solution
 
-### Fix Applied
-Changed line 8 in `scenes/levels/csharp/TestTier.tscn`:
+### Fix Applied (Commit `fb5f2ba`)
+Changed line 7 in `scenes/levels/csharp/TestTier.tscn`:
 
 **Before:**
 ```gdscript
@@ -126,6 +126,31 @@ Changed line 8 in `scenes/levels/csharp/TestTier.tscn`:
 1. Scene file now references correct enemy UID: `uid://cx5m8np6u3bwd`
 2. Enemy scene path corrected: `res://scenes/objects/Enemy.tscn`
 3. No changes needed to enemy configuration (lines 331-339) - parameters were correct
+
+### IMPORTANT: Godot Cache Requires Rebuild
+
+**If you're still seeing the red square after this fix**, you need to rebuild the project because:
+
+1. **Godot Editor Cache**: The `.godot/` and `.import/` folders cache scene references and UIDs
+2. **Pre-built Executable**: If you exported the game before the fix, the old reference is baked into the .pck file
+3. **UID Cache**: Godot caches UID-to-path mappings that may point to the old scene
+
+**How to Fix:**
+1. **In Godot Editor**:
+   - Close Godot Editor completely
+   - Delete the `.godot/` folder (or at least `.godot/uid_cache.bin`)
+   - Reopen the project in Godot Editor
+   - Verify the tutorial enemy looks correct
+   - Export/build a new executable
+
+2. **If Using Pre-built Executable**:
+   - Delete the old .exe and .pck files
+   - Export a fresh build from the Godot Editor after clearing cache
+
+**Verification:**
+- Open the Tutorial map (Обучение) in Godot Editor
+- The TutorialEnemy should show the full enemy sprite (body, head, arms, weapon)
+- NOT a red square placeholder
 
 ## Lessons Learned
 
@@ -148,17 +173,49 @@ Changed line 8 in `scenes/levels/csharp/TestTier.tscn`:
 3. **Naming Convention**: Establish clear naming for placeholders vs production scenes
 4. **Code Review**: Human review scene file changes to catch incorrect references
 
+## Persistent Issue After Fix: Godot Cache Problem
+
+### User Report (2026-01-24 06:47:20)
+After the fix was committed at 04:52:58, the user still reported seeing the red square at 06:47:20. This indicates a **Godot caching issue**.
+
+### Root Cause of Persistence
+When a scene UID reference changes in Godot:
+1. The `.godot/uid_cache.bin` file may still map the old UID to the old scene
+2. Pre-exported .pck files contain the old scene reference
+3. The Godot editor may cache the instantiated scene until project reload
+
+### Evidence from Game Log
+The game log `game_log_20260124_064720.txt` from 06:47:20 shows:
+- Tutorial level detected (line 121, 660)
+- Player spawned correctly
+- **NO enemy spawn logs** (compare with Building map enemies at lines 77-93)
+- This confirms the C# placeholder is still being loaded
+
+### Timeline
+- **04:43:20** - Commit `443b341`: Bug introduced (wrong scene reference)
+- **04:52:58** - Commit `fb5f2ba`: Bug fixed (correct scene reference)
+- **06:47:20** - User testing: Still sees red square (cache issue)
+
+### Resolution
+User must:
+1. Close Godot Editor
+2. Delete `.godot/` folder or at minimum `.godot/uid_cache.bin`
+3. Reopen project
+4. Rebuild/re-export executable
+5. Test with fresh build
+
 ## Related Files
 
-- `docs/case-studies/issue-295/game_log_20260124_064720.txt` - User's game log showing the issue
-- `scenes/levels/csharp/TestTier.tscn` - Tutorial map scene (fixed)
+- `docs/case-studies/issue-295/game_log_20260124_064720.txt` - User's game log showing the persistent issue
+- `scenes/levels/csharp/TestTier.tscn` - Tutorial map scene (fixed in source)
 - `scenes/objects/Enemy.tscn` - Correct enemy scene (GDScript)
 - `scenes/objects/csharp/Enemy.tscn` - C# placeholder (should not be used in production maps)
 - Commit `443b341` - Where the bug was introduced
-- Commit `[PENDING]` - Where the bug was fixed
+- Commit `fb5f2ba` - Where the bug was fixed
 
 ## References
 
 - Issue: https://github.com/Jhon-Crow/godot-topdown-MVP/issues/295
 - Pull Request: https://github.com/Jhon-Crow/godot-topdown-MVP/pull/296
 - Godot Docs: [Scene File Format](https://docs.godotengine.org/en/stable/contributing/development/file_formats/tscn.html)
+- Godot Docs: [Import System](https://docs.godotengine.org/en/stable/tutorials/assets_pipeline/import_process.html)
