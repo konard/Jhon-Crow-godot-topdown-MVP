@@ -357,3 +357,99 @@ func _process_searching_state(delta: float) -> void:
 ### Prior Work in This Codebase
 - [Issue #322 Case Study](../issue-322/README.md) - Original SEARCHING state implementation
 - [PR #323](https://github.com/Jhon-Crow/godot-topdown-MVP/pull/323) - Search state with zone tracking
+
+---
+
+## Implementation Details (PR #331)
+
+### Solution Implemented
+
+Based on user feedback and log analysis, we implemented **Solution 4: Persistent Search** combined with improved zone coverage.
+
+#### Key Changes to `enemy.gd`:
+
+##### 1. Added `_has_left_idle` Flag (Line 449)
+
+```gdscript
+## Flag tracking if enemy has ever left IDLE state (Issue #330).
+## Once an enemy leaves IDLE (due to combat contact, sound detection, etc.),
+## it should NEVER return to IDLE - it must search infinitely until finding the player.
+var _has_left_idle: bool = false
+```
+
+##### 2. Updated All State Transition Functions
+
+Every transition function that moves AWAY from IDLE now sets `_has_left_idle = true`:
+
+- `_transition_to_combat()` - Line 2588
+- `_transition_to_seeking_cover()` - Line 2608
+- `_transition_to_in_cover()` - Line 2615
+- `_transition_to_flanking()` - Line 2643
+- `_transition_to_suppressed()` - Line 2706
+- `_transition_to_pursuing()` - Line 2713
+- `_transition_to_assault()` - Line 2727
+- `_transition_to_searching()` - Line 2741
+- `_transition_to_retreating()` - Line 2756
+
+##### 3. Modified `_process_searching_state()` (Lines 2407-2450)
+
+Key changes:
+
+1. **Timeout only applies to patrol enemies** (never engaged):
+   ```gdscript
+   if _search_state_timer >= SEARCH_MAX_DURATION and not _has_left_idle:
+       _log_to_file("SEARCHING timeout after %.1fs, returning to IDLE (patrol enemy)" % _search_state_timer)
+       _transition_to_idle()
+       return
+   ```
+
+2. **Engaged enemies search forever**, but move center when max radius reached:
+   ```gdscript
+   if _has_left_idle:
+       # Move search center to current position (so enemy explores new area)
+       var old_center := _search_center
+       _search_center = global_position
+       _search_radius = SEARCH_INITIAL_RADIUS
+       _search_state_timer = 0.0
+       # Keep visited zones to avoid re-visiting same spots
+       _generate_search_waypoints()
+       _log_to_file("SEARCHING: Max radius reached, moved center from %s to %s" % [old_center, _search_center])
+       return
+   ```
+
+##### 4. Modified Other State Transitions to Search Instead of IDLE
+
+When engaged enemies lose their target or have other triggers that would normally return to IDLE, they now start searching instead:
+
+- **FLANKING state** - if player lost: start searching (Line 1937-1943)
+- **PURSUING state** - if no valid target: start searching (Line 2244-2251)
+- **Memory confidence low** - start searching at suspected position (Line 2321-2330)
+- **State reset (no target)** - start searching from current position (Line 3889-3895)
+
+### Log Output Changes
+
+Before:
+```
+[01:07:59] [Enemy1] SEARCHING timeout after 30.0s, returning to IDLE
+[01:07:59] [Enemy1] State: SEARCHING -> IDLE
+```
+
+After (engaged enemy):
+```
+[01:07:59] [Enemy1] SEARCHING: Max radius reached, moved center from (645, 715) to (720, 680) (engaged enemy, wps=8)
+```
+
+After (patrol enemy):
+```
+[01:07:59] [Enemy1] SEARCHING timeout after 30.0s, returning to IDLE (patrol enemy)
+```
+
+### Zone Coverage Improvement
+
+Instead of clearing `_search_visited_zones` when resetting (which would cause re-visiting), we:
+1. Keep the visited zones dictionary intact
+2. Move the search center to current position
+3. Generate new waypoints from the new center
+4. This naturally avoids previously visited areas
+
+The enemy effectively "walks" through the map, exploring new areas as they go, while avoiding spots they've already checked.
