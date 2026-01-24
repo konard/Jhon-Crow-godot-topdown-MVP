@@ -651,7 +651,6 @@ var _death_animation: Node = null
 
 ## Note: DeathAnimationComponent is available via class_name declaration.
 
-
 func _ready() -> void:
 	# Add to enemies group for grenade targeting
 	add_to_group("enemies")
@@ -711,13 +710,11 @@ func _ready() -> void:
 	# Initialize death animation component
 	_init_death_animation()
 
-
 ## Initialize health with random value between min and max.
 func _initialize_health() -> void:
 	_max_health = randi_range(min_health, max_health)
 	_current_health = _max_health
 	_is_alive = true
-
 
 ## Initialize ammunition with full magazine and reserve ammo.
 func _initialize_ammo() -> void:
@@ -727,14 +724,12 @@ func _initialize_ammo() -> void:
 	_is_reloading = false
 	_reload_timer = 0.0
 
-
 ## Setup patrol points based on patrol offsets from initial position.
 func _setup_patrol_points() -> void:
 	_patrol_points.clear()
 	_patrol_points.append(_initial_position)
 	for offset in patrol_offsets:
 		_patrol_points.append(_initial_position + offset)
-
 
 ## Setup wall detection raycasts for obstacle avoidance.
 func _setup_wall_detection() -> void:
@@ -747,7 +742,6 @@ func _setup_wall_detection() -> void:
 		add_child(raycast)
 		_wall_raycasts.append(raycast)
 
-
 ## Setup cover detection raycasts for finding cover positions.
 func _setup_cover_detection() -> void:
 	for i in range(COVER_CHECK_COUNT):
@@ -757,7 +751,6 @@ func _setup_cover_detection() -> void:
 		raycast.exclude_parent = true
 		add_child(raycast)
 		_cover_raycasts.append(raycast)
-
 
 ## Setup threat sphere for detecting nearby bullets.
 func _setup_threat_sphere() -> void:
@@ -778,13 +771,11 @@ func _setup_threat_sphere() -> void:
 	_threat_sphere.area_entered.connect(_on_threat_area_entered)
 	_threat_sphere.area_exited.connect(_on_threat_area_exited)
 
-
 ## Register this enemy as a listener for in-game sound propagation.
 ## This allows the enemy to react to sounds like gunshots even when not in direct combat.
 ## Uses call_deferred to ensure SoundPropagation autoload is fully initialized.
 func _register_sound_listener() -> void:
 	call_deferred("_deferred_register_sound_listener")
-
 
 ## Deferred registration to ensure SoundPropagation is ready.
 func _deferred_register_sound_listener() -> void:
@@ -797,13 +788,11 @@ func _deferred_register_sound_listener() -> void:
 		_log_to_file("WARNING: Could not register as sound listener (SoundPropagation not found)")
 		push_warning("[%s] Could not register as sound listener - SoundPropagation not found" % name)
 
-
 ## Unregister this enemy from sound propagation when dying or being destroyed.
 func _unregister_sound_listener() -> void:
 	var sound_propagation: Node = get_node_or_null("/root/SoundPropagation")
 	if sound_propagation and sound_propagation.has_method("unregister_listener"):
 		sound_propagation.unregister_listener(self)
-
 
 ## Called by SoundPropagation when a sound is heard within range.
 ## This is the callback that allows the enemy to react to in-game sounds.
@@ -816,7 +805,6 @@ func _unregister_sound_listener() -> void:
 func on_sound_heard(sound_type: int, position: Vector2, source_type: int, source_node: Node2D) -> void:
 	# Default to full intensity if called without intensity parameter
 	on_sound_heard_with_intensity(sound_type, position, source_type, source_node, 1.0)
-
 
 ## Called by SoundPropagation when a sound is heard within range (with intensity).
 ## This version includes physically-calculated sound intensity.
@@ -983,7 +971,6 @@ func on_sound_heard_with_intensity(sound_type: int, position: Vector2, source_ty
 	# Transition to combat mode to investigate the sound
 	_transition_to_combat()
 
-
 ## Initialize GOAP world state.
 func _initialize_goap_state() -> void:
 	_goap_world_state = {
@@ -1012,11 +999,9 @@ func _initialize_goap_state() -> void:
 		"confidence_low": false
 	}
 
-
 ## Initialize the enemy memory system (Issue #297).
 func _initialize_memory() -> void:
 	_memory = EnemyMemory.new()
-
 
 ## Connect to GameManager's debug mode signal for F7 toggle.
 func _connect_debug_mode_signal() -> void:
@@ -1029,12 +1014,10 @@ func _connect_debug_mode_signal() -> void:
 		if game_manager.has_method("is_debug_mode_enabled"):
 			debug_label_enabled = game_manager.is_debug_mode_enabled()
 
-
 ## Called when debug mode is toggled via F7 key.
 func _on_debug_mode_toggled(enabled: bool) -> void:
 	debug_label_enabled = enabled
 	_update_debug_label()
-
 
 ## Find the player node in the scene tree.
 func _find_player() -> void:
@@ -1049,7 +1032,6 @@ func _find_player() -> void:
 	if root:
 		_player = _find_player_recursive(root)
 
-
 ## Recursively search for a player node.
 func _find_player_recursive(node: Node) -> Node2D:
 	if node.name == "Player" and node is Node2D:
@@ -1059,7 +1041,6 @@ func _find_player_recursive(node: Node) -> Node2D:
 		if result:
 			return result
 	return null
-
 
 func _physics_process(delta: float) -> void:
 	if not _is_alive:
@@ -1111,7 +1092,6 @@ func _physics_process(delta: float) -> void:
 
 	move_and_slide()
 
-
 ## Update GOAP world state based on current conditions.
 func _update_goap_state() -> void:
 	_goap_world_state["player_visible"] = _can_see_player
@@ -1135,7 +1115,6 @@ func _update_goap_state() -> void:
 		_goap_world_state["confidence_high"] = _memory.is_high_confidence()
 		_goap_world_state["confidence_medium"] = _memory.is_medium_confidence()
 		_goap_world_state["confidence_low"] = _memory.is_low_confidence()
-
 
 ## Updates the enemy model rotation to face the aim/movement direction.
 ## The enemy model (body, head, arms) rotates to follow the direction of movement or aim.
@@ -1200,7 +1179,6 @@ func _update_enemy_model_rotation() -> void:
 		_enemy_model.global_rotation = target_angle
 		_enemy_model.scale = Vector2(enemy_model_scale, enemy_model_scale)
 
-
 ## Forces the enemy model to face a specific direction immediately.
 ## Used for priority attacks where we need to aim and shoot in the same frame.
 ##
@@ -1226,7 +1204,6 @@ func _force_model_to_face_direction(direction: Vector2) -> void:
 	else:
 		_enemy_model.global_rotation = target_angle
 		_enemy_model.scale = Vector2(enemy_model_scale, enemy_model_scale)
-
 
 ## DEPRECATED: This function is no longer used.
 ##
@@ -1291,7 +1268,6 @@ func _calculate_aim_direction_from_weapon(target_pos: Vector2) -> Vector2:
 
 	return current_direction
 
-
 ## Updates the walking animation based on enemy movement state.
 ## Creates a natural bobbing motion for body parts during movement.
 ## @param delta: Time since last frame.
@@ -1347,7 +1323,6 @@ func _update_walk_animation(delta: float) -> void:
 		if _right_arm_sprite:
 			_right_arm_sprite.position = _right_arm_sprite.position.lerp(_base_right_arm_pos, lerp_speed)
 
-
 ## Update suppression state.
 func _update_suppression(delta: float) -> void:
 	# Clean up destroyed bullets from tracking
@@ -1383,7 +1358,6 @@ func _update_suppression(delta: float) -> void:
 			_under_fire = true
 			_suppression_timer = 0.0
 
-
 ## Update reload state.
 func _update_reload(delta: float) -> void:
 	if not _is_reloading:
@@ -1392,7 +1366,6 @@ func _update_reload(delta: float) -> void:
 	_reload_timer += delta
 	if _reload_timer >= reload_time:
 		_finish_reload()
-
 
 ## Start reloading the weapon.
 func _start_reload() -> void:
@@ -1404,7 +1377,6 @@ func _start_reload() -> void:
 	_reload_timer = 0.0
 	reload_started.emit()
 	_log_debug("Reloading... (%d reserve ammo)" % _reserve_ammo)
-
 
 ## Finish the reload process.
 func _finish_reload() -> void:
@@ -1421,7 +1393,6 @@ func _finish_reload() -> void:
 	reload_finished.emit()
 	ammo_changed.emit(_current_ammo, _reserve_ammo)
 	_log_debug("Reload complete. Magazine: %d/%d, Reserve: %d" % [_current_ammo, magazine_size, _reserve_ammo])
-
 
 ## Check if the enemy can shoot (has ammo and not reloading).
 func _can_shoot() -> bool:
@@ -1443,7 +1414,6 @@ func _can_shoot() -> bool:
 		return false
 
 	return true
-
 
 ## Process the AI state machine.
 func _process_ai_state(delta: float) -> void:
@@ -1601,7 +1571,6 @@ func _process_ai_state(delta: float) -> void:
 		# Also log to file for exported build debugging
 		_log_to_file("State: %s -> %s" % [AIState.keys()[previous_state], AIState.keys()[_current_state]])
 
-
 ## Process IDLE state - patrol or guard behavior.
 func _process_idle_state(delta: float) -> void:
 	# Transition to combat if player is visible
@@ -1632,7 +1601,6 @@ func _process_idle_state(delta: float) -> void:
 			_process_patrol(delta)
 		BehaviorMode.GUARD:
 			_process_guard(delta)
-
 
 ## Process COMBAT state - approach player for direct contact, shoot for 2-3 seconds, return to cover.
 ## Implements the combat cycling behavior: exit cover -> exposed shooting -> return to cover.
@@ -1827,7 +1795,6 @@ func _process_combat_state(delta: float) -> void:
 			_shoot()
 			_shoot_timer = 0.0
 
-
 ## Calculate a target position to exit cover and get a clear shot.
 ## Returns a position that should allow the bullet spawn point to be unobstructed.
 func _calculate_clear_shot_exit_position(direction_to_player: Vector2) -> Vector2:
@@ -1880,7 +1847,6 @@ func _calculate_clear_shot_exit_position(direction_to_player: Vector2) -> Vector
 
 	return best_position
 
-
 ## Process SEEKING_COVER state - moving to cover position.
 func _process_seeking_cover_state(_delta: float) -> void:
 	if not _has_valid_cover:
@@ -1918,7 +1884,6 @@ func _process_seeking_cover_state(_delta: float) -> void:
 		_aim_at_player()
 		_shoot()
 		_shoot_timer = 0.0
-
 
 ## Process IN_COVER state - taking cover from enemy fire.
 ## Decides next action based on:
@@ -2005,7 +1970,6 @@ func _process_in_cover_state(delta: float) -> void:
 	if not _can_see_player and not _under_fire:
 		_log_debug("Lost sight of player from cover, transitioning to PURSUING")
 		_transition_to_pursuing()
-
 
 ## Process FLANKING state - attempting to flank the player using cover-to-cover movement.
 ## Uses intermediate cover positions to navigate around obstacles instead of walking
@@ -2099,7 +2063,6 @@ func _process_flanking_state(delta: float) -> void:
 	# This handles obstacles properly unlike direct movement with wall avoidance
 	_move_to_target_nav(_flank_target, combat_move_speed)
 
-
 ## Process SUPPRESSED state - staying in cover under fire.
 func _process_suppressed_state(delta: float) -> void:
 	velocity = Vector2.ZERO
@@ -2146,7 +2109,6 @@ func _process_suppressed_state(delta: float) -> void:
 	# If no longer under fire, exit suppression
 	if not _under_fire:
 		_transition_to_in_cover()
-
 
 ## Process RETREATING state - moving to cover with behavior based on damage taken.
 func _process_retreating_state(delta: float) -> void:
@@ -2195,7 +2157,6 @@ func _process_retreating_state(delta: float) -> void:
 		RetreatMode.MULTIPLE_HITS:
 			_process_retreat_multiple_hits(delta, direction_to_cover)
 
-
 ## Process FULL_HP retreat: walk backwards facing player, shoot with reduced accuracy,
 ## periodically turn toward cover.
 func _process_retreat_full_hp(delta: float, _direction_to_cover: Vector2) -> void:
@@ -2232,7 +2193,6 @@ func _process_retreat_full_hp(delta: float, _direction_to_cover: Vector2) -> voi
 			if _can_see_player and _detection_delay_elapsed and _shoot_timer >= shoot_cooldown:
 				_shoot_with_inaccuracy()
 				_shoot_timer = 0.0
-
 
 ## Process ONE_HIT retreat: quick burst of 2-4 shots in an arc while turning, then face cover.
 func _process_retreat_one_hit(delta: float, direction_to_cover: Vector2) -> void:
@@ -2277,12 +2237,10 @@ func _process_retreat_one_hit(delta: float, direction_to_cover: Vector2) -> void
 		# After burst, run to cover without shooting using navigation
 		_move_to_target_nav(_cover_position, combat_move_speed)
 
-
 ## Process MULTIPLE_HITS retreat: quick burst of 2-4 shots then run to cover (same as ONE_HIT).
 func _process_retreat_multiple_hits(delta: float, direction_to_cover: Vector2) -> void:
 	# Same behavior as ONE_HIT - quick burst then escape
 	_process_retreat_one_hit(delta, direction_to_cover)
-
 
 ## Process PURSUING state - move cover-to-cover toward player.
 ## Enemy moves between covers, waiting 1-2 seconds at each cover,
@@ -2468,7 +2426,6 @@ func _process_pursuing_state(delta: float) -> void:
 		else:
 			_transition_to_combat()
 
-
 ## Process ASSAULT state - disabled per issue #169.
 ## This state is kept for backwards compatibility but immediately transitions to COMBAT.
 ## Previously: coordinated multi-enemy rush where enemies wait 5 seconds then rush together.
@@ -2479,7 +2436,6 @@ func _process_assault_state(_delta: float) -> void:
 	_in_assault = false
 	_assault_ready = false
 	_transition_to_combat()
-
 
 ## Shoot with reduced accuracy for retreat mode.
 ## Bullets fly in barrel direction with added inaccuracy spread.
@@ -2555,7 +2511,6 @@ func _shoot_with_inaccuracy() -> void:
 	if _current_ammo <= 0 and _reserve_ammo > 0:
 		_start_reload()
 
-
 ## Shoot a burst shot with arc spread for ONE_HIT retreat.
 ## Bullets fly in barrel direction with added arc spread.
 ## Enemy must be properly aimed before shooting (within AIM_TOLERANCE_DOT).
@@ -2628,7 +2583,6 @@ func _shoot_burst_shot() -> void:
 	if _current_ammo <= 0 and _reserve_ammo > 0:
 		_start_reload()
 
-
 ## Transition to IDLE state.
 func _transition_to_idle() -> void:
 	_current_state = AIState.IDLE
@@ -2637,7 +2591,6 @@ func _transition_to_idle() -> void:
 	# Reset alarm mode when returning to idle
 	_in_alarm_mode = false
 	_cover_burst_pending = false
-
 
 ## Transition to COMBAT state.
 func _transition_to_combat() -> void:
@@ -2659,17 +2612,14 @@ func _transition_to_combat() -> void:
 	# Clear vulnerability sound pursuit flag
 	_pursuing_vulnerability_sound = false
 
-
 ## Transition to SEEKING_COVER state.
 func _transition_to_seeking_cover() -> void:
 	_current_state = AIState.SEEKING_COVER
 	_find_cover_position()
 
-
 ## Transition to IN_COVER state.
 func _transition_to_in_cover() -> void:
 	_current_state = AIState.IN_COVER
-
 
 ## Check if flanking is available (not on cooldown from failures).
 func _can_attempt_flanking() -> bool:
@@ -2685,7 +2635,6 @@ func _can_attempt_flanking() -> bool:
 		_log_debug("Flanking disabled due to %d failures" % _flank_fail_count)
 		return false
 	return true
-
 
 ## Transition to FLANKING state.
 ## Returns true if transition succeeded, false if flanking is unavailable.
@@ -2729,7 +2678,6 @@ func _transition_to_flanking() -> bool:
 	_log_to_file(msg)
 	return true
 
-
 ## Check if the current flank target is reachable via navigation mesh.
 ## Returns true if a path exists, false otherwise.
 func _is_flank_target_reachable() -> bool:
@@ -2758,13 +2706,11 @@ func _is_flank_target_reachable() -> bool:
 
 	return true
 
-
 ## Transition to SUPPRESSED state.
 func _transition_to_suppressed() -> void:
 	_current_state = AIState.SUPPRESSED
 	# Enter alarm mode when suppressed
 	_in_alarm_mode = true
-
 
 ## Transition to PURSUING state.
 func _transition_to_pursuing() -> void:
@@ -2780,7 +2726,6 @@ func _transition_to_pursuing() -> void:
 	_detection_timer = 0.0
 	_detection_delay_elapsed = false
 
-
 ## Transition to ASSAULT state.
 func _transition_to_assault() -> void:
 	_current_state = AIState.ASSAULT
@@ -2792,7 +2737,6 @@ func _transition_to_assault() -> void:
 	_detection_delay_elapsed = false
 	# Find closest cover to player for assault position
 	_find_cover_closest_to_player()
-
 
 ## Transition to RETREATING state with appropriate retreat mode.
 func _transition_to_retreating() -> void:
@@ -2826,7 +2770,6 @@ func _transition_to_retreating() -> void:
 	# Find cover position for retreating
 	_find_cover_position()
 
-
 ## Check if the enemy is visible from the player's position.
 ## Uses raycasting from player to enemy to determine if there are obstacles blocking line of sight.
 ## This is the inverse of _can_see_player - it checks if the PLAYER can see the ENEMY.
@@ -2844,7 +2787,6 @@ func _is_visible_from_player() -> bool:
 			return true
 
 	return false
-
 
 ## Get multiple check points on the enemy body for visibility testing.
 ## Returns center and 4 corner points offset by the enemy's radius.
@@ -2864,7 +2806,6 @@ func _get_enemy_check_points(center: Vector2) -> Array[Vector2]:
 	points.append(center + Vector2(-diagonal_offset, -diagonal_offset))
 
 	return points
-
 
 ## Check if a single point is visible from the player's position.
 func _is_point_visible_from_player(point: Vector2) -> bool:
@@ -2898,7 +2839,6 @@ func _is_point_visible_from_player(point: Vector2) -> bool:
 		else:
 			return true
 
-
 ## Check if a specific position would make the enemy visible from the player's position.
 ## Checks all enemy body points (center and corners) to account for enemy size.
 ## Used to validate cover positions before moving to them.
@@ -2914,7 +2854,6 @@ func _is_position_visible_from_player(pos: Vector2) -> bool:
 			return true
 
 	return false
-
 
 ## Check if a target position is visible from the enemy's perspective.
 ## Uses raycast to verify there are no obstacles between enemy and the target position.
@@ -2948,7 +2887,6 @@ func _is_position_visible_to_enemy(target_pos: Vector2) -> bool:
 
 	return true
 
-
 ## Get multiple check points on the player's body for visibility testing.
 ## Returns center and 4 corner points offset by the player's radius.
 ## The player has a collision radius of 16 pixels (from Player.tscn).
@@ -2968,7 +2906,6 @@ func _get_player_check_points(center: Vector2) -> Array[Vector2]:
 	points.append(center + Vector2(-diagonal_offset, -diagonal_offset))
 
 	return points
-
 
 ## Check if a single point on the player is visible from the enemy's position.
 ## Uses direct space state query to check for obstacles blocking line of sight.
@@ -2999,7 +2936,6 @@ func _is_player_point_visible_to_enemy(point: Vector2) -> bool:
 
 	return true
 
-
 ## Calculate what fraction of the player's body is visible to the enemy.
 ## Returns a value from 0.0 (completely hidden) to 1.0 (fully visible).
 ## Checks multiple points on the player's body (center + corners).
@@ -3015,7 +2951,6 @@ func _calculate_player_visibility_ratio() -> float:
 			visible_count += 1
 
 	return float(visible_count) / float(check_points.size())
-
 
 ## Check if the line of fire to the target position is clear of other enemies.
 ## Returns true if no other enemies would be hit by a bullet traveling to the target.
@@ -3051,7 +2986,6 @@ func _is_firing_line_clear_of_friendlies(target_position: Vector2) -> bool:
 
 	return true
 
-
 ## Check if a bullet fired at the target position would be blocked by cover/obstacles.
 ## Returns true if the shot would likely hit the target, false if blocked by cover.
 func _is_shot_clear_of_cover(target_position: Vector2) -> bool:
@@ -3082,7 +3016,6 @@ func _is_shot_clear_of_cover(target_position: Vector2) -> bool:
 
 	return true
 
-
 ## Check if there's an obstacle immediately in front of the enemy that would block bullets.
 ## This prevents shooting into walls that the enemy is flush against or very close to.
 ## Uses a single raycast from enemy center to the bullet spawn position.
@@ -3111,7 +3044,6 @@ func _is_bullet_spawn_clear(direction: Vector2) -> bool:
 		return false
 
 	return true
-
 
 ## Find a sidestep direction that would lead to a clear shot position.
 ## Checks perpendicular directions to the player and returns the first one
@@ -3163,7 +3095,6 @@ func _find_sidestep_direction_for_clear_shot(direction_to_player: Vector2) -> Ve
 
 	return Vector2.ZERO  # No clear sidestep direction found
 
-
 ## Check if the enemy should shoot at the current target.
 ## Validates bullet spawn clearance, friendly fire avoidance, and cover blocking.
 func _should_shoot_at_target(target_position: Vector2) -> bool:
@@ -3184,14 +3115,12 @@ func _should_shoot_at_target(target_position: Vector2) -> bool:
 
 	return true
 
-
 ## Check if the player is "close" (within CLOSE_COMBAT_DISTANCE).
 ## Used to determine if the enemy should engage directly or pursue.
 func _is_player_close() -> bool:
 	if _player == null:
 		return false
 	return global_position.distance_to(_player.global_position) <= CLOSE_COMBAT_DISTANCE
-
 
 ## Get the best known target position to move toward (Issue #297).
 ## Priority: 1. Direct player position (if visible), 2. Memory suspected position, 3. Last known position
@@ -3214,7 +3143,6 @@ func _get_target_position() -> Vector2:
 
 	return global_position  # Stay in place if no target
 
-
 ## Check if the enemy can hit the player from their current position.
 ## Returns true if there's a clear line of fire to the player.
 func _can_hit_player_from_current_position() -> bool:
@@ -3227,7 +3155,6 @@ func _can_hit_player_from_current_position() -> bool:
 
 	# Check if the shot would be blocked by cover
 	return _is_shot_clear_of_cover(_player.global_position)
-
 
 ## Count the number of enemies currently in combat-related states.
 ## Includes COMBAT, PURSUING, ASSAULT, IN_COVER (if can see player).
@@ -3258,11 +3185,9 @@ func _count_enemies_in_combat() -> int:
 
 	return count
 
-
 ## Check if this enemy is engaged in combat (can see player and in combat state).
 func is_in_combat_engagement() -> bool:
 	return _can_see_player and _current_state in [AIState.COMBAT, AIState.IN_COVER, AIState.ASSAULT]
-
 
 ## Find cover position closer to the player for pursuit.
 ## Used during PURSUING state to move cover-to-cover toward the player.
@@ -3370,7 +3295,6 @@ func _find_pursuit_cover_toward_player() -> void:
 	else:
 		_has_pursuit_cover = false
 
-
 ## Check if there's a clear path to a position (no walls blocking).
 ## Used to verify cover positions are reachable before selecting them.
 func _can_reach_position(target: Vector2) -> bool:
@@ -3396,7 +3320,6 @@ func _can_reach_position(target: Vector2) -> bool:
 	var hit_distance := global_position.distance_to(result["position"])
 	var target_distance := global_position.distance_to(target)
 	return hit_distance >= target_distance - 10.0  # 10 pixel tolerance
-
 
 ## Find cover position closest to the player for assault positioning.
 ## Used during ASSAULT state to take the nearest safe cover to the player.
@@ -3451,7 +3374,6 @@ func _find_cover_closest_to_player() -> void:
 	else:
 		# Fall back to normal cover finding
 		_find_cover_position()
-
 
 ## Find a valid cover position relative to the player.
 ## The cover position must be hidden from the player's line of sight.
@@ -3528,7 +3450,6 @@ func _find_cover_position() -> void:
 	else:
 		_has_valid_cover = false
 
-
 ## Calculate flank position based on player location.
 ## Uses the stored _flank_side which is set once when entering FLANKING state.
 func _calculate_flank_position() -> void:
@@ -3543,7 +3464,6 @@ func _calculate_flank_position() -> void:
 
 	_flank_target = player_pos + flank_direction * flank_distance
 	_log_debug("Flank target: %s (side: %s)" % [_flank_target, "right" if _flank_side > 0 else "left"])
-
 
 ## Choose the best flank side (left or right) based on obstacle presence.
 ## Returns 1.0 for right, -1.0 for left.
@@ -3586,7 +3506,6 @@ func _choose_best_flank_side() -> float:
 		_log_debug("Choosing left flank (closer)")
 		return -1.0
 
-
 ## Check if there's a clear path (no obstacles) to the target position.
 ## Uses a raycast to check for walls/obstacles between current position and target.
 func _has_clear_path_to(target: Vector2) -> bool:
@@ -3607,7 +3526,6 @@ func _has_clear_path_to(target: Vector2) -> bool:
 		return collision_distance >= distance - 10.0
 
 	return true
-
 
 ## Find cover position closer to the flank target.
 ## Used during FLANKING state to move cover-to-cover toward the flank position.
@@ -3677,7 +3595,6 @@ func _find_flank_cover_toward_target() -> void:
 	else:
 		_has_flank_cover = false
 
-
 ## Check if there's a wall ahead in the given direction and return avoidance direction.
 ## Returns Vector2.ZERO if no wall detected, otherwise returns a vector to avoid the wall.
 ## Enhanced version uses 8 raycasts with distance-weighted avoidance for better navigation.
@@ -3736,7 +3653,6 @@ func _check_wall_ahead(direction: Vector2) -> Vector2:
 
 	return avoidance.normalized() if avoidance.length() > 0 else Vector2.ZERO
 
-
 ## Apply wall avoidance to a movement direction with dynamic weighting.
 ## Returns the adjusted movement direction.
 func _apply_wall_avoidance(direction: Vector2) -> Vector2:
@@ -3747,7 +3663,6 @@ func _apply_wall_avoidance(direction: Vector2) -> Vector2:
 	var weight: float = _get_wall_avoidance_weight(direction)
 	# Blend original direction with avoidance, stronger avoidance when close to walls
 	return (direction * (1.0 - weight) + avoidance * weight).normalized()
-
 
 ## Calculate wall avoidance weight based on distance to nearest wall.
 ## Returns a value between WALL_AVOIDANCE_MAX_WEIGHT (far) and WALL_AVOIDANCE_MIN_WEIGHT (close).
@@ -3770,7 +3685,6 @@ func _get_wall_avoidance_weight(direction: Vector2) -> float:
 	# Interpolate between min and max weight based on distance
 	var normalized_distance: float = clampf(closest_distance / WALL_CHECK_DISTANCE, 0.0, 1.0)
 	return lerpf(WALL_AVOIDANCE_MIN_WEIGHT, WALL_AVOIDANCE_MAX_WEIGHT, normalized_distance)
-
 
 ## Check if the player is visible using raycast.
 ## If detection_range is 0 or negative, uses unlimited detection range (line-of-sight only).
@@ -3823,7 +3737,6 @@ func _check_player_visibility() -> void:
 		_continuous_visibility_timer = 0.0
 		_player_visibility_ratio = 0.0
 
-
 ## Update the enemy memory system (Issue #297).
 ## - Updates memory with visual detection (confidence 1.0) when player is visible
 ## - Applies confidence decay over time
@@ -3846,7 +3759,6 @@ func _update_memory(delta: float) -> void:
 	if _intel_share_timer >= INTEL_SHARE_INTERVAL:
 		_intel_share_timer = 0.0
 		_share_intel_with_nearby_enemies()
-
 
 ## Share intelligence with nearby enemies (Issue #297).
 ## Enemies can share information if:
@@ -3879,7 +3791,6 @@ func _share_intel_with_nearby_enemies() -> void:
 		if can_share and other_enemy.has_method("receive_intel_from_ally"):
 			other_enemy.receive_intel_from_ally(_memory)
 
-
 ## Receive intelligence from an allied enemy (Issue #297).
 ## Called by other enemies when they share intel.
 func receive_intel_from_ally(ally_memory: EnemyMemory) -> void:
@@ -3893,7 +3804,6 @@ func receive_intel_from_ally(ally_memory: EnemyMemory) -> void:
 		])
 		# Update legacy position for compatibility
 		_last_known_player_position = _memory.suspected_position
-
 
 ## Check if there is a clear line of sight to a position.
 ## Used for enemy-to-enemy communication range checking.
@@ -3928,7 +3838,6 @@ func _has_line_of_sight_to_position(target_pos: Vector2) -> bool:
 
 	return has_los
 
-
 ## Aim the enemy sprite/direction at the player using gradual rotation.
 func _aim_at_player() -> void:
 	if _player == null:
@@ -3950,7 +3859,6 @@ func _aim_at_player() -> void:
 		rotation += rotation_speed * delta
 	else:
 		rotation -= rotation_speed * delta
-
 
 ## Shoot a bullet towards the player.
 ## Bullets fly in the direction the barrel is pointing (realistic behavior).
@@ -4046,14 +3954,12 @@ func _shoot() -> void:
 	if _current_ammo <= 0 and _reserve_ammo > 0:
 		_start_reload()
 
-
 ## Play shell casing sound with a delay to simulate the casing hitting the ground.
 func _play_delayed_shell_sound() -> void:
 	await get_tree().create_timer(0.15).timeout
 	var audio_manager: Node = get_node_or_null("/root/AudioManager")
 	if audio_manager and audio_manager.has_method("play_shell_rifle"):
 		audio_manager.play_shell_rifle(global_position)
-
 
 ## Spawns a bullet casing that gets ejected from the weapon.
 ## Based on BaseWeapon.cs SpawnCasing method for visual consistency with player weapons.
@@ -4098,7 +4004,6 @@ func _spawn_casing(shoot_direction: Vector2, weapon_forward: Vector2) -> void:
 		casing.set("caliber_data", caliber_data)
 
 	get_tree().current_scene.add_child(casing)
-
 
 ## Calculate lead prediction - aims where the player will be, not where they are.
 ## Uses iterative approach for better accuracy with moving targets.
@@ -4166,7 +4071,6 @@ func _calculate_lead_prediction() -> Vector2:
 
 	return predicted_pos
 
-
 ## Process patrol behavior - move between patrol points.
 func _process_patrol(delta: float) -> void:
 	if _patrol_points.is_empty():
@@ -4199,12 +4103,10 @@ func _process_patrol(delta: float) -> void:
 		# Face movement direction when patrolling
 		rotation = direction.angle()
 
-
 ## Process guard behavior - stand still and look around.
 func _process_guard(_delta: float) -> void:
 	velocity = Vector2.ZERO
 	# In guard mode, enemy doesn't move but can still aim at player when visible
-
 
 ## Called when a bullet enters the threat sphere.
 func _on_threat_area_entered(area: Area2D) -> void:
@@ -4221,17 +4123,14 @@ func _on_threat_area_entered(area: Area2D) -> void:
 	# This gives the player more time before the enemy reacts to nearby gunfire
 	_log_debug("Bullet entered threat sphere, starting reaction delay...")
 
-
 ## Called when a bullet exits the threat sphere.
 func _on_threat_area_exited(area: Area2D) -> void:
 	_bullets_in_threat_sphere.erase(area)
-
 
 ## Called when the enemy is hit (by bullet.gd).
 func on_hit() -> void:
 	# Call extended version with default values
 	on_hit_with_info(Vector2.RIGHT, null)
-
 
 ## Called when the enemy is hit with extended hit information.
 ## @param hit_direction: Direction the bullet was traveling.
@@ -4239,7 +4138,6 @@ func on_hit() -> void:
 func on_hit_with_info(hit_direction: Vector2, caliber_data: Resource) -> void:
 	# Call the full version with default special kill flags
 	on_hit_with_bullet_info(hit_direction, caliber_data, false, false)
-
 
 ## Called when the enemy is hit with full bullet information.
 ## @param hit_direction: Direction the bullet was traveling.
@@ -4305,7 +4203,6 @@ func on_hit_with_bullet_info(hit_direction: Vector2, caliber_data: Resource, has
 			impact_manager.spawn_blood_effect(global_position, hit_direction, caliber_data, false)
 		_update_health_visual()
 
-
 ## Shows a brief flash effect when hit.
 func _show_hit_flash() -> void:
 	if not _enemy_model:
@@ -4319,14 +4216,12 @@ func _show_hit_flash() -> void:
 	if _is_alive:
 		_update_health_visual()
 
-
 ## Updates the sprite color based on current health percentage.
 func _update_health_visual() -> void:
 	# Interpolate color based on health percentage
 	var health_percent := _get_health_percent()
 	var color := full_health_color.lerp(low_health_color, 1.0 - health_percent)
 	_set_all_sprites_modulate(color)
-
 
 ## Sets the modulate color on all enemy sprite parts.
 ## @param color: The color to apply to all sprites.
@@ -4340,13 +4235,11 @@ func _set_all_sprites_modulate(color: Color) -> void:
 	if _right_arm_sprite:
 		_right_arm_sprite.modulate = color
 
-
 ## Returns the current health as a percentage (0.0 to 1.0).
 func _get_health_percent() -> float:
 	if _max_health <= 0:
 		return 0.0
 	return float(_current_health) / float(_max_health)
-
 
 ## Calculates the bullet spawn position at the weapon's muzzle.
 ## The muzzle is positioned relative to the weapon mount, offset in the weapon's forward direction.
@@ -4392,7 +4285,6 @@ func _get_bullet_spawn_position(_direction: Vector2) -> Vector2:
 	else:
 		# Fallback to old behavior if weapon sprite or enemy model not found
 		return global_position + _direction * bullet_spawn_offset
-
 
 ## Returns the weapon's forward direction in world coordinates.
 ## This is the direction the weapon barrel is visually pointing.
@@ -4440,7 +4332,6 @@ func _get_weapon_forward_direction() -> Vector2:
 			return (_player.global_position - global_position).normalized()
 		return Vector2.RIGHT  # Default fallback
 
-
 ## Updates the weapon sprite rotation to match the direction the enemy will shoot.
 ## This ensures the rifle visually points where bullets will travel.
 ## Also handles vertical flipping when aiming left to avoid upside-down appearance.
@@ -4472,7 +4363,6 @@ func _update_weapon_sprite_rotation() -> void:
 	var aiming_left := absf(aim_angle) > PI / 2.0
 	_weapon_sprite.flip_v = aiming_left
 
-
 ## Returns the effective detection delay based on difficulty.
 ## In Easy mode, enemies take longer to react after spotting the player.
 func _get_effective_detection_delay() -> float:
@@ -4481,7 +4371,6 @@ func _get_effective_detection_delay() -> float:
 		return difficulty_manager.get_detection_delay()
 	# Fall back to export variable if DifficultyManager is not available
 	return detection_delay
-
 
 ## Called when the enemy dies.
 func _on_death() -> void:
@@ -4515,7 +4404,6 @@ func _on_death() -> void:
 	else:
 		await get_tree().create_timer(respawn_delay).timeout
 		_reset()
-
 
 ## Resets the enemy to its initial state.
 func _reset() -> void:
@@ -4594,7 +4482,6 @@ func _reset() -> void:
 	# Re-register for sound propagation after respawning
 	_register_sound_listener()
 
-
 ## Disables hit area collision so bullets pass through dead enemies.
 ## Uses multiple approaches due to Godot engine limitations with Area2D collision toggling.
 func _disable_hit_area_collision() -> void:
@@ -4615,7 +4502,6 @@ func _disable_hit_area_collision() -> void:
 		_hit_area.set_deferred("monitorable", false)
 		_hit_area.set_deferred("monitoring", false)
 
-
 ## Re-enables hit area collision after respawning.
 ## Restores all collision properties to their original values.
 func _enable_hit_area_collision() -> void:
@@ -4633,12 +4519,10 @@ func _enable_hit_area_collision() -> void:
 		_hit_area.monitorable = true
 		_hit_area.monitoring = true
 
-
 ## Returns whether this enemy is currently alive.
 ## Used by bullets to check if they should pass through or hit.
 func is_alive() -> bool:
 	return _is_alive
-
 
 ## Initialize the death animation component.
 func _init_death_animation() -> void:
@@ -4662,23 +4546,19 @@ func _init_death_animation() -> void:
 
 	_log_to_file("Death animation component initialized")
 
-
 ## Called when death animation completes (body at rest).
 func _on_death_animation_completed() -> void:
 	_log_to_file("Death animation completed")
 	death_animation_completed.emit()
 
-
 ## Called when ragdoll physics activates.
 func _on_ragdoll_activated() -> void:
 	_log_to_file("Ragdoll activated")
-
 
 ## Log debug message if debug_logging is enabled.
 func _log_debug(message: String) -> void:
 	if debug_logging:
 		print("[Enemy %s] %s" % [name, message])
-
 
 ## Log a message to the file logger (always logs, regardless of debug_logging setting).
 ## Use for important events like spawning, dying, or critical state changes.
@@ -4689,13 +4569,11 @@ func _log_to_file(message: String) -> void:
 	if file_logger and file_logger.has_method("log_enemy"):
 		file_logger.log_enemy(name, message)
 
-
 ## Log spawn info (called via call_deferred to ensure FileLogger is loaded).
 func _log_spawn_info() -> void:
 	_log_to_file("Enemy spawned at %s, health: %d, behavior: %s, player_found: %s" % [
 		global_position, _max_health, BehaviorMode.keys()[behavior_mode],
 		"yes" if _player != null else "no"])
-
 
 ## Get AI state name as a human-readable string.
 func _get_state_name(state: AIState) -> String:
@@ -4720,7 +4598,6 @@ func _get_state_name(state: AIState) -> String:
 			return "ASSAULT"
 		_:
 			return "UNKNOWN"
-
 
 ## Update the debug label with current AI state.
 func _update_debug_label() -> void:
@@ -4791,16 +4668,13 @@ func _update_debug_label() -> void:
 
 	_debug_label.text = state_text
 
-
 ## Get current AI state (for external access/debugging).
 func get_current_state() -> AIState:
 	return _current_state
 
-
 ## Get GOAP world state (for GOAP planner).
 func get_goap_world_state() -> Dictionary:
 	return _goap_world_state.duplicate()
-
 
 ## Set player reloading state. Called by level when player starts/finishes reload.
 ## When player starts reloading near an enemy, the enemy will attack with maximum priority.
@@ -4810,7 +4684,6 @@ func set_player_reloading(is_reloading: bool) -> void:
 	if is_reloading != old_value:
 		_log_to_file("Player reloading state changed: %s -> %s" % [old_value, is_reloading])
 
-
 ## Set player ammo empty state. Called by level when player tries to shoot with empty weapon.
 ## When player tries to shoot with no ammo, the enemy will attack with maximum priority.
 func set_player_ammo_empty(is_empty: bool) -> void:
@@ -4819,47 +4692,38 @@ func set_player_ammo_empty(is_empty: bool) -> void:
 	if is_empty != old_value:
 		_log_to_file("Player ammo empty state changed: %s -> %s" % [old_value, is_empty])
 
-
 ## Check if enemy is currently under fire.
 func is_under_fire() -> bool:
 	return _under_fire
-
 
 ## Check if enemy is in cover.
 func is_in_cover() -> bool:
 	return _current_state == AIState.IN_COVER or _current_state == AIState.SUPPRESSED
 
-
 ## Get current ammo in magazine.
 func get_current_ammo() -> int:
 	return _current_ammo
-
 
 ## Get reserve ammo.
 func get_reserve_ammo() -> int:
 	return _reserve_ammo
 
-
 ## Get total ammo (current + reserve).
 func get_total_ammo() -> int:
 	return _current_ammo + _reserve_ammo
-
 
 ## Check if enemy is currently reloading.
 func is_reloading() -> bool:
 	return _is_reloading
 
-
 ## Check if enemy has any ammo left.
 func has_ammo() -> bool:
 	return _current_ammo > 0 or _reserve_ammo > 0
-
 
 ## Get current player visibility ratio (for debugging).
 ## Returns 0.0 if player is completely hidden, 1.0 if fully visible.
 func get_player_visibility_ratio() -> float:
 	return _player_visibility_ratio
-
 
 ## Draw debug visualization when debug mode is enabled.
 ## Shows: line to target (cover, clear shot, player), bullet spawn point status.
@@ -4954,7 +4818,6 @@ func _draw() -> void:
 		# Draw small filled circle at center
 		draw_circle(to_suspected, 5.0, confidence_color)
 
-
 ## Check if the player is "distracted" (not aiming at the enemy).
 ## A player is considered distracted if they can see the enemy but their aim direction
 ## is more than 23 degrees away from the direction toward the enemy.
@@ -5008,7 +4871,6 @@ func _is_player_distracted() -> bool:
 
 	return is_distracted
 
-
 ## Set a navigation target and get the direction to follow the path.
 ## Uses NavigationAgent2D for proper pathfinding around obstacles.
 ## Returns the direction to move, or Vector2.ZERO if navigation is not available.
@@ -5031,7 +4893,6 @@ func _get_nav_direction_to(target_pos: Vector2) -> Vector2:
 	var direction: Vector2 = (next_pos - global_position).normalized()
 	return direction
 
-
 ## Move toward a target position using NavigationAgent2D pathfinding.
 ## This is the primary movement function that should be used instead of direct velocity assignment.
 ## Returns true if movement was applied, false if target was reached or navigation unavailable.
@@ -5049,7 +4910,6 @@ func _move_to_target_nav(target_pos: Vector2, speed: float) -> bool:
 	rotation = direction.angle()
 	return true
 
-
 ## Check if the navigation agent has a valid path to the target.
 func _has_nav_path_to(target_pos: Vector2) -> bool:
 	if _nav_agent == null:
@@ -5057,7 +4917,6 @@ func _has_nav_path_to(target_pos: Vector2) -> bool:
 
 	_nav_agent.target_position = target_pos
 	return not _nav_agent.is_navigation_finished()
-
 
 ## Get distance to target along the navigation path (more accurate than straight-line).
 func _get_nav_path_distance(target_pos: Vector2) -> float:
@@ -5067,11 +4926,9 @@ func _get_nav_path_distance(target_pos: Vector2) -> float:
 	_nav_agent.target_position = target_pos
 	return _nav_agent.distance_to_target()
 
-
 # ============================================================================
 # Status Effects (Blindness, Stun)
 # ============================================================================
-
 
 ## Set the blinded state (from flashbang grenade).
 ## When blinded, the enemy cannot see the player.
@@ -5089,7 +4946,6 @@ func set_blinded(blinded: bool) -> void:
 		_log_debug("Enemy is no longer blinded")
 		_log_to_file("Status effect: BLINDED removed")
 
-
 ## Set the stunned state (from flashbang grenade).
 ## When stunned, the enemy cannot move or take actions.
 func set_stunned(stunned: bool) -> void:
@@ -5105,11 +4961,9 @@ func set_stunned(stunned: bool) -> void:
 		_log_debug("Enemy is no longer stunned")
 		_log_to_file("Status effect: STUNNED removed")
 
-
 ## Check if the enemy is currently blinded.
 func is_blinded() -> bool:
 	return _is_blinded
-
 
 ## Check if the enemy is currently stunned.
 func is_stunned() -> bool:
