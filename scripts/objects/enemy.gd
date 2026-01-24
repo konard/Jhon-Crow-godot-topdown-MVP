@@ -2369,7 +2369,7 @@ func _process_searching_state(delta: float) -> void:
 		_log_to_file("SEARCHING timeout after %.1fs, returning to IDLE" % _search_state_timer)
 		_transition_to_idle()
 		return
-	if _can_see_player():
+	if _can_see_player:
 		_log_to_file("SEARCHING: Player spotted! Transitioning to COMBAT")
 		_transition_to_combat()
 		return
