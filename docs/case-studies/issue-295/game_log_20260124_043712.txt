@@ -1,0 +1,97 @@
+[04:37:12] [INFO] ============================================================
+[04:37:12] [INFO] GAME LOG STARTED
+[04:37:12] [INFO] ============================================================
+[04:37:12] [INFO] Timestamp: 2026-01-24T04:37:12
+[04:37:12] [INFO] Log file: I:/Загрузки/godot exe/game_log_20260124_043712.txt
+[04:37:12] [INFO] Executable: I:/Загрузки/godot exe/Godot-Top-Down-Template.exe
+[04:37:12] [INFO] OS: Windows
+[04:37:12] [INFO] Debug build: false
+[04:37:12] [INFO] Engine version: 4.3-stable (official)
+[04:37:12] [INFO] Project: Godot Top-Down Template
+[04:37:12] [INFO] ------------------------------------------------------------
+[04:37:12] [INFO] [GameManager] GameManager ready
+[04:37:12] [INFO] [ScoreManager] ScoreManager ready
+[04:37:12] [INFO] [SoundPropagation] SoundPropagation autoload initialized
+[04:37:12] [INFO] [ImpactEffects] Scenes loaded: DustEffect, BloodEffect, SparksEffect, BloodDecal
+[04:37:12] [INFO] [ImpactEffects] ImpactEffectsManager ready - FULL VERSION with blood effects enabled
+[04:37:12] [INFO] [PenultimateHit] Resetting all effects (scene change detected)
+[04:37:12] [INFO] [PenultimateHit] Saturation shader loaded successfully
+[04:37:12] [INFO] [PenultimateHit] PenultimateHitEffectsManager ready - Configuration:
+[04:37:12] [INFO] [PenultimateHit]   Time scale: 0.10 (10x slowdown)
+[04:37:12] [INFO] [PenultimateHit]   Saturation boost: 2.0 (3.0x)
+[04:37:12] [INFO] [PenultimateHit]   Contrast boost: 1.0 (2.0x)
+[04:37:12] [INFO] [PenultimateHit]   Effect duration: 3.0 real seconds
+[04:37:12] [INFO] [LastChance] Resetting all effects (scene change detected)
+[04:37:12] [INFO] [LastChance] Last chance shader loaded successfully
+[04:37:12] [INFO] [LastChance] LastChanceEffectsManager ready - Configuration:
+[04:37:12] [INFO] [LastChance]   Freeze duration: 6.0 real seconds
+[04:37:12] [INFO] [LastChance]   Sepia intensity: 0.70
+[04:37:12] [INFO] [LastChance]   Brightness: 0.60
+[04:37:12] [INFO] [GrenadeManager] Loaded grenade scene: res://scenes/projectiles/FlashbangGrenade.tscn
+[04:37:12] [INFO] [GrenadeManager] Loaded grenade scene: res://scenes/projectiles/FragGrenade.tscn
+[04:37:12] [INFO] [Player.Grenade] Grenade scene loaded from GrenadeManager: Flashbang
+[04:37:12] [INFO] [Player.Grenade] Normal level - starting with 1 grenade
+[04:37:12] [INFO] [Player.Init] Body sprite found at position: (-4, 0)
+[04:37:12] [INFO] [Player.Init] Head sprite found at position: (-6, -2)
+[04:37:12] [INFO] [Player.Init] Left arm sprite found at position: (24, 6)
+[04:37:12] [INFO] [Player.Init] Right arm sprite found at position: (-2, 6)
+[04:37:12] [INFO] [Player.Debug] Connected to GameManager, debug mode: False
+[04:37:12] [INFO] [Player] Ready! Ammo: 30/30, Grenades: 1/3, Health: 4/4
+[04:37:12] [INFO] [Player.Grenade] Throwing system: VELOCITY-BASED (v2.0 - mouse velocity at release)
+[04:37:12] [INFO] [BuildingLevel] BuildingLevel _ready() started
+[04:37:12] [INFO] [BuildingLevel] Enemy tracking: Found 10 children under Environment/Enemies
+[04:37:12] [INFO] [BuildingLevel] Enemy node 'Enemy1': class=CharacterBody2D, script=<GDScript#-9223372007276542736>, has_died=false
+[04:37:12] [INFO] [BuildingLevel] WARNING: Enemy 'Enemy1' missing died signal - likely script load failure
+[04:37:12] [INFO] [BuildingLevel] Enemy node 'Enemy2': class=CharacterBody2D, script=<GDScript#-9223372007276542736>, has_died=false
+[04:37:12] [INFO] [BuildingLevel] WARNING: Enemy 'Enemy2' missing died signal - likely script load failure
+[04:37:12] [INFO] [BuildingLevel] Enemy node 'Enemy3': class=CharacterBody2D, script=<GDScript#-9223372007276542736>, has_died=false
+[04:37:12] [INFO] [BuildingLevel] WARNING: Enemy 'Enemy3' missing died signal - likely script load failure
+[04:37:12] [INFO] [BuildingLevel] Enemy node 'Enemy4': class=CharacterBody2D, script=<GDScript#-9223372007276542736>, has_died=false
+[04:37:12] [INFO] [BuildingLevel] WARNING: Enemy 'Enemy4' missing died signal - likely script load failure
+[04:37:12] [INFO] [BuildingLevel] Enemy node 'Enemy5': class=CharacterBody2D, script=<GDScript#-9223372007276542736>, has_died=false
+[04:37:12] [INFO] [BuildingLevel] WARNING: Enemy 'Enemy5' missing died signal - likely script load failure
+[04:37:12] [INFO] [BuildingLevel] Enemy node 'Enemy6': class=CharacterBody2D, script=<GDScript#-9223372007276542736>, has_died=false
+[04:37:12] [INFO] [BuildingLevel] WARNING: Enemy 'Enemy6' missing died signal - likely script load failure
+[04:37:12] [INFO] [BuildingLevel] Enemy node 'Enemy7': class=CharacterBody2D, script=<GDScript#-9223372007276542736>, has_died=false
+[04:37:12] [INFO] [BuildingLevel] WARNING: Enemy 'Enemy7' missing died signal - likely script load failure
+[04:37:12] [INFO] [BuildingLevel] Enemy node 'Enemy8': class=CharacterBody2D, script=<GDScript#-9223372007276542736>, has_died=false
+[04:37:12] [INFO] [BuildingLevel] WARNING: Enemy 'Enemy8' missing died signal - likely script load failure
+[04:37:12] [INFO] [BuildingLevel] Enemy node 'Enemy9': class=CharacterBody2D, script=<GDScript#-9223372007276542736>, has_died=false
+[04:37:12] [INFO] [BuildingLevel] WARNING: Enemy 'Enemy9' missing died signal - likely script load failure
+[04:37:12] [INFO] [BuildingLevel] Enemy node 'Enemy10': class=CharacterBody2D, script=<GDScript#-9223372007276542736>, has_died=false
+[04:37:12] [INFO] [BuildingLevel] WARNING: Enemy 'Enemy10' missing died signal - likely script load failure
+[04:37:12] [INFO] [BuildingLevel] Enemy tracking complete: 0/10 enemies registered
+[04:37:12] [INFO] [ScoreManager] Level started with 0 enemies
+[04:37:12] [INFO] [BuildingLevel] BuildingLevel initialization complete: 0 enemies, player found
+[04:37:12] [INFO] [Player] Detecting weapon pose (frame 3)...
+[04:37:12] [INFO] [Player] Detected weapon: Rifle (default pose)
+[04:37:12] [INFO] [Player] Applied Rifle arm pose: Left=(24, 6), Right=(-2, 6)
+[04:37:12] [INFO] [PenultimateHit] Found player: Player (class: CharacterBody2D)
+[04:37:12] [INFO] [PenultimateHit] Connected to player Damaged signal (C#)
+[04:37:12] [INFO] [PenultimateHit] Connected to player Died signal (C#)
+[04:37:12] [INFO] [LastChance] Found player: Player
+[04:37:12] [INFO] [LastChance] Connected to ThreatSphere threat_detected signal
+[04:37:12] [INFO] [LastChance] Connected to player Damaged signal (C#)
+[04:37:12] [INFO] [LastChance] Connected to player Died signal (C#)
+[04:37:42] [INFO] [SoundPropagation] Sound emitted: type=GUNSHOT, pos=(450, 1256), source=PLAYER (AssaultRifle), range=1469, listeners=0
+[04:37:42] [INFO] [SoundPropagation] Sound result: notified=0, out_of_range=0, self=0, below_threshold=0
+[04:37:42] [INFO] [Bullet] _get_distance_to_shooter: shooter_position=(450, 1256), shooter_id=45650806452, bullet_pos=(828.01776, 1027.5876)
+[04:37:42] [INFO] [Bullet] Using shooter_position, distance=441,66687
+[04:37:42] [INFO] [Bullet] Distance to wall: 441,66687 (30,073912% of viewport)
+[04:37:42] [INFO] [Bullet] Within ricochet range - trying ricochet first
+[04:37:42] [INFO] [Bullet] _get_distance_to_shooter: shooter_position=(450, 1256), shooter_id=45650806452, bullet_pos=(1238.0055, 1373.2379)
+[04:37:42] [INFO] [Bullet] Using shooter_position, distance=796,679
+[04:37:42] [INFO] [Bullet] Distance to wall: 796,679 (54,247345% of viewport)
+[04:37:42] [INFO] [Bullet] Distance-based penetration chance: 83,3781%
+[04:37:42] [INFO] [Bullet] Penetration failed (distance roll)
+[04:37:44] [INFO] [SoundPropagation] Sound emitted: type=GUNSHOT, pos=(470.3253, 768.0858), source=PLAYER (AssaultRifle), range=1469, listeners=0
+[04:37:44] [INFO] [SoundPropagation] Sound result: notified=0, out_of_range=0, self=0, below_threshold=0
+[04:37:45] [INFO] [SoundPropagation] Sound emitted: type=GUNSHOT, pos=(498.1642, 747.0546), source=PLAYER (AssaultRifle), range=1469, listeners=0
+[04:37:45] [INFO] [SoundPropagation] Sound result: notified=0, out_of_range=0, self=0, below_threshold=0
+[04:37:45] [INFO] [SoundPropagation] Sound emitted: type=GUNSHOT, pos=(529.6811, 739.9414), source=PLAYER (AssaultRifle), range=1469, listeners=0
+[04:37:45] [INFO] [SoundPropagation] Sound result: notified=0, out_of_range=0, self=0, below_threshold=0
+[04:37:45] [INFO] [SoundPropagation] Sound emitted: type=GUNSHOT, pos=(559.7663, 745.8248), source=PLAYER (AssaultRifle), range=1469, listeners=0
+[04:37:45] [INFO] [SoundPropagation] Sound result: notified=0, out_of_range=0, self=0, below_threshold=0
+[04:37:47] [INFO] ------------------------------------------------------------
+[04:37:47] [INFO] GAME LOG ENDED: 2026-01-24T04:37:47
+[04:37:47] [INFO] ============================================================

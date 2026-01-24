@@ -42,6 +42,33 @@
 - Shows same symptom: "Level started with 0 enemies"
 - User testing latest build (timestamp 01:18 UTC = after latest commit at 01:13 UTC)
 
+### 2026-01-24 01:31 UTC
+- Commit `bd58473` added comprehensive debug logging to building_level.gd
+- Debug logs show: "Enemy node 'Enemy1': class=CharacterBody2D, script=<GDScript#...>, has_died=false"
+- **Key finding**: Scripts ARE attached, but `died` signal is missing
+- This indicates script is loading but not parsing correctly
+
+### 2026-01-24 01:38 UTC
+- User provides third game log: game_log_20260124_043712.txt
+- Debug output confirms 10 enemies found, all missing `died` signal
+- User asks: "может дело в импортах?" (maybe it's imports?)
+
+### 2026-01-24 01:42 UTC - ROOT CAUSE IDENTIFIED
+- Downloaded Windows Export CI logs and found parse errors:
+  1. `enemy.gd`: "Identifier '_navigation_agent' not declared" (wrong variable name)
+  2. `grenade_thrower_component.gd`: "Cannot infer type of 'world_2d' variable"
+  3. `building_level.gd`: "Variable type is being inferred from a Variant value"
+- GDScript 2.0 strict mode in export treats these as fatal errors
+- Scripts fail to parse, so signals are never defined
+
+### 2026-01-24 01:42-01:43 UTC - FIX APPLIED
+- Commit `b1a0976` fixes all three parse errors:
+  1. Fixed `_navigation_agent` → `_nav_agent` (correct variable name)
+  2. Added explicit type annotations: `World2D`, `PhysicsDirectSpaceState2D`, `Dictionary`
+  3. Added explicit type annotations for `get_node_or_null()` results
+- All CI checks pass
+- No more parse errors in export logs for main game scripts
+
 ## Root Cause Analysis
 
 ### CI Architecture Failure
@@ -49,48 +76,62 @@
 - **Root cause**: Adding grenade coordination features (issue #295) added ~583 new lines
 - **Solution**: Condensed multi-line doc comments to single lines
 
-### "Enemies Broken" Report - PERSISTS in Latest Build
+### "Enemies Broken" Report - ROOT CAUSE IDENTIFIED AND FIXED
 
 **Symptoms:**
-- Game log shows "Level started with 0 enemies" in BOTH reports (04:02 and 04:18 local time)
+- Game log shows "Level started with 0 enemies" in ALL reports
 - Sound propagation shows 0 listeners: "listeners=0" in all gunshot events
 - No enemy movement or behavior
+- Debug logging showed scripts ARE attached but `has_signal("died")` returns FALSE
 
-**Investigation Timeline:**
+**Root Cause: GDScript Parse Errors in Export Mode**
 
-1. **First hypothesis**: User testing old build (commit 8144be2 with 5273 line enemy.gd)
-   - REJECTED: Second report at 04:18 local (01:18 UTC) is AFTER latest successful build at 01:13 UTC
+The Windows Export uses GDScript 2.0 strict mode, which treats certain type inference patterns as fatal parse errors. Three scripts had issues:
 
-2. **Second hypothesis**: GDScript export issue with large files
-   - Initial commit had 5273 lines → reduced to 4999 lines in refactor
-   - Windows Export CI succeeded for BOTH versions
-   - If export was truncating files, CI would show errors
+1. **enemy.gd line 769-770**: Used wrong variable name
+   ```gdscript
+   // BEFORE (error): Identifier "_navigation_agent" not declared
+   if _navigation_agent:
+       _navigation_agent.target_position = ...
 
-3. **Current investigation**: Enemy script fails to load in Windows export
+   // AFTER (fixed): Using correct variable name _nav_agent
+   if _nav_agent:
+       _nav_agent.target_position = ...
+   ```
 
-**Evidence from codebase analysis:**
+2. **grenade_thrower_component.gd lines 193-226**: Type inference from nullable returns
+   ```gdscript
+   // BEFORE (error): Cannot infer type from Variant value
+   var world_2d := parent_node.get_world_2d()
+   var space_state := world_2d.direct_space_state
+   var spawn_result := space_state.intersect_ray(spawn_check)
 
-```gdscript
-// building_level.gd:_setup_enemy_tracking()
-for child in enemies_node.get_children():
-    if child.has_signal("died"):  // <-- Returns FALSE for all 10 enemy nodes!
-        _enemies.append(child)
-```
+   // AFTER (fixed): Explicit type annotations
+   var world_2d: World2D = parent_node.get_world_2d()
+   var space_state: PhysicsDirectSpaceState2D = world_2d.direct_space_state
+   var spawn_result: Dictionary = space_state.intersect_ray(spawn_check)
+   ```
 
-**Why enemy.gd might not load:**
-- enemy.gd extends CharacterBody2D (correct)
-- enemy.gd declares signals at class level (lines 176-200)
-- BuildingLevel.tscn contains 10 Enemy instances
-- Enemy.tscn references "res://scripts/objects/enemy.gd"
+3. **building_level.gd**: Multiple `get_node_or_null()` calls without explicit types
+   ```gdscript
+   // BEFORE (warning treated as error)
+   var enemies_node := get_node_or_null("Environment/Enemies")
 
-**Possible causes:**
-1. **GDScript parsing error in export**: If enemy.gd has a parse error that only manifests in export build (not editor), script won't attach
-2. **Missing dependency**: GrenadeThrowerComponent may not be included in export
-3. **Resource loading failure**: caliber_545x39.tres or other resources missing in export
-4. **Scene corruption**: Enemy.tscn file integrity issue in export
+   // AFTER (fixed)
+   var enemies_node: Node = get_node_or_null("Environment/Enemies")
+   ```
 
-**Critical finding:**
-The file size reduction (5273 → 4999 lines) did NOT fix the issue. Both the oversized and refactored versions exhibit the same "0 enemies" problem in Windows exports.
+**Why this wasn't caught earlier:**
+- GUT Tests run in Godot Editor, which has more lenient parsing
+- Architecture check only validates file size and structure, not parse errors
+- Windows Export CI "succeeds" even when scripts fail to parse - it just logs warnings
+- The export artifact is created, but scripts that fail to parse are not attached properly
+
+**Key insight:**
+When a GDScript fails to parse, Godot attaches an empty/stub script object. This means:
+- `child.get_script()` returns a GDScript object (not null)
+- But `child.has_signal("died")` returns FALSE (signal never defined)
+- The enemy appears as CharacterBody2D but has no AI behavior
 
 ## Features Implemented (Issue #295)
 
@@ -202,6 +243,20 @@ The file size reduction (5273 → 4999 lines) did NOT fix the issue. Both the ov
 - [x] Unit tests passing
 - [x] Windows Export builds successfully (CI)
 - [x] Case study analysis completed
-- [ ] **CRITICAL**: Enemies not loading in Windows Export - requires urgent investigation
-- [ ] Debug logging added to identify load failure
-- [ ] User verification of fix needed
+- [x] **RESOLVED**: Parse errors in enemy.gd, grenade_thrower_component.gd, building_level.gd fixed
+- [x] Debug logging added and helped identify the issue
+- [ ] User verification of fix needed - awaiting test of commit `b1a0976`
+
+## Resolution Summary
+
+**Commit `b1a0976`** fixes the critical parse errors:
+- Fixed wrong variable name in enemy.gd (`_navigation_agent` → `_nav_agent`)
+- Added explicit type annotations for nullable returns in grenade_thrower_component.gd
+- Added explicit type annotations for get_node_or_null() calls in building_level.gd
+
+**CI Status after fix:**
+- Architecture Best Practices Check: ✅ SUCCESS
+- Run GUT Tests: ✅ SUCCESS
+- Build Windows Portable EXE: ✅ SUCCESS
+
+**Next step:** User should download the new Windows Export artifact from CI run #21306989974 and verify enemies work correctly.
