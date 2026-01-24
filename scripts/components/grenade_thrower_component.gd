@@ -21,6 +21,13 @@ signal throw_completed
 ## Signal emitted when an ally death is witnessed.
 signal ally_death_witnessed(death_count: int)
 
+## Signal emitted when allies should be notified about incoming grenade.
+## Parameters: target_position (where grenade will land), blast_radius (danger zone size)
+signal notify_allies_of_grenade(target_position: Vector2, blast_radius: float)
+
+## Signal emitted when grenade explodes (for coordinated assault trigger).
+signal grenade_exploded(explosion_position: Vector2)
+
 ## Enable/disable grenade throwing behavior.
 @export var enabled: bool = false
 
@@ -42,6 +49,12 @@ signal ally_death_witnessed(death_count: int)
 
 ## Offset distance from enemy to spawn grenade (to avoid immediate collision).
 @export var grenade_spawn_offset: float = 50.0
+
+## Blast radius for frag grenades (used for ally notification).
+@export var frag_blast_radius: float = 225.0
+
+## Blast radius for flashbangs (used for ally notification).
+@export var flashbang_blast_radius: float = 400.0
 
 ## Frag grenade scene to instantiate when throwing.
 @export var frag_grenade_scene: PackedScene
@@ -88,6 +101,18 @@ var _witnessed_ally_deaths: int = 0
 ## Reference to the log function from parent.
 var _log_func: Callable
 
+## Last grenade target position (for post-explosion assault through same passage).
+var _last_throw_target: Vector2 = Vector2.ZERO
+
+## Whether we're waiting for a grenade to explode (for coordinated assault).
+var _awaiting_explosion: bool = false
+
+## Timer for grenade explosion (frag grenades are impact-triggered, flashbangs have 4s fuse).
+var _explosion_timer: float = 0.0
+
+## Whether the grenade was offensive (impacts post-throw behavior).
+var _last_grenade_was_offensive: bool = true
+
 
 ## Initialize the component.
 func initialize(log_function: Callable = Callable()) -> void:
@@ -114,6 +139,14 @@ func update_cooldown(delta: float) -> void:
 		_cooldown_timer -= delta
 		if _cooldown_timer <= 0.0:
 			_cooldown_timer = 0.0
+
+	# Update explosion timer if awaiting explosion
+	if _awaiting_explosion and _explosion_timer > 0.0:
+		_explosion_timer -= delta
+		if _explosion_timer <= 0.0:
+			_awaiting_explosion = false
+			grenade_exploded.emit(_last_throw_target)
+			_log("Grenade exploded at %s - triggering assault" % _last_throw_target)
 
 
 ## Update player hidden timer. Call when player visibility changes.
@@ -151,6 +184,71 @@ func has_grenades() -> bool:
 func is_safe_throw_distance(throw_origin: Vector2, target_pos: Vector2) -> bool:
 	var distance_to_target := throw_origin.distance_to(target_pos)
 	return distance_to_target >= min_safe_distance
+
+
+## Check if there's a wall blocking the throw path from origin to target.
+## Returns true if the path is CLEAR (no wall blocking), false if blocked.
+## This prevents enemies from throwing grenades at walls point-blank.
+func is_throw_path_clear(throw_origin: Vector2, target_pos: Vector2) -> bool:
+	var parent_node := get_parent()
+	if parent_node == null:
+		return true  # Fail-open if no parent
+
+	var world_2d := parent_node.get_world_2d()
+	if world_2d == null:
+		return true
+	var space_state := world_2d.direct_space_state
+	if space_state == null:
+		return true
+
+	# Calculate the grenade spawn position (offset from throw origin)
+	var direction_to_target := (target_pos - throw_origin).normalized()
+	var spawn_pos := throw_origin + direction_to_target * grenade_spawn_offset
+
+	# First check: Is there a wall between enemy and spawn position?
+	var spawn_check := PhysicsRayQueryParameters2D.new()
+	spawn_check.from = throw_origin
+	spawn_check.to = spawn_pos
+	spawn_check.collision_mask = 4  # Obstacles (layer 3)
+	spawn_check.exclude = [parent_node.get_rid()] if parent_node.has_method("get_rid") else []
+
+	var spawn_result := space_state.intersect_ray(spawn_check)
+	if not spawn_result.is_empty():
+		_log("Grenade throw blocked: wall between enemy and spawn position")
+		return false
+
+	# Second check: Is there a wall between spawn position and target?
+	var target_check := PhysicsRayQueryParameters2D.new()
+	target_check.from = spawn_pos
+	target_check.to = target_pos
+	target_check.collision_mask = 4  # Obstacles (layer 3)
+
+	var target_result := space_state.intersect_ray(target_check)
+	if not target_result.is_empty():
+		# Check if the wall is very close (point-blank situation)
+		var hit_position: Vector2 = target_result["position"]
+		var distance_to_wall := spawn_pos.distance_to(hit_position)
+		var distance_to_target := spawn_pos.distance_to(target_pos)
+
+		# If wall is less than 50 pixels away, it's point-blank - don't throw
+		if distance_to_wall < 50.0:
+			_log("Grenade throw blocked: wall point-blank (%.1f pixels away)" % distance_to_wall)
+			return false
+
+		# If wall blocks more than 80% of the path, don't throw
+		if distance_to_wall < distance_to_target * 0.2:
+			_log("Grenade throw blocked: wall blocking throw path (%.1f%% of distance)" % [(distance_to_wall / distance_to_target) * 100])
+			return false
+
+	return true
+
+
+## Get the blast radius for the currently selected grenade type.
+func get_current_blast_radius() -> float:
+	if _type_to_throw == GrenadeType.OFFENSIVE:
+		return frag_blast_radius
+	else:
+		return flashbang_blast_radius
 
 
 ## Check if a grenade throw should be triggered.
@@ -241,9 +339,15 @@ func begin_throw(target_pos: Vector2, grenade_type: int) -> void:
 	_type_to_throw = grenade_type
 	_prep_timer = 0.0
 	_is_throwing = true
+	_last_grenade_was_offensive = (grenade_type == GrenadeType.OFFENSIVE)
 
 	var type_name: String = "frag" if grenade_type == GrenadeType.OFFENSIVE else "flashbang"
 	_log("Preparing to throw %s grenade at %s" % [type_name, target_pos])
+
+	# Notify allies in the blast zone / throw line to evacuate (per issue #295)
+	var blast_radius := get_current_blast_radius()
+	notify_allies_of_grenade.emit(target_pos, blast_radius)
+	_log("Notifying allies: blast zone at %s, radius %.0f" % [target_pos, blast_radius])
 
 
 ## Update throw preparation. Returns true when throw should execute.
@@ -332,6 +436,17 @@ func execute_throw(throw_origin: Vector2) -> RigidBody2D:
 		actual_distance
 	])
 
+	# Store last throw position for post-explosion assault (per issue #295)
+	_last_throw_target = _target_position
+	_awaiting_explosion = true
+
+	# For flashbangs, set explosion timer (4 seconds fuse)
+	# Frag grenades are impact-triggered, so we estimate ~1 second flight time
+	if _type_to_throw == GrenadeType.OFFENSIVE:
+		_explosion_timer = 1.0  # Estimated impact time for frag
+	else:
+		_explosion_timer = 4.0  # Flashbang fuse timer
+
 	# Complete the throw
 	_finish_throw()
 
@@ -384,3 +499,26 @@ func reset() -> void:
 	_player_hidden_timer = 0.0
 	_continuous_gunfire_timer = 0.0
 	_witnessed_ally_deaths = 0
+	_last_throw_target = Vector2.ZERO
+	_awaiting_explosion = false
+	_explosion_timer = 0.0
+
+
+## Get the last throw target position (for post-explosion assault).
+func get_last_throw_target() -> Vector2:
+	return _last_throw_target
+
+
+## Check if we're awaiting a grenade explosion.
+func is_awaiting_explosion() -> bool:
+	return _awaiting_explosion
+
+
+## Check if the last grenade was offensive (affects post-throw cover behavior).
+func was_last_grenade_offensive() -> bool:
+	return _last_grenade_was_offensive
+
+
+## Mark explosion as completed (called by enemy when processing assault).
+func mark_explosion_complete() -> void:
+	_awaiting_explosion = false
