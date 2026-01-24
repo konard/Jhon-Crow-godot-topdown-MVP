@@ -1537,7 +1537,13 @@ func _throw_grenade(drag_end: Vector2) -> void:
 
 	if velocity_magnitude > 10.0:
 		# Primary direction: the direction the mouse is MOVING (velocity direction)
-		throw_direction = release_velocity.normalized()
+		# FIX for issue #313 v3: Snap to cardinal directions when close to cardinal
+		# This compensates for imprecise human mouse movement
+		var raw_direction := release_velocity.normalized()
+		throw_direction = _snap_to_cardinal_direction(raw_direction)
+		FileLogger.info("[Player.Grenade] Raw direction: %s, Snapped direction: %s" % [
+			str(raw_direction), str(throw_direction)
+		])
 	else:
 		# Fallback when mouse is not moving - use player-to-mouse as fallback
 		var player_to_mouse := drag_end - global_position
@@ -1672,6 +1678,36 @@ func _get_safe_grenade_spawn_position(from_pos: Vector2, intended_pos: Vector2, 
 
 	_active_grenade.global_position = safe_position
 	return safe_position
+
+
+## Snap a direction vector to the nearest cardinal direction (4 directions).
+## FIX for issue #313 v3: Compensates for imprecise human mouse movement.
+## Uses 4 cardinal directions (right, down, left, up) with 90° sectors each.
+## User requirement: When moving mouse DOWN, grenade flies DOWN (not diagonally).
+## This is achieved by snapping to the nearest of 4 cardinal directions.
+## @param raw_direction: The raw normalized direction from mouse velocity.
+## @return: A snapped direction vector pointing to the nearest cardinal direction.
+func _snap_to_cardinal_direction(raw_direction: Vector2) -> Vector2:
+	# Calculate angle in radians (-PI to PI)
+	var angle := raw_direction.angle()
+
+	# Use 4 cardinal directions with 90° sectors each
+	# 0 = right, PI/2 = down, PI = left, -PI/2 = up
+	var sector_size := PI / 2.0  # 90 degrees per sector
+
+	# Snap to nearest sector (round to nearest multiple of 90°)
+	var sector_index := roundi(angle / sector_size)
+	var snapped_angle := sector_index * sector_size
+
+	# Handle the PI/-PI boundary (both represent "left")
+	# When sector_index is 2 or -2, it's "left" direction
+	if sector_index == 2 or sector_index == -2:
+		snapped_angle = PI  # Use positive PI for left
+
+	# Convert back to direction vector
+	var snapped_direction := Vector2(cos(snapped_angle), sin(snapped_angle))
+
+	return snapped_direction
 
 
 ## Rotate player to face throw direction (with swing animation).
