@@ -53,11 +53,19 @@ const SATURATION_INTENSITY: float = 0.25
 var _enemies: Array = []
 
 
+## Log to file logger if available.
+func _log_to_file(message: String) -> void:
+	var file_logger: Node = get_node_or_null("/root/FileLogger")
+	if file_logger and file_logger.has_method("log_info"):
+		file_logger.log_info("[BuildingLevel] " + message)
+
+
 func _ready() -> void:
 	print("BuildingLevel loaded - Hotline Miami Style")
 	print("Building size: ~2400x2000 pixels")
 	print("Clear all rooms to win!")
 	print("Press Q for quick restart")
+	_log_to_file("BuildingLevel _ready() started")
 
 	# Setup navigation mesh for enemy pathfinding
 	_setup_navigation()
@@ -85,6 +93,13 @@ func _ready() -> void:
 
 	# Initialize ScoreManager for this level
 	_initialize_score_manager()
+
+	# Log completion
+	print("[BuildingLevel] _ready() completed successfully")
+	_log_to_file("BuildingLevel initialization complete: %d enemies, player %s" % [
+		_initial_enemy_count,
+		"found" if _player else "NOT FOUND"
+	])
 
 
 ## Initialize the ScoreManager for this level.
@@ -243,23 +258,53 @@ func _setup_player_tracking() -> void:
 func _setup_enemy_tracking() -> void:
 	var enemies_node := get_node_or_null("Environment/Enemies")
 	if enemies_node == null:
+		print("[BuildingLevel] ERROR: Environment/Enemies node not found!")
+		_log_to_file("Enemy tracking setup failed: Environment/Enemies node not found")
 		return
+
+	var child_count := enemies_node.get_child_count()
+	print("[BuildingLevel] Found Environment/Enemies with %d children" % child_count)
+	_log_to_file("Enemy tracking: Found %d children under Environment/Enemies" % child_count)
 
 	_enemies.clear()
 	for child in enemies_node.get_children():
+		var child_class := child.get_class()
+		var child_script := child.get_script()
+		var has_died_signal := child.has_signal("died")
+
+		print("[BuildingLevel] Child '%s': class=%s, script=%s, has_died_signal=%s" % [
+			child.name,
+			child_class,
+			str(child_script) if child_script else "NONE",
+			has_died_signal
+		])
+		_log_to_file("Enemy node '%s': class=%s, script=%s, has_died=%s" % [
+			child.name,
+			child_class,
+			str(child_script) if child_script else "NONE",
+			has_died_signal
+		])
+
 		if child.has_signal("died"):
 			_enemies.append(child)
 			child.died.connect(_on_enemy_died)
 			# Connect to died_with_info for score tracking if available
 			if child.has_signal("died_with_info"):
 				child.died_with_info.connect(_on_enemy_died_with_info)
+			print("[BuildingLevel] Enemy '%s' registered successfully" % child.name)
+			_log_to_file("Enemy '%s' registered with died signal" % child.name)
+		else:
+			print("[BuildingLevel] WARNING: Enemy '%s' missing 'died' signal - script may not be loaded!" % child.name)
+			_log_to_file("WARNING: Enemy '%s' missing died signal - likely script load failure" % child.name)
+
 		# Track when enemy is hit for accuracy
 		if child.has_signal("hit"):
 			child.hit.connect(_on_enemy_hit)
 
 	_initial_enemy_count = _enemies.size()
 	_current_enemy_count = _initial_enemy_count
-	print("Tracking %d enemies" % _initial_enemy_count)
+	print("[BuildingLevel] Tracking %d enemies (out of %d total children)" % [_initial_enemy_count, child_count])
+	_log_to_file("Enemy tracking complete: %d/%d enemies registered" % [_initial_enemy_count, child_count])
 
 	# Configure grenades for enemies based on difficulty (per issue #273)
 	_configure_enemy_grenades()
