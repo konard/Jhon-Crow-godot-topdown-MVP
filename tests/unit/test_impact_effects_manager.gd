@@ -931,3 +931,103 @@ func test_blood_decal_gradient_alpha_has_significant_drops() -> void:
 			# We just verify no TINY changes like 0.02 (1.0→0.98)
 			if alpha_drop > 0.001:  # If there's a drop at all
 				pass  # We found a meaningful transition
+
+
+# ============================================================================
+# Round 11: RGB Gradient Tests (Issue #293)
+# ============================================================================
+
+
+func test_blood_decal_has_rgb_gradient_not_flat() -> void:
+	# Round 11: Blood should have RGB gradient (not flat color)
+	# Root cause analysis showed all flat-RGB attempts failed
+	# Only Round 5 with RGB gradient succeeded
+	var blood_decal_scene = load("res://scenes/effects/BloodDecal.tscn")
+	var blood_decal = blood_decal_scene.instantiate()
+	add_child_autoqfree(blood_decal)
+
+	var gradient_texture = blood_decal.texture as GradientTexture2D
+	var gradient = gradient_texture.gradient
+	var colors = gradient.colors
+
+	# Get center and edge colors
+	var center_red = colors[0].r
+	var edge_red = colors[len(colors) - 2].r  # Second to last (last is corner)
+
+	# RGB should vary from center to edge
+	var rgb_variation = abs(center_red - edge_red)
+	assert_gt(rgb_variation, 0.05,
+		"RGB should vary by at least 0.05 from center to edge (not flat color)")
+
+
+func test_blood_decal_rgb_gradient_direction() -> void:
+	# Round 11: RGB should fade from brighter center to darker edge
+	# This creates smooth color transitions that mask banding artifacts
+	var blood_decal_scene = load("res://scenes/effects/BloodDecal.tscn")
+	var blood_decal = blood_decal_scene.instantiate()
+	add_child_autoqfree(blood_decal)
+
+	var gradient_texture = blood_decal.texture as GradientTexture2D
+	var gradient = gradient_texture.gradient
+	var colors = gradient.colors
+
+	# Center should be brighter than edge
+	var center_red = colors[0].r
+	var edge_red = colors[len(colors) - 2].r
+
+	assert_gt(center_red, edge_red,
+		"Center red channel should be brighter than edge for proper gradient")
+
+
+func test_blood_decal_matches_round5_rgb_values() -> void:
+	# Round 11: Should match Round 5's proven working RGB gradient
+	# Round 5 used: 0.4, 0.38, 0.36, 0.33, 0.30, 0.28, 0.26, 0.25, 0.25
+	var blood_decal_scene = load("res://scenes/effects/BloodDecal.tscn")
+	var blood_decal = blood_decal_scene.instantiate()
+	add_child_autoqfree(blood_decal)
+
+	var gradient_texture = blood_decal.texture as GradientTexture2D
+	var gradient = gradient_texture.gradient
+	var offsets = gradient.offsets
+	var colors = gradient.colors
+
+	# Check center (offset 0) - should be ~0.4
+	if len(offsets) > 0 and abs(offsets[0] - 0.0) < 0.01:
+		assert_almost_eq(colors[0].r, 0.4, 0.05,
+			"Center red channel should be ~0.4 (Round 5 value)")
+
+	# Check edge visibility (offset ~0.707) - should be ~0.25
+	for i in range(len(offsets)):
+		if abs(offsets[i] - 0.707) < 0.02:
+			assert_almost_eq(colors[i].r, 0.25, 0.05,
+				"Edge red channel should be ~0.25 (Round 5 value)")
+
+
+func test_blood_decal_round11_complete_gradient() -> void:
+	# Round 11: Verify complete Round 5 restoration (RGB + alpha)
+	# This is the only known working configuration
+	var blood_decal_scene = load("res://scenes/effects/BloodDecal.tscn")
+	var blood_decal = blood_decal_scene.instantiate()
+	add_child_autoqfree(blood_decal)
+
+	var gradient_texture = blood_decal.texture as GradientTexture2D
+	var gradient = gradient_texture.gradient
+	var offsets = gradient.offsets
+	var colors = gradient.colors
+
+	# Should have 9 offsets (proven structure)
+	assert_eq(len(offsets), 9,
+		"Should have 9 gradient offsets (Round 5 structure)")
+
+	# Center should have both bright RGB and full alpha
+	assert_gt(colors[0].r, 0.3,
+		"Center should have bright red channel (RGB gradient)")
+	assert_almost_eq(colors[0].a, 1.0, 0.01,
+		"Center should have full opacity")
+
+	# Edge should have both dark RGB and zero alpha
+	var edge_idx = len(colors) - 2  # Second to last
+	assert_lt(colors[edge_idx].r, 0.26,
+		"Edge should have dark red channel (RGB gradient end)")
+	assert_almost_eq(colors[edge_idx].a, 0.0, 0.01,
+		"Edge should be transparent")
