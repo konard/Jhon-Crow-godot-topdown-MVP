@@ -160,6 +160,12 @@ func toggle_grenade_debug_logging() -> void:
 	grenade_debug_logging_toggled.emit(grenade_debug_logging_enabled)
 	_log_to_file("Grenade debug logging toggled: %s" % ("ON" if grenade_debug_logging_enabled else "OFF"))
 
+	# Flush log when debug mode is turned OFF to ensure all debug data is saved
+	if not grenade_debug_logging_enabled:
+		var file_logger = get_node_or_null("/root/FileLogger")
+		if file_logger != null and file_logger.has_method("flush"):
+			file_logger.call("flush")
+
 
 ## Returns whether grenade debug logging is currently enabled.
 func is_grenade_debug_logging_enabled() -> bool:

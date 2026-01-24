@@ -88,6 +88,8 @@ func _close_log_file() -> void:
 		log_info("-" .repeat(60))
 		log_info("GAME LOG ENDED: %s" % Time.get_datetime_string_from_system())
 		log_info("=" .repeat(60))
+		# Flush all remaining buffered data before closing
+		_log_file.flush()
 		_log_file.close()
 		_log_file = null
 
@@ -105,7 +107,8 @@ func _write_log(level: String, message: String) -> void:
 
 	if _log_file != null:
 		_log_file.store_line(log_line)
-		_log_file.flush()
+		# Don't flush on every log - let OS handle buffering for performance
+		# Flush is only called on critical events (errors, shutdown)
 	else:
 		# Buffer messages if file not ready yet
 		_log_buffer.append(log_line)
@@ -126,6 +129,8 @@ func log_warning(message: String) -> void:
 ## Log an error message.
 func log_error(message: String) -> void:
 	_write_log("ERROR", message)
+	# Flush immediately after errors to ensure they're captured
+	flush()
 
 
 ## Log a debug message (only in debug builds).
@@ -152,6 +157,14 @@ func get_log_path() -> String:
 ## Check if logging is enabled and working.
 func is_logging_enabled() -> bool:
 	return _logging_enabled and _log_file != null
+
+
+## Force flush the log buffer to disk.
+## Call this manually for critical events (errors already auto-flush).
+## Note: Frequent flushing can cause performance issues - use sparingly.
+func flush() -> void:
+	if _log_file != null:
+		_log_file.flush()
 
 
 ## Alias methods for compatibility with different calling conventions.

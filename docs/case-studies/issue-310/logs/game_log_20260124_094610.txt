@@ -1,0 +1,195 @@
+[09:46:10] [INFO] ============================================================
+[09:46:10] [INFO] GAME LOG STARTED
+[09:46:10] [INFO] ============================================================
+[09:46:10] [INFO] Timestamp: 2026-01-24T09:46:10
+[09:46:10] [INFO] Log file: I:/Загрузки/godot exe/game_log_20260124_094610.txt
+[09:46:10] [INFO] Executable: I:/Загрузки/godot exe/Godot-Top-Down-Template.exe
+[09:46:10] [INFO] OS: Windows
+[09:46:10] [INFO] Debug build: false
+[09:46:10] [INFO] Engine version: 4.3-stable (official)
+[09:46:10] [INFO] Project: Godot Top-Down Template
+[09:46:10] [INFO] ------------------------------------------------------------
+[09:46:10] [INFO] [GameManager] GameManager ready
+[09:46:10] [INFO] [ScoreManager] ScoreManager ready
+[09:46:10] [INFO] [SoundPropagation] SoundPropagation autoload initialized
+[09:46:10] [INFO] [ImpactEffects] Scenes loaded: DustEffect, BloodEffect, SparksEffect, BloodDecal
+[09:46:10] [INFO] [ImpactEffects] ImpactEffectsManager ready - FULL VERSION with blood effects enabled
+[09:46:10] [INFO] [PenultimateHit] Resetting all effects (scene change detected)
+[09:46:10] [INFO] [PenultimateHit] Saturation shader loaded successfully
+[09:46:10] [INFO] [PenultimateHit] PenultimateHitEffectsManager ready - Configuration:
+[09:46:10] [INFO] [PenultimateHit]   Time scale: 0.10 (10x slowdown)
+[09:46:10] [INFO] [PenultimateHit]   Saturation boost: 2.0 (3.0x)
+[09:46:10] [INFO] [PenultimateHit]   Contrast boost: 1.0 (2.0x)
+[09:46:10] [INFO] [PenultimateHit]   Effect duration: 3.0 real seconds
+[09:46:10] [INFO] [LastChance] Resetting all effects (scene change detected)
+[09:46:10] [INFO] [LastChance] Last chance shader loaded successfully
+[09:46:10] [INFO] [LastChance] LastChanceEffectsManager ready - Configuration:
+[09:46:10] [INFO] [LastChance]   Freeze duration: 6.0 real seconds
+[09:46:10] [INFO] [LastChance]   Sepia intensity: 0.70
+[09:46:10] [INFO] [LastChance]   Brightness: 0.60
+[09:46:10] [INFO] [GrenadeManager] Loaded grenade scene: res://scenes/projectiles/FlashbangGrenade.tscn
+[09:46:10] [INFO] [GrenadeManager] Loaded grenade scene: res://scenes/projectiles/FragGrenade.tscn
+[09:46:10] [ENEMY] [Enemy1] Death animation component initialized
+[09:46:10] [ENEMY] [Enemy2] Death animation component initialized
+[09:46:10] [ENEMY] [Enemy3] Death animation component initialized
+[09:46:10] [ENEMY] [Enemy4] Death animation component initialized
+[09:46:10] [ENEMY] [Enemy5] Death animation component initialized
+[09:46:10] [ENEMY] [Enemy6] Death animation component initialized
+[09:46:10] [ENEMY] [Enemy7] Death animation component initialized
+[09:46:10] [ENEMY] [Enemy8] Death animation component initialized
+[09:46:10] [ENEMY] [Enemy9] Death animation component initialized
+[09:46:10] [ENEMY] [Enemy10] Death animation component initialized
+[09:46:10] [INFO] [Player.Grenade] Grenade scene loaded from GrenadeManager: Flashbang
+[09:46:10] [INFO] [Player.Grenade] Normal level - starting with 1 grenade
+[09:46:10] [INFO] [Player.Init] Body sprite found at position: (-4, 0)
+[09:46:10] [INFO] [Player.Init] Head sprite found at position: (-6, -2)
+[09:46:10] [INFO] [Player.Init] Left arm sprite found at position: (24, 6)
+[09:46:10] [INFO] [Player.Init] Right arm sprite found at position: (-2, 6)
+[09:46:10] [INFO] [Player.Debug] Connected to GameManager, debug mode: False, grenade debug: False
+[09:46:10] [INFO] [Player] Ready! Ammo: 30/30, Grenades: 1/3, Health: 4/4
+[09:46:10] [INFO] [Player.Grenade] Throwing system: VELOCITY-BASED (v2.0 - mouse velocity at release)
+[09:46:10] [INFO] [ScoreManager] Level started with 10 enemies
+[09:46:10] [INFO] [SoundPropagation] Registered listener: Enemy1 (total: 1)
+[09:46:10] [ENEMY] [Enemy1] Registered as sound listener
+[09:46:10] [ENEMY] [Enemy1] Enemy spawned at (300, 350), health: 3, behavior: GUARD, player_found: yes
+[09:46:10] [INFO] [SoundPropagation] Registered listener: Enemy2 (total: 2)
+[09:46:10] [ENEMY] [Enemy2] Registered as sound listener
+[09:46:10] [ENEMY] [Enemy2] Enemy spawned at (400, 550), health: 3, behavior: GUARD, player_found: yes
+[09:46:10] [INFO] [SoundPropagation] Registered listener: Enemy3 (total: 3)
+[09:46:10] [ENEMY] [Enemy3] Registered as sound listener
+[09:46:10] [ENEMY] [Enemy3] Enemy spawned at (700, 750), health: 4, behavior: GUARD, player_found: yes
+[09:46:10] [INFO] [SoundPropagation] Registered listener: Enemy4 (total: 4)
+[09:46:10] [ENEMY] [Enemy4] Registered as sound listener
+[09:46:10] [ENEMY] [Enemy4] Enemy spawned at (800, 900), health: 3, behavior: GUARD, player_found: yes
+[09:46:10] [INFO] [SoundPropagation] Registered listener: Enemy5 (total: 5)
+[09:46:10] [ENEMY] [Enemy5] Registered as sound listener
+[09:46:10] [ENEMY] [Enemy5] Enemy spawned at (1700, 350), health: 2, behavior: GUARD, player_found: yes
+[09:46:10] [INFO] [SoundPropagation] Registered listener: Enemy6 (total: 6)
+[09:46:10] [ENEMY] [Enemy6] Registered as sound listener
+[09:46:10] [ENEMY] [Enemy6] Enemy spawned at (1950, 450), health: 3, behavior: GUARD, player_found: yes
+[09:46:10] [INFO] [SoundPropagation] Registered listener: Enemy7 (total: 7)
+[09:46:10] [ENEMY] [Enemy7] Registered as sound listener
+[09:46:10] [ENEMY] [Enemy7] Enemy spawned at (1606.114, 893.8859), health: 3, behavior: PATROL, player_found: yes
+[09:46:10] [INFO] [SoundPropagation] Registered listener: Enemy8 (total: 8)
+[09:46:10] [ENEMY] [Enemy8] Registered as sound listener
+[09:46:10] [ENEMY] [Enemy8] Enemy spawned at (1900, 1450), health: 4, behavior: GUARD, player_found: yes
+[09:46:10] [INFO] [SoundPropagation] Registered listener: Enemy9 (total: 9)
+[09:46:10] [ENEMY] [Enemy9] Registered as sound listener
+[09:46:10] [ENEMY] [Enemy9] Enemy spawned at (2100, 1550), health: 4, behavior: GUARD, player_found: yes
+[09:46:10] [INFO] [SoundPropagation] Registered listener: Enemy10 (total: 10)
+[09:46:10] [ENEMY] [Enemy10] Registered as sound listener
+[09:46:10] [ENEMY] [Enemy10] Enemy spawned at (1200, 1550), health: 3, behavior: PATROL, player_found: yes
+[09:46:10] [INFO] [Player] Detecting weapon pose (frame 3)...
+[09:46:10] [INFO] [Player] Detected weapon: Rifle (default pose)
+[09:46:10] [INFO] [Player] Applied Rifle arm pose: Left=(24, 6), Right=(-2, 6)
+[09:46:10] [INFO] [PenultimateHit] Found player: Player (class: CharacterBody2D)
+[09:46:10] [INFO] [PenultimateHit] Connected to player Damaged signal (C#)
+[09:46:10] [INFO] [PenultimateHit] Connected to player Died signal (C#)
+[09:46:10] [INFO] [LastChance] Found player: Player
+[09:46:10] [INFO] [LastChance] Connected to ThreatSphere threat_detected signal
+[09:46:10] [INFO] [LastChance] Connected to player Damaged signal (C#)
+[09:46:10] [INFO] [LastChance] Connected to player Died signal (C#)
+[09:46:12] [INFO] [Player.Grenade.Debug] Detailed throw logging ENABLED (F8 toggle)
+[09:46:12] [INFO] [GameManager] Grenade debug logging toggled: ON
+[09:46:13] [INFO] [Player.Grenade.Anim] Phase changed to: GrabGrenade (duration: 0,20s)
+[09:46:13] [INFO] [Player.Grenade] G pressed - starting grab animation
+[09:46:13] [INFO] [Player.Grenade] Step 1 started: G held, RMB pressed at (474.32114, 1242.6531)
+[09:46:14] [INFO] [Player.Grenade] Timer started, grenade created at (450, 1250)
+[09:46:14] [INFO] [Player.Grenade.Anim] Phase changed to: PullPin (duration: 0,15s)
+[09:46:14] [INFO] [Player.Grenade] Step 1 complete! Drag: (409.5198, -20.03711)
+[09:46:14] [INFO] [Player.Grenade.Anim] Phase changed to: HandsApproach (duration: 0,20s)
+[09:46:14] [INFO] [Player.Grenade] Step 2 part 1: G+RMB held - now release G to ready the throw
+[09:46:14] [INFO] [Player.Grenade.Anim] Phase changed to: Transfer (duration: 0,15s)
+[09:46:14] [INFO] [Player.Grenade] Step 2 complete: G released, RMB held - now aiming (velocity-based throwing enabled)
+[09:46:14] [INFO] [Player.Grenade.Debug] ====== AIMING STARTED ======
+[09:46:14] [INFO] [Player.Grenade.Debug] Player position: (450,0, 1250,0)
+[09:46:14] [INFO] [Player.Grenade.Debug] Player rotation: 0,00 rad (0,0 deg)
+[09:46:14] [INFO] [Player.Grenade.Debug] Aim start mouse position: (483,0, 1227,3)
+[09:46:14] [INFO] [Player.Grenade.Debug] Mouse relative to player: (33,0, -22,7)
+[09:46:14] [INFO] [Player.Grenade.Anim] Phase changed to: WindUp (duration: 0,00s)
+[09:46:14] [INFO] [Player.Grenade.Anim] Entered wind-up phase
+[09:46:14] [INFO] [Player.Grenade.Debug] Frame 1 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:14] [INFO] [Player.Grenade.Debug] Frame 2 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:14] [INFO] [Player.Grenade.Debug] Frame 3 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:14] [INFO] [Player.Grenade.Debug] Frame 4 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:14] [INFO] [Player.Grenade.Debug] Frame 5 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:14] [INFO] [Player.Grenade.Debug] Frame 6 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:14] [INFO] [Player.Grenade.Debug] Frame 7 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:14] [INFO] [Player.Grenade.Debug] Frame 8 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:14] [INFO] [Player.Grenade.Debug] Frame 9 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:14] [INFO] [Player.Grenade.Debug] Frame 10 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:14] [INFO] [Player.Grenade.Debug] Frame 11 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 12 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 13 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 14 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 15 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 16 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 17 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 18 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 19 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 20 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 21 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 22 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 23 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 24 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 25 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 26 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 27 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 28 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 29 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 30 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 31 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 32 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 33 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 34 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 35 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 36 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 37 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 38 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 39 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 40 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 41 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 42 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 43 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 44 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 45 | MouseGlobal: (483,0, 1227,3) | MouseRelPlayer: (33,0, -22,7) | Delta: (0,0, 0,0) | InstVel: (0,0, 0,0) px/s | SmoothVel: (0,0, 0,0) px/s | TotalSwing: 0,0 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 46 | MouseGlobal: (507,7, 1227,3) | MouseRelPlayer: (57,7, -22,7) | Delta: (24,7, 0,0) | InstVel: (1373,2, 0,0) px/s | SmoothVel: (274,6, 0,0) px/s | TotalSwing: 24,7 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 47 | MouseGlobal: (674,7, 1205,9) | MouseRelPlayer: (224,7, -44,1) | Delta: (167,0, -21,4) | InstVel: (10438,4, -1335,8) px/s | SmoothVel: (2362,3, -267,2) px/s | TotalSwing: 193,1 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 48 | MouseGlobal: (956,0, 1193,2) | MouseRelPlayer: (506,0, -56,8) | Delta: (281,3, -12,7) | InstVel: (16544,3, -746,5) px/s | SmoothVel: (5671,2, -416,5) px/s | TotalSwing: 474,6 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Frame 49 | MouseGlobal: (1249,9, 1181,2) | MouseRelPlayer: (799,9, -68,8) | Delta: (293,9, -12,0) | InstVel: (17290,9, -707,2) px/s | SmoothVel: (9129,4, -557,9) px/s | TotalSwing: 768,8 px
+[09:46:15] [INFO] [Player.Grenade.Anim] Phase changed to: Throw (duration: 0,20s)
+[09:46:15] [INFO] [Player.Grenade] Throwing toward mouse! Direction: (0.9963224, -0.085683085), Mouse velocity: 9146,4 px/s, Swing: 768,8
+[09:46:15] [INFO] [Player.Grenade.Debug] ====== THROW EXECUTED ======
+[09:46:15] [INFO] [Player.Grenade.Debug] Total frames tracked: 49
+[09:46:15] [INFO] [Player.Grenade.Debug] --- PLAYER STATE ---
+[09:46:15] [INFO] [Player.Grenade.Debug] Player position at throw: (450,0, 1250,0)
+[09:46:15] [INFO] [Player.Grenade.Debug] Player position at aim start: (450,0, 1250,0)
+[09:46:15] [INFO] [Player.Grenade.Debug] Player moved during aiming: (0,0, 0,0)
+[09:46:15] [INFO] [Player.Grenade.Debug] Player rotation: 0,00 rad (0,0 deg)
+[09:46:15] [INFO] [Player.Grenade.Debug] --- MOUSE INPUT ---
+[09:46:15] [INFO] [Player.Grenade.Debug] Aim start mouse: (483,0, 1227,3)
+[09:46:15] [INFO] [Player.Grenade.Debug] Aim end mouse (drag_end): (1249,9, 1181,2)
+[09:46:15] [INFO] [Player.Grenade.Debug] Total drag vector: (766,9, -46,1)
+[09:46:15] [INFO] [Player.Grenade.Debug] Total drag distance: 768,3 px
+[09:46:15] [INFO] [Player.Grenade.Debug] Total swing distance: 768,8 px
+[09:46:15] [INFO] [Player.Grenade.Debug] --- VELOCITY CALCULATION ---
+[09:46:15] [INFO] [Player.Grenade.Debug] Release mouse velocity: (9129,4, -557,9) px/s
+[09:46:15] [INFO] [Player.Grenade.Debug] Velocity magnitude: 9146,4 px/s
+[09:46:15] [INFO] [Player.Grenade.Debug] Velocity angle: -0,06 rad (-3,5 deg)
+[09:46:15] [INFO] [Player.Grenade.Debug] --- THROW DIRECTION ---
+[09:46:15] [INFO] [Player.Grenade.Debug] Mouse position at release: (1249,9, 1181,2)
+[09:46:15] [INFO] [Player.Grenade.Debug] Direction source: player_to_mouse (FIXED in issue #281)
+[09:46:15] [INFO] [Player.Grenade.Debug] Throw direction: (0,996, -0,086)
+[09:46:15] [INFO] [Player.Grenade.Debug] Throw angle: -0,09 rad (-4,9 deg)
+[09:46:15] [INFO] [Player.Grenade.Debug] ====== END THROW DATA ======
+[09:46:15] [INFO] [Player.Grenade] Player rotated for throw: 0 -> -0,08578828
+[09:46:15] [INFO] [Player.Grenade] Thrown! Velocity: 9146,4, Swing: 768,8
+[09:46:15] [INFO] [Player.Grenade] State reset to IDLE
+[09:46:15] [INFO] [Player.Grenade] Player rotation restored to 0
+[09:46:15] [INFO] [Player.Grenade.Anim] Phase changed to: ReturnIdle (duration: 0,30s)
+[09:46:16] [INFO] [Player.Grenade.Anim] Animation complete, returning to normal
+[09:46:21] [INFO] [Player.Grenade.Debug] Detailed throw logging DISABLED (F8 toggle)
+[09:46:21] [INFO] [GameManager] Grenade debug logging toggled: OFF
+[09:46:24] [INFO] ------------------------------------------------------------
+[09:46:24] [INFO] GAME LOG ENDED: 2026-01-24T09:46:24
+[09:46:24] [INFO] ============================================================
