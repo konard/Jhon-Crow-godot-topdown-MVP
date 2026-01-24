@@ -41,6 +41,19 @@ enum BehaviorMode {
 @export var rotation_speed: float = 25.0
 ## Detection range (0=unlimited, line-of-sight only).
 @export var detection_range: float = 0.0
+
+## Field of view angle in degrees.
+## Enemy can only see targets within this cone centered on their facing direction.
+## Set to 0 or negative to disable FOV check (360 degree vision).
+## Default is 100 degrees as requested in issue #66.
+@export var fov_angle: float = 100.0
+
+## Whether FOV checking is enabled for this specific enemy.
+## This is combined with the global ExperimentalSettings.fov_enabled setting.
+## Both must be true for FOV to be active.
+## Note: The global setting in ExperimentalSettings is disabled by default.
+@export var fov_enabled: bool = true
+
 ## Time between shots (0.1s = 10 rounds/sec).
 @export var shoot_cooldown: float = 0.1
 
@@ -182,8 +195,16 @@ const AIM_TOLERANCE_DOT: float = 0.866  ## cos(30°) - aim tolerance (issue #254
 
 var _original_hit_area_layer: int = 0  ## Original collision layer (restore on respawn)
 var _original_hit_area_mask: int = 0
+
 var _walk_anim_time: float = 0.0  ## Walking animation accumulator
 var _is_walking: bool = false  ## Currently walking (for anim)
+var _target_model_rotation: float = 0.0  ## Target rotation for smooth interpolation
+var _model_facing_left: bool = false  ## Model flipped for left-facing direction
+const MODEL_ROTATION_SPEED: float = 3.0  ## Max model rotation speed (3.0 rad/s = 172 deg/s)
+var _idle_scan_timer: float = 0.0  ## IDLE scanning state for GUARD enemies
+var _idle_scan_target_index: int = 0
+var _idle_scan_targets: Array[float] = []
+const IDLE_SCAN_INTERVAL: float = 10.0
 var _base_body_pos: Vector2 = Vector2.ZERO  ## Base positions for animation
 var _base_head_pos: Vector2 = Vector2.ZERO
 var _base_left_arm_pos: Vector2 = Vector2.ZERO
@@ -686,28 +707,12 @@ func _unregister_sound_listener() -> void:
 	if sound_propagation and sound_propagation.has_method("unregister_listener"):
 		sound_propagation.unregister_listener(self)
 
-## Called by SoundPropagation when a sound is heard within range.
-## This is the callback that allows the enemy to react to in-game sounds.
-##
-## Parameters:
-## - sound_type: The type of sound (from SoundPropagation.SoundType enum)
-## - position: World position where the sound originated
-## - source_type: Whether sound is from PLAYER, ENEMY, or NEUTRAL (from SoundPropagation.SourceType)
-## - source_node: The node that produced the sound (can be null)
+## Called by SoundPropagation when a sound is heard. Delegates to on_sound_heard_with_intensity.
 func on_sound_heard(sound_type: int, position: Vector2, source_type: int, source_node: Node2D) -> void:
 	# Default to full intensity if called without intensity parameter
 	on_sound_heard_with_intensity(sound_type, position, source_type, source_node, 1.0)
 
-## Called by SoundPropagation when a sound is heard within range (with intensity).
-## This version includes physically-calculated sound intensity.
-##
-## Parameters:
-## - sound_type: The type of sound (from SoundPropagation.SoundType enum)
-##   0=GUNSHOT, 1=EXPLOSION, 2=FOOTSTEP, 3=RELOAD, 4=IMPACT, 5=EMPTY_CLICK, 6=RELOAD_COMPLETE
-## - position: World position where the sound originated
-## - source_type: Whether sound is from PLAYER, ENEMY, or NEUTRAL (from SoundPropagation.SourceType)
-## - source_node: The node that produced the sound (can be null)
-## - intensity: Sound intensity from 0.0 to 1.0 based on inverse square law
+## Called by SoundPropagation with intensity. Reacts to reload/empty_click/gunshot sounds.
 func on_sound_heard_with_intensity(sound_type: int, position: Vector2, source_type: int, source_node: Node2D, intensity: float) -> void:
 	# Only react if alive and not confused from memory reset (Issue #318 - block sounds during confusion)
 	if not _is_alive or _memory_reset_confusion_timer > 0.0:
@@ -909,6 +914,8 @@ func _connect_debug_mode_signal() -> void:
 func _on_debug_mode_toggled(enabled: bool) -> void:
 	debug_label_enabled = enabled
 	_update_debug_label()
+	queue_redraw()  # Redraw to show/hide FOV cone
+
 
 ## Find the player node in the scene tree.
 func _find_player() -> void:
@@ -1011,67 +1018,38 @@ func _update_goap_state() -> void:
 		_goap_world_state["confidence_medium"] = _memory.is_medium_confidence()
 		_goap_world_state["confidence_low"] = _memory.is_low_confidence()
 
-## Updates the enemy model rotation to face the aim/movement direction.
-## The enemy model (body, head, arms) rotates to follow the direction of movement or aim.
-## Note: Enemy sprites face RIGHT (0 radians), same as player sprites.
-##
-## IMPORTANT: When aiming at the player, we calculate the direction from the WEAPON position
-## to the player, not from the enemy center. This ensures the weapon barrel actually points
-## at the player, accounting for the weapon's offset from the enemy center.
+## Updates model rotation. Instant for combat/movement, smooth only for idle scanning.
 func _update_enemy_model_rotation() -> void:
 	if not _enemy_model:
 		return
-
-	# Determine the direction to face:
-	# - If can see player, face the player (simple direction from enemy center)
-	# - Otherwise, face the movement direction
-	#
-	# NOTE: We use simple center-to-player direction, NOT offset-compensated direction.
-	# This ensures the weapon visually points in the same direction as bullets fly.
-	# The bullets are fired from the muzzle toward the target, and the muzzle is
-	# positioned along the direction the model faces.
-	var face_direction: Vector2
-
+	var target_angle: float
+	var use_smooth_rotation := false
 	if _player != null and _can_see_player:
-		# Simple direction from enemy center to player (like player character does)
-		face_direction = (_player.global_position - global_position).normalized()
+		target_angle = (_player.global_position - global_position).normalized().angle()
 	elif velocity.length_squared() > 1.0:
-		# Face movement direction
-		face_direction = velocity.normalized()
+		target_angle = velocity.normalized().angle()
+	elif _current_state == AIState.IDLE and _idle_scan_targets.size() > 0:
+		target_angle = _idle_scan_targets[_idle_scan_target_index]
+		use_smooth_rotation = true
 	else:
-		# Keep current rotation
 		return
-
-	# Calculate target rotation angle
-	# Enemy sprites face RIGHT (same as player sprites, 0 radians)
-	var target_angle := face_direction.angle()
-
-	# Handle sprite flipping for left/right aim
-	# When aiming left (angle > 90° or < -90°), flip vertically to avoid upside-down appearance
-	var aiming_left := absf(target_angle) > PI / 2
-
-	# Apply rotation to the enemy model using GLOBAL rotation.
-	# IMPORTANT: We use global_rotation instead of (local) rotation because the Enemy
-	# CharacterBody2D node may also have its own rotation (for aiming/turning). Using
-	# global_rotation ensures the EnemyModel's visual direction is set in world coordinates,
-	# independent of any parent rotation.
-	#
-	# IMPORTANT FIX (Issue #264 - Session 5):
-	# After the transform delay fix in f188853, we now calculate bullet direction directly
-	# as (_player.global_position - global_position).normalized() to avoid stale transforms.
-	# To make the visual model rotation match this bullet direction, we must NOT negate
-	# the angle when flipping vertically. The flip handles the visual appearance, but the
-	# rotation angle should match the actual geometric direction to the player.
-	#
-	# Example: Player is up-left at angle -135°:
-	# - Without flip: global_rotation = -135°, scale.y = 1.3  -> faces down-right (wrong)
-	# - With flip, OLD code: global_rotation = 135°, scale.y = -1.3 -> faces up-left (visual ok, but bullets go wrong)
-	# - With flip, NEW code: global_rotation = -135°, scale.y = -1.3 -> faces up-left (visual matches bullets) ✓
-	if aiming_left:
+	if use_smooth_rotation:
+		var delta := get_physics_process_delta_time()
+		var current_rot := _enemy_model.global_rotation
+		var angle_diff := wrapf(target_angle - current_rot, -PI, PI)
+		if abs(angle_diff) <= MODEL_ROTATION_SPEED * delta:
+			_enemy_model.global_rotation = target_angle
+		elif angle_diff > 0:
+			_enemy_model.global_rotation = current_rot + MODEL_ROTATION_SPEED * delta
+		else:
+			_enemy_model.global_rotation = current_rot - MODEL_ROTATION_SPEED * delta
+	else:
 		_enemy_model.global_rotation = target_angle
+	var aiming_left := absf(_enemy_model.global_rotation) > PI / 2
+	_model_facing_left = aiming_left
+	if aiming_left:
 		_enemy_model.scale = Vector2(enemy_model_scale, -enemy_model_scale)
 	else:
-		_enemy_model.global_rotation = target_angle
 		_enemy_model.scale = Vector2(enemy_model_scale, enemy_model_scale)
 
 ## Forces the enemy model to face a specific direction immediately.
@@ -1677,8 +1655,7 @@ func _process_combat_state(delta: float) -> void:
 			_shoot()
 			_shoot_timer = 0.0
 
-## Calculate a target position to exit cover and get a clear shot.
-## Returns a position that should allow the bullet spawn point to be unobstructed.
+## Calculate a position to exit cover and get a clear shot at the player.
 func _calculate_clear_shot_exit_position(direction_to_player: Vector2) -> Vector2:
 	# Calculate perpendicular directions to the player
 	var perpendicular := Vector2(-direction_to_player.y, direction_to_player.x)
@@ -2039,8 +2016,7 @@ func _process_retreating_state(delta: float) -> void:
 		RetreatMode.MULTIPLE_HITS:
 			_process_retreat_multiple_hits(delta, direction_to_cover)
 
-## Process FULL_HP retreat: walk backwards facing player, shoot with reduced accuracy,
-## periodically turn toward cover.
+## Process FULL_HP retreat: walk backwards facing player, shoot with reduced accuracy.
 func _process_retreat_full_hp(delta: float, _direction_to_cover: Vector2) -> void:
 	_retreat_turn_timer += delta
 
@@ -2124,12 +2100,7 @@ func _process_retreat_multiple_hits(delta: float, direction_to_cover: Vector2) -
 	# Same behavior as ONE_HIT - quick burst then escape
 	_process_retreat_one_hit(delta, direction_to_cover)
 
-## Process PURSUING state - move cover-to-cover toward player.
-## Enemy moves between covers, waiting 1-2 seconds at each cover,
-## until they can see and hit the player.
-## When at the last cover (no better cover found), enters approach phase
-## to move directly toward the player.
-## Special case: when pursuing a vulnerability sound, move directly toward sound position.
+## Process PURSUING state - move cover-to-cover toward player or vulnerability sound.
 func _process_pursuing_state(delta: float) -> void:
 	# Track time in PURSUING state (for preventing rapid state thrashing)
 	_pursuing_state_timer += delta
@@ -2313,9 +2284,7 @@ func _process_pursuing_state(delta: float) -> void:
 		else:
 			_transition_to_combat()
 
-## Process ASSAULT state - disabled per issue #169.
-## This state is kept for backwards compatibility but immediately transitions to COMBAT.
-## Previously: coordinated multi-enemy rush where enemies wait 5 seconds then rush together.
+## Process ASSAULT state - disabled per issue #169. Immediately transitions to COMBAT.
 func _process_assault_state(_delta: float) -> void:
 	# ASSAULT state is disabled per issue #169
 	# Immediately transition to COMBAT state
@@ -2575,6 +2544,10 @@ func _transition_to_idle() -> void:
 	# Reset alarm mode when returning to idle
 	_in_alarm_mode = false
 	_cover_burst_pending = false
+	# Reset idle scanning state for GUARD enemies
+	_idle_scan_timer = 0.0
+	_idle_scan_targets.clear()  # Will be re-initialized in _process_guard
+
 
 ## Transition to COMBAT state.
 func _transition_to_combat() -> void:
@@ -2620,8 +2593,7 @@ func _can_attempt_flanking() -> bool:
 		return false
 	return true
 
-## Transition to FLANKING state.
-## Returns true if transition succeeded, false if flanking is unavailable.
+## Transition to FLANKING state. Returns true if transition succeeded.
 func _transition_to_flanking() -> bool:
 	# Check if flanking is available
 	if not _can_attempt_flanking():
@@ -2663,7 +2635,6 @@ func _transition_to_flanking() -> bool:
 	return true
 
 ## Check if the current flank target is reachable via navigation mesh.
-## Returns true if a path exists, false otherwise.
 func _is_flank_target_reachable() -> bool:
 	if _nav_agent == null:
 		return true  # Assume reachable if no nav agent
@@ -3039,10 +3010,7 @@ func _is_bullet_spawn_clear(direction: Vector2) -> bool:
 
 	return true
 
-## Find a sidestep direction that would lead to a clear shot position.
-## Checks perpendicular directions to the player and returns the first one
-## that would allow the bullet spawn point to be clear.
-## Returns Vector2.ZERO if no clear direction is found.
+## Find a sidestep direction for a clear shot. Returns Vector2.ZERO if none found.
 func _find_sidestep_direction_for_clear_shot(direction_to_player: Vector2) -> Vector2:
 	# Fail-safe: allow normal behavior if physics is not ready
 	var world_2d := get_world_2d()
@@ -3089,8 +3057,7 @@ func _find_sidestep_direction_for_clear_shot(direction_to_player: Vector2) -> Ve
 
 	return Vector2.ZERO  # No clear sidestep direction found
 
-## Check if the enemy should shoot at the current target.
-## Validates bullet spawn clearance, friendly fire avoidance, and cover blocking.
+## Check if the enemy should shoot at the target (bullet spawn, friendly fire, cover).
 func _should_shoot_at_target(target_position: Vector2) -> bool:
 	# Check if the immediate path to bullet spawn is clear
 	# This prevents shooting into walls the enemy is flush against
@@ -3109,8 +3076,7 @@ func _should_shoot_at_target(target_position: Vector2) -> bool:
 
 	return true
 
-## Check if the player is "close" (within CLOSE_COMBAT_DISTANCE).
-## Used to determine if the enemy should engage directly or pursue.
+## Check if the player is close (within CLOSE_COMBAT_DISTANCE).
 func _is_player_close() -> bool:
 	if _player == null:
 		return false
@@ -3279,7 +3245,6 @@ func _find_pursuit_cover_toward_player() -> void:
 		_has_pursuit_cover = false
 
 ## Check if there's a clear path to a position (no walls blocking).
-## Used to verify cover positions are reachable before selecting them.
 func _can_reach_position(target: Vector2) -> bool:
 	var world_2d := get_world_2d()
 	if world_2d == null:
@@ -3305,7 +3270,6 @@ func _can_reach_position(target: Vector2) -> bool:
 	return hit_distance >= target_distance - 10.0  # 10 pixel tolerance
 
 ## Find cover position closest to the player for assault positioning.
-## Used during ASSAULT state to take the nearest safe cover to the player.
 func _find_cover_closest_to_player() -> void:
 	if _player == null:
 		_has_valid_cover = false
@@ -3433,8 +3397,7 @@ func _find_cover_position() -> void:
 	else:
 		_has_valid_cover = false
 
-## Calculate flank position based on player location.
-## Uses the stored _flank_side which is set once when entering FLANKING state.
+## Calculate flank position based on player location and stored _flank_side.
 func _calculate_flank_position() -> void:
 	if _player == null:
 		return
@@ -3448,9 +3411,7 @@ func _calculate_flank_position() -> void:
 	_flank_target = player_pos + flank_direction * flank_distance
 	_log_debug("Flank target: %s (side: %s)" % [_flank_target, "right" if _flank_side > 0 else "left"])
 
-## Choose the best flank side (left or right) based on obstacle presence.
-## Returns 1.0 for right, -1.0 for left.
-## Checks which side has fewer obstacles to the flank position.
+## Choose the best flank side (1.0=right, -1.0=left) based on obstacle presence.
 func _choose_best_flank_side() -> float:
 	if _player == null:
 		return 1.0 if randf() > 0.5 else -1.0
@@ -3490,7 +3451,6 @@ func _choose_best_flank_side() -> float:
 		return -1.0
 
 ## Check if there's a clear path (no obstacles) to the target position.
-## Uses a raycast to check for walls/obstacles between current position and target.
 func _has_clear_path_to(target: Vector2) -> bool:
 	if _raycast == null:
 		return true  # Assume clear if no raycast available
@@ -3510,8 +3470,7 @@ func _has_clear_path_to(target: Vector2) -> bool:
 
 	return true
 
-## Find cover position closer to the flank target.
-## Used during FLANKING state to move cover-to-cover toward the flank position.
+## Find cover position closer to the flank target for cover-to-cover movement.
 func _find_flank_cover_toward_target() -> void:
 	var best_cover: Vector2 = Vector2.ZERO
 	var best_score: float = -INF
@@ -3636,8 +3595,7 @@ func _check_wall_ahead(direction: Vector2) -> Vector2:
 
 	return avoidance.normalized() if avoidance.length() > 0 else Vector2.ZERO
 
-## Apply wall avoidance to a movement direction with dynamic weighting.
-## Returns the adjusted movement direction.
+## Apply wall avoidance to a movement direction. Returns adjusted direction.
 func _apply_wall_avoidance(direction: Vector2) -> Vector2:
 	var avoidance: Vector2 = _check_wall_ahead(direction)
 	if avoidance == Vector2.ZERO:
@@ -3648,7 +3606,6 @@ func _apply_wall_avoidance(direction: Vector2) -> Vector2:
 	return (direction * (1.0 - weight) + avoidance * weight).normalized()
 
 ## Calculate wall avoidance weight based on distance to nearest wall.
-## Returns a value between WALL_AVOIDANCE_MAX_WEIGHT (far) and WALL_AVOIDANCE_MIN_WEIGHT (close).
 func _get_wall_avoidance_weight(direction: Vector2) -> float:
 	if _wall_raycasts.is_empty():
 		return WALL_AVOIDANCE_MAX_WEIGHT
@@ -3669,11 +3626,22 @@ func _get_wall_avoidance_weight(direction: Vector2) -> float:
 	var normalized_distance: float = clampf(closest_distance / WALL_CHECK_DISTANCE, 0.0, 1.0)
 	return lerpf(WALL_AVOIDANCE_MIN_WEIGHT, WALL_AVOIDANCE_MAX_WEIGHT, normalized_distance)
 
-## Check if the player is visible using raycast.
-## If detection_range is 0 or negative, uses unlimited detection range (line-of-sight only).
-## This allows the enemy to see the player even outside the viewport if there's no obstacle.
-## Also updates the continuous visibility timer and visibility ratio for lead prediction control.
-## Uses multi-point visibility check to handle player near wall corners (issue #264).
+
+## Check if target is within FOV cone. FOV uses _enemy_model.global_rotation for facing.
+func _is_position_in_fov(target_pos: Vector2) -> bool:
+	var experimental_settings: Node = get_node_or_null("/root/ExperimentalSettings")
+	var global_fov_enabled: bool = experimental_settings != null and experimental_settings.has_method("is_fov_enabled") and experimental_settings.is_fov_enabled()
+	if not global_fov_enabled or not fov_enabled or fov_angle <= 0.0:
+		return true  # FOV disabled - 360 degree vision
+	var facing_angle := _enemy_model.global_rotation if _enemy_model else rotation
+	var dir_to_target := (target_pos - global_position).normalized()
+	var dot := Vector2.from_angle(facing_angle).dot(dir_to_target)
+	var angle_to_target := rad_to_deg(acos(clampf(dot, -1.0, 1.0)))
+	var in_fov := angle_to_target <= fov_angle / 2.0
+	return in_fov
+
+
+## Check if the player is visible using multi-point raycast. Updates visibility timer.
 func _check_player_visibility() -> void:
 	var was_visible := _can_see_player
 	_can_see_player = false
@@ -3701,6 +3669,11 @@ func _check_player_visibility() -> void:
 		_continuous_visibility_timer = 0.0
 		return
 
+	# Check FOV angle (if FOV is enabled via ExperimentalSettings)
+	if not _is_position_in_fov(_player.global_position):
+		_continuous_visibility_timer = 0.0
+		return
+
 	# Check multiple points on the player's body (center + corners) to handle
 	# cases where player is near a wall corner. A single raycast to the center
 	# might hit the wall, but parts of the player's body could still be visible.
@@ -3725,10 +3698,7 @@ func _check_player_visibility() -> void:
 		_continuous_visibility_timer = 0.0
 		_player_visibility_ratio = 0.0
 
-## Update the enemy memory system (Issue #297).
-## - Updates memory with visual detection (confidence 1.0) when player is visible
-## - Applies confidence decay over time
-## - Shares intel with nearby enemies periodically
+## Update enemy memory: visual detection, decay, and periodic intel sharing (Issue #297).
 func _update_memory(delta: float) -> void:
 	if _memory == null:
 		return
@@ -3748,10 +3718,7 @@ func _update_memory(delta: float) -> void:
 		_intel_share_timer = 0.0
 		_share_intel_with_nearby_enemies()
 
-## Share intelligence with nearby enemies (Issue #297).
-## Enemies can share information if:
-## - Within 660px AND have direct line of sight, OR
-## - Within 300px regardless of line of sight
+## Share intelligence with nearby enemies within 660px (LOS) or 300px (no LOS).
 func _share_intel_with_nearby_enemies() -> void:
 	if _memory == null or not _memory.has_target():
 		return
@@ -3821,6 +3788,7 @@ func reset_memory() -> void:
 			_log_to_file("State reset: %s -> IDLE (no target)" % AIState.keys()[_current_state])
 			_transition_to_idle()
 
+
 ## Check if there is a clear line of sight to a position (enemy-to-enemy comms).
 func _has_line_of_sight_to_position(target_pos: Vector2) -> bool:
 	if _raycast == null:
@@ -3875,9 +3843,7 @@ func _aim_at_player() -> void:
 	else:
 		rotation -= rotation_speed * delta
 
-## Shoot a bullet towards the player.
-## Bullets fly in the direction the barrel is pointing (realistic behavior).
-## Enemy must be properly aimed before shooting (within AIM_TOLERANCE_DOT).
+## Shoot a bullet in barrel direction. Enemy must be aimed within AIM_TOLERANCE_DOT.
 func _shoot() -> void:
 	if bullet_scene == null or _player == null:
 		return
@@ -3976,7 +3942,6 @@ func _play_delayed_shell_sound() -> void:
 	if audio_manager and audio_manager.has_method("play_shell_rifle"):
 		audio_manager.play_shell_rifle(global_position)
 
-## Spawns a bullet casing that gets ejected from the weapon.
 ## Spawn bullet casing (based on BaseWeapon.cs for visual consistency with player).
 func _spawn_casing(shoot_direction: Vector2, weapon_forward: Vector2) -> void:
 	if casing_scene == null:
@@ -4018,13 +3983,7 @@ func _spawn_casing(shoot_direction: Vector2, weapon_forward: Vector2) -> void:
 
 	get_tree().current_scene.add_child(casing)
 
-## Calculate lead prediction - aims where the player will be, not where they are.
-## Uses iterative approach for better accuracy with moving targets.
-## Only applies lead prediction if:
-## 1. The player has been continuously visible for at least lead_prediction_delay seconds
-## 2. At least lead_prediction_visibility_threshold of the player's body is visible
-## 3. The predicted position is also visible to the enemy (not behind cover)
-## This prevents enemies from "knowing" where the player will emerge from cover.
+## Calculate lead prediction - aims where the player will be based on velocity.
 func _calculate_lead_prediction() -> Vector2:
 	if _player == null:
 		return global_position
@@ -4116,47 +4075,79 @@ func _process_patrol(delta: float) -> void:
 		# Face movement direction when patrolling
 		rotation = direction.angle()
 
-## Process guard behavior - stand still and look around.
-func _process_guard(_delta: float) -> void:
+## Process guard behavior - scan for threats every IDLE_SCAN_INTERVAL seconds.
+func _process_guard(delta: float) -> void:
 	velocity = Vector2.ZERO
-	# In guard mode, enemy doesn't move but can still aim at player when visible
+	if _idle_scan_targets.is_empty():
+		_initialize_idle_scan_targets()
+	_idle_scan_timer += delta
+	if _idle_scan_timer >= IDLE_SCAN_INTERVAL:
+		_idle_scan_timer = 0.0
+		if _idle_scan_targets.size() > 0:
+			_idle_scan_target_index = (_idle_scan_target_index + 1) % _idle_scan_targets.size()
+
+
+## Initialize scan targets - detects passages using raycasts.
+func _initialize_idle_scan_targets() -> void:
+	_idle_scan_targets.clear()
+	var space_state := get_world_2d().direct_space_state
+	var opening_angles: Array[float] = []
+	for i in range(16):
+		var angle := (float(i) / 16.0) * TAU
+		var query := PhysicsRayQueryParameters2D.create(global_position, global_position + Vector2.from_angle(angle) * 500.0)
+		query.collision_mask = 0b100
+		query.exclude = [self]
+		var result := space_state.intersect_ray(query)
+		if result.is_empty() or global_position.distance_to(result.position) > 200.0:
+			opening_angles.append(angle)
+	if opening_angles.size() > 0:
+		var clusters: Array[Array] = []
+		opening_angles.sort()
+		for angle in opening_angles:
+			var found := false
+			for cluster in clusters:
+				var avg: float = 0.0
+				for a in cluster: avg += a
+				avg /= cluster.size()
+				if abs(wrapf(angle - avg, -PI, PI)) < deg_to_rad(30.0):
+					cluster.append(angle)
+					found = true
+					break
+			if not found: clusters.append([angle])
+		for cluster in clusters:
+			var avg: float = 0.0
+			for a in cluster: avg += a
+			_idle_scan_targets.append(avg / cluster.size())
+	if _idle_scan_targets.size() < 2:
+		_idle_scan_targets = [0.0, PI]
+	_idle_scan_target_index = randi() % _idle_scan_targets.size()
+
 
 ## Called when a bullet enters the threat sphere.
 func _on_threat_area_entered(area: Area2D) -> void:
-	# Check if bullet has shooter_id property and if it's from this enemy
-	# This prevents enemies from being suppressed by their own bullets
 	if "shooter_id" in area and area.shooter_id == get_instance_id():
-		return  # Ignore own bullets
-
+		return
 	_bullets_in_threat_sphere.append(area)
-	# Set threat memory timer so enemy can react even after fast bullets exit
-	# This allows the reaction delay to complete even if bullets pass through quickly
 	_threat_memory_timer = THREAT_MEMORY_DURATION
-	# Note: _under_fire is now set in _update_suppression after threat_reaction_delay
-	# This gives the player more time before the enemy reacts to nearby gunfire
 	_log_debug("Bullet entered threat sphere, starting reaction delay...")
+
 
 ## Called when a bullet exits the threat sphere.
 func _on_threat_area_exited(area: Area2D) -> void:
 	_bullets_in_threat_sphere.erase(area)
 
+
 ## Called when the enemy is hit (by bullet.gd).
 func on_hit() -> void:
-	# Call extended version with default values
 	on_hit_with_info(Vector2.RIGHT, null)
 
+
 ## Called when the enemy is hit with extended hit information.
-## @param hit_direction: Direction the bullet was traveling.
-## @param caliber_data: Caliber resource for effect scaling.
 func on_hit_with_info(hit_direction: Vector2, caliber_data: Resource) -> void:
-	# Call the full version with default special kill flags
 	on_hit_with_bullet_info(hit_direction, caliber_data, false, false)
 
+
 ## Called when the enemy is hit with full bullet information.
-## @param hit_direction: Direction the bullet was traveling.
-## @param caliber_data: Caliber resource for effect scaling.
-## @param has_ricocheted: Whether the bullet had ricocheted before this hit.
-## @param has_penetrated: Whether the bullet had penetrated a wall before this hit.
 func on_hit_with_bullet_info(hit_direction: Vector2, caliber_data: Resource, has_ricocheted: bool, has_penetrated: bool) -> void:
 	if not _is_alive:
 		return
@@ -4237,7 +4228,6 @@ func _update_health_visual() -> void:
 	_set_all_sprites_modulate(color)
 
 ## Sets the modulate color on all enemy sprite parts.
-## @param color: The color to apply to all sprites.
 func _set_all_sprites_modulate(color: Color) -> void:
 	if _body_sprite:
 		_body_sprite.modulate = color
@@ -4299,29 +4289,8 @@ func _get_bullet_spawn_position(_direction: Vector2) -> Vector2:
 		# Fallback to old behavior if weapon sprite or enemy model not found
 		return global_position + _direction * bullet_spawn_offset
 
-## Returns the weapon's forward direction in world coordinates.
-## This is the direction the weapon barrel is visually pointing.
-##
-## NOTE: This is used to calculate the muzzle position, NOT the bullet direction.
-## The actual bullet direction is calculated in _shoot() as (target - muzzle).normalized()
-## to ensure bullets fly toward the target, not just in the model's facing direction.
-##
-## IMPORTANT: We use global_transform.x to get the actual visual forward direction.
-## This correctly accounts for the vertical flip (scale.y negative) that happens
-## when aiming left. The transform includes all parent transforms, so it gives
-## the true world-space direction the weapon is pointing.
-##
-## IMPORTANT FIX (Issue #264 - Session 4):
-## In Godot 4, when we set global_rotation on a Node2D, the global_transform of
-## child nodes does NOT update immediately in the same physics frame. This caused
-## bullets to be fired in the wrong direction because _weapon_sprite.global_transform.x
-## would return the OLD direction from the previous frame.
-##
-## The fix is to calculate the expected weapon direction directly from the player's
-## position when we can see the player, rather than reading it back from the transform.
-## This ensures bullets always fly toward the intended target, not the stale transform.
-##
-## @returns: Normalized direction vector the weapon should be pointing.
+## Returns the weapon's forward direction (normalized). Uses direct calculation to player
+## when visible to avoid transform delay (Issue #264).
 func _get_weapon_forward_direction() -> Vector2:
 	# When we can see the player, calculate direction directly to avoid transform delay.
 	# This is the same calculation used in _update_enemy_model_rotation(), ensuring
@@ -4345,9 +4314,7 @@ func _get_weapon_forward_direction() -> Vector2:
 			return (_player.global_position - global_position).normalized()
 		return Vector2.RIGHT  # Default fallback
 
-## Updates the weapon sprite rotation to match the direction the enemy will shoot.
-## This ensures the rifle visually points where bullets will travel.
-## Also handles vertical flipping when aiming left to avoid upside-down appearance.
+## Updates the weapon sprite rotation to match shooting direction with vertical flip handling.
 func _update_weapon_sprite_rotation() -> void:
 	if not _weapon_sprite:
 		return
@@ -4376,8 +4343,7 @@ func _update_weapon_sprite_rotation() -> void:
 	var aiming_left := absf(aim_angle) > PI / 2.0
 	_weapon_sprite.flip_v = aiming_left
 
-## Returns the effective detection delay based on difficulty.
-## In Easy mode, enemies take longer to react after spotting the player.
+## Returns the effective detection delay based on difficulty setting.
 func _get_effective_detection_delay() -> float:
 	var difficulty_manager: Node = get_node_or_null("/root/DifficultyManager")
 	if difficulty_manager and difficulty_manager.has_method("get_detection_delay"):
@@ -4392,11 +4358,7 @@ func _on_death() -> void:
 	died.emit()
 	died_with_info.emit(_killed_by_ricochet, _killed_by_penetration)
 
-	# Disable hit area collision so bullets pass through dead enemies.
-	# This prevents dead enemies from "absorbing" bullets before respawn/deletion.
-	# Multiple approaches are used due to Godot engine limitations:
-	# - Godot issue #62506: set_deferred() on monitorable/monitoring is inconsistent
-	# - Godot issue #100687: toggling monitorable doesn't affect already-overlapping areas
+	# Disable hit area collision so bullets pass through dead enemies
 	_disable_hit_area_collision()
 
 	# Unregister from sound propagation when dying
@@ -4755,6 +4717,32 @@ func _draw() -> void:
 	var color_bullet_spawn := Color.GREEN  # Bullet spawn point indicator
 	var color_blocked := Color.RED  # Blocked path indicator
 
+	# Draw FOV cone in debug mode - always visible to show FOV configuration
+	# Color indicates whether FOV is actually active (green) or just visualization (gray)
+	var experimental_settings: Node = get_node_or_null("/root/ExperimentalSettings")
+	var global_fov_enabled := false
+	if experimental_settings and experimental_settings.has_method("is_fov_enabled"):
+		global_fov_enabled = experimental_settings.is_fov_enabled()
+
+	# Determine if FOV is actually active for this enemy
+	var fov_active := global_fov_enabled and fov_enabled and fov_angle > 0.0
+
+	# Choose color based on whether FOV is active
+	# Green = FOV is active (100 degree vision)
+	# Gray = FOV is disabled (360 degree vision, but showing what the cone would be)
+	var color_fov: Color
+	var color_fov_edge: Color
+	if fov_active:
+		color_fov = Color(0.2, 0.8, 0.2, 0.3)  # Semi-transparent green (active)
+		color_fov_edge = Color(0.2, 0.8, 0.2, 0.8)  # Bright green edge (active)
+	else:
+		color_fov = Color(0.5, 0.5, 0.5, 0.2)  # Semi-transparent gray (inactive)
+		color_fov_edge = Color(0.5, 0.5, 0.5, 0.5)  # Gray edge (inactive)
+
+	# Always draw FOV cone in debug mode (if fov_angle is set)
+	if fov_angle > 0.0:
+		_draw_fov_cone(color_fov, color_fov_edge)
+
 	# Draw line to player if visible
 	if _can_see_player and _player:
 		var to_player := _player.global_position - global_position
@@ -4832,6 +4820,26 @@ func _draw() -> void:
 			draw_line(p1, p2, confidence_color, 1.5)
 		# Draw small filled circle at center
 		draw_circle(to_suspected, 5.0, confidence_color)
+
+
+## Draw FOV cone for debug visualization.
+func _draw_fov_cone(fill_color: Color, edge_color: Color) -> void:
+	var half_fov := deg_to_rad(fov_angle / 2.0)
+	var cone_length := 400.0
+	var left_end := Vector2.from_angle(-half_fov) * cone_length
+	var right_end := Vector2.from_angle(half_fov) * cone_length
+	var cone_points: PackedVector2Array = [Vector2.ZERO]
+	var arc_segments := 16
+	for i in range(arc_segments + 1):
+		cone_points.append(Vector2.from_angle(-half_fov + (float(i) / arc_segments) * 2 * half_fov) * cone_length)
+	draw_colored_polygon(cone_points, fill_color)
+	draw_line(Vector2.ZERO, left_end, edge_color, 2.0)
+	draw_line(Vector2.ZERO, right_end, edge_color, 2.0)
+	for i in range(arc_segments):
+		var a1 := -half_fov + (float(i) / arc_segments) * 2 * half_fov
+		var a2 := -half_fov + (float(i + 1) / arc_segments) * 2 * half_fov
+		draw_line(Vector2.from_angle(a1) * cone_length, Vector2.from_angle(a2) * cone_length, edge_color, 1.5)
+
 
 ## Check if the player is "distracted" (not aiming at the enemy).
 ## A player is considered distracted if they can see the enemy but their aim direction
