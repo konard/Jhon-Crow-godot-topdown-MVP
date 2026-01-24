@@ -3805,6 +3805,23 @@ func receive_intel_from_ally(ally_memory: EnemyMemory) -> void:
 		# Update legacy position for compatibility
 		_last_known_player_position = _memory.suspected_position
 
+
+## Reset enemy memory - called when player "teleports" during last chance effect (Issue #318).
+## This makes the enemy forget the player's last known position, forcing them to
+## re-acquire the player through visual contact or sound detection.
+func reset_memory() -> void:
+	if _memory != null:
+		_memory.reset()
+		_log_to_file("Memory reset (last chance teleport effect)")
+
+	# Also reset the legacy last known position
+	_last_known_player_position = Vector2.ZERO
+
+	# Reset the intel sharing timer to prevent immediate re-acquisition from allies
+	# This ensures enemies don't immediately get new intel after memory reset
+	_intel_share_timer = 0.0
+
+
 ## Check if there is a clear line of sight to a position.
 ## Used for enemy-to-enemy communication range checking.
 func _has_line_of_sight_to_position(target_pos: Vector2) -> bool:
