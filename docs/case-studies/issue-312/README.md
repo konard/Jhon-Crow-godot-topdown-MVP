@@ -3,9 +3,65 @@
 ## Issue Summary
 **Issue**: [#312](https://github.com/Jhon-Crow/godot-topdown-MVP/issues/312)
 **Title**: добавить пистолет с глушителем (Add silenced pistol)
-**Status**: Fixed - weapon now appears in armory
+**Status**: Fixed - weapon now appears in armory and is selectable
 
-## Bug Report: Weapon Not Appearing in Armory
+---
+
+## Bug Report #2: Weapon Selection Not Working
+
+### Problem Description
+After the armory registration fix, the silenced pistol appeared in the armory menu but when selected, the player character still spawned with the AssaultRifle instead. The user reported: "пункт в armory добавился, но оружие при выборе не меняется" (item appeared in armory, but weapon doesn't change when selected).
+
+### Evidence from Logs (`game_log_20260124_195249.txt`)
+
+```
+[19:52:56] [INFO] [GameManager] Weapon selected: silenced_pistol
+[19:52:56] [INFO] [SoundPropagation] Sound emitted: source=PLAYER (AssaultRifle)  # <-- WRONG!
+...
+[19:53:09] [INFO] [GameManager] Weapon selected: mini_uzi
+[19:53:09] [INFO] [SoundPropagation] Sound emitted: source=PLAYER (MiniUzi)  # <-- CORRECT!
+...
+[19:53:14] [INFO] [GameManager] Weapon selected: silenced_pistol
+[19:53:14] [INFO] [SoundPropagation] Sound emitted: source=PLAYER (AssaultRifle)  # <-- STILL WRONG!
+```
+
+### Root Cause Analysis
+
+**Root Cause**: The level scripts (`tutorial_level.gd`, `test_tier.gd`, `building_level.gd`) had **hardcoded weapon loading logic** with if-else conditions only for "shotgun", "mini_uzi", and default to "m16". There was **no case for "silenced_pistol"**, so when selected, the code fell through to the default case which equipped the AssaultRifle.
+
+Additionally, the `Player.cs` script's `DetectAndApplyWeaponPose()` method only checked for specific weapon node names (`MiniUzi`, `Shotgun`), not `SilencedPistol`.
+
+### Fix Applied
+
+1. **Level Scripts** - Added `silenced_pistol` case to `_setup_selected_weapon()` in all three level files:
+   - `scripts/levels/tutorial_level.gd`
+   - `scripts/levels/test_tier.gd`
+   - `scripts/levels/building_level.gd`
+
+2. **Player.cs** - Added `Pistol` weapon type and detection for `SilencedPistol`:
+   - Added `Pistol` to `WeaponType` enum
+   - Added detection for `SilencedPistol` node in `DetectAndApplyWeaponPose()`
+   - Added `Pistol` arm pose offsets in `ApplyWeaponArmOffsets()`
+
+### Updated Weapon Addition Checklist
+
+When adding a new weapon, ensure these are updated:
+
+- [ ] Create weapon script (C# or GDScript)
+- [ ] Create weapon data resource (.tres)
+- [ ] Create weapon scene (.tscn)
+- [ ] Add sprite/icon asset
+- [ ] Register in `armory_menu.gd` WEAPONS dictionary
+- [ ] Register in `game_manager.gd` WEAPON_SCENES dictionary
+- [ ] **Add weapon loading case to ALL level scripts** (`tutorial_level.gd`, `test_tier.gd`, `building_level.gd`)
+- [ ] **Add weapon type enum and detection in `Player.cs`** (if new weapon type)
+- [ ] Test weapon appears in armory
+- [ ] Test weapon is selectable and actually loads
+- [ ] Test weapon is functional in gameplay
+
+---
+
+## Bug Report #1: Weapon Not Appearing in Armory
 
 ### Problem Description
 After initial implementation, the silenced pistol was not appearing in the game's armory menu. The user reported: "пистолет не добавился в armory (возможно проблема с C#)" (pistol was not added to armory, possibly a C# problem).
