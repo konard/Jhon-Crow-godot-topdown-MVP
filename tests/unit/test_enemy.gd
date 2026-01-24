@@ -84,6 +84,9 @@ class MockEnemy:
 	var _memory: EnemyMemory = null
 	var _last_known_player_position: Vector2 = Vector2.ZERO
 	var _intel_share_timer: float = 0.0
+	var _memory_reset_confusion_timer: float = 0.0
+	const MEMORY_RESET_CONFUSION_DURATION: float = 0.5
+	var _continuous_visibility_timer: float = 0.0
 
 	## Patrol state
 	var _patrol_points: Array[Vector2] = []
@@ -314,6 +317,7 @@ class MockEnemy:
 	## Reset enemy memory - called when player "teleports" during last chance effect (Issue #318).
 	## This makes the enemy forget the player's last known position, forcing them to
 	## re-acquire the player through visual contact or sound detection.
+	## Also resets visibility state and applies a confusion period to prevent immediate re-acquisition.
 	func reset_memory() -> void:
 		if _memory != null:
 			_memory.reset()
@@ -323,6 +327,17 @@ class MockEnemy:
 
 		# Reset the intel sharing timer to prevent immediate re-acquisition from allies
 		_intel_share_timer = 0.0
+
+		# CRITICAL: Reset visibility state to prevent immediate re-acquisition (Issue #318)
+		_can_see_player = false
+		_continuous_visibility_timer = 0.0
+
+		# Apply confusion cooldown
+		_memory_reset_confusion_timer = MEMORY_RESET_CONFUSION_DURATION
+
+		# Transition active combat/pursuit states to IDLE to require re-detection
+		if _current_state in [AIState.PURSUING, AIState.COMBAT, AIState.ASSAULT, AIState.FLANKING]:
+			_current_state = AIState.IDLE
 
 
 	func has_memory_target() -> bool:
