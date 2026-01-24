@@ -2292,30 +2292,16 @@ func _process_retreat_multiple_hits(delta: float, direction_to_cover: Vector2) -
 	# Same behavior as ONE_HIT - quick burst then escape
 	_process_retreat_one_hit(delta, direction_to_cover)
 
-## Process PURSUING state - move cover-to-cover toward player.
-## Enemy moves between covers, waiting 1-2 seconds at each cover,
-## until they can see and hit the player.
-## When at the last cover (no better cover found), enters approach phase
-## to move directly toward the player.
-## Special case: when pursuing a vulnerability sound, move directly toward sound position.
+## Process PURSUING state - move cover-to-cover toward player, or direct pursuit on vulnerability sound.
 func _process_pursuing_state(delta: float) -> void:
-	# Track time in PURSUING state (for preventing rapid state thrashing)
 	_pursuing_state_timer += delta
-
-	# Check for suppression - transition to retreating behavior
-	# BUT: When pursuing a vulnerability sound (player reloading/out of ammo),
-	# ignore suppression and continue the attack - this is the best time to strike!
+	# Check suppression (ignored when pursuing vulnerability sound - best time to strike)
 	if _under_fire and enable_cover and not _pursuing_vulnerability_sound:
 		_pursuit_approaching = false
 		_transition_to_retreating()
 		return
 
-	# NOTE: ASSAULT state transition removed per issue #169
-	# Enemies now stay in PURSUING instead of transitioning to coordinated assault
-
-	# If can see player and can hit them from current position, engage
-	# But only after minimum time has elapsed to prevent rapid state thrashing
-	# when visibility flickers at wall/obstacle edges
+	# Engage if can see/hit player (after min time to prevent state thrashing)
 	if _can_see_player and _player:
 		var can_hit := _can_hit_player_from_current_position()
 		if can_hit and _pursuing_state_timer >= PURSUING_MIN_DURATION_BEFORE_COMBAT:
@@ -2326,30 +2312,21 @@ func _process_pursuing_state(delta: float) -> void:
 			_transition_to_combat()
 			return
 
-	# VULNERABILITY SOUND PURSUIT: When we heard a reload/empty click sound,
-	# move directly toward the sound position using navigation (goes around walls).
-	# This is a direct pursuit without cover-to-cover movement.
+	# VULNERABILITY SOUND PURSUIT: move directly toward reload/empty click sound
 	if _pursuing_vulnerability_sound and _last_known_player_position != Vector2.ZERO:
 		var distance_to_sound := global_position.distance_to(_last_known_player_position)
 
-		# If we reached the sound position
 		if distance_to_sound < 50.0:
 			_log_debug("Reached vulnerability sound position (dist=%.0f)" % distance_to_sound)
-			# If we can see the player now, attack
 			if _can_see_player and _player:
 				_log_debug("Can see player at sound position, transitioning to COMBAT")
 				_pursuing_vulnerability_sound = false
 				_transition_to_combat()
 				return
-			# If player moved or we still can't see them, clear the flag and use normal pursuit
 			_log_debug("Player not visible at sound position, switching to normal pursuit")
 			_pursuing_vulnerability_sound = false
-			# Fall through to normal pursuit behavior
-
 		else:
-			# Keep moving toward the sound position using navigation
 			_move_to_target_nav(_last_known_player_position, combat_move_speed)
-			# Log progress periodically
 			var vuln_pursuit_key := "last_vuln_pursuit_log"
 			var current_frame := Engine.get_physics_frames()
 			var last_log_frame: int = _goap_world_state.get(vuln_pursuit_key, -100)
@@ -2358,58 +2335,47 @@ func _process_pursuing_state(delta: float) -> void:
 				_log_to_file("Pursuing vulnerability sound at %s, distance=%.0f" % [_last_known_player_position, distance_to_sound])
 			return
 
-	# Process approach phase - moving directly toward player when no better cover exists
-	if _pursuit_approaching:
-		if _player:
-			var direction := (_player.global_position - global_position).normalized()
-			var can_hit := _can_hit_player_from_current_position()
-
-			_pursuit_approach_timer += delta
-
-			# If we can now hit the player, transition to combat
-			if can_hit:
-				_log_debug("Can now hit player after approach (%.1fs), transitioning to COMBAT" % _pursuit_approach_timer)
+	# Approach phase - moving directly toward player when no cover
+	if _pursuit_approaching and _player:
+		var can_hit := _can_hit_player_from_current_position()
+		_pursuit_approach_timer += delta
+		if can_hit:
+			_log_debug("Can now hit player after approach (%.1fs), transitioning to COMBAT" % _pursuit_approach_timer)
+			_pursuit_approaching = false
+			_transition_to_combat()
+			return
+		if _pursuit_approach_timer >= PURSUIT_APPROACH_MAX_TIME:
+			_log_debug("Approach timer expired (%.1fs), transitioning to COMBAT" % _pursuit_approach_timer)
+			_pursuit_approaching = false
+			_transition_to_combat()
+			return
+		if not _has_pursuit_cover:
+			_find_pursuit_cover_toward_player()
+			if _has_pursuit_cover:
+				_log_debug("Found cover while approaching, switching to cover movement")
 				_pursuit_approaching = false
-				_transition_to_combat()
 				return
-
-			# If approach timer expired, give up and engage in combat anyway
-			if _pursuit_approach_timer >= PURSUIT_APPROACH_MAX_TIME:
-				_log_debug("Approach timer expired (%.1fs), transitioning to COMBAT" % _pursuit_approach_timer)
-				_pursuit_approaching = false
-				_transition_to_combat()
-				return
-
-			# If we found a new cover opportunity while approaching, take it
-			if not _has_pursuit_cover:
-				_find_pursuit_cover_toward_player()
-				if _has_pursuit_cover:
-					_log_debug("Found cover while approaching, switching to cover movement")
-					_pursuit_approaching = false
-					return
-
-			# Use navigation-based pathfinding to move toward player
-			_move_to_target_nav(_player.global_position, combat_move_speed)
+		_move_to_target_nav(_player.global_position, combat_move_speed)
 		return
 
-	# Check if we're waiting at cover
+	# Waiting at cover before moving to next
 	if _has_valid_cover and not _has_pursuit_cover:
-		# Currently at cover, wait for 1-2 seconds before moving to next cover
 		_pursuit_cover_wait_timer += delta
 		velocity = Vector2.ZERO
 
 		if _pursuit_cover_wait_timer >= PURSUIT_COVER_WAIT_DURATION:
-			# Done waiting, find next cover closer to player
 			_log_debug("Pursuit wait complete, finding next cover")
 			_pursuit_cover_wait_timer = 0.0
 			_find_pursuit_cover_toward_player()
 			if _has_pursuit_cover:
 				_log_debug("Found pursuit cover at %s" % _pursuit_next_cover)
+				# Issue #295: Solo enemy throws grenade before entering cover near player's hiding spot
+				if _should_throw_grenade_before_cover_entry(_pursuit_next_cover):
+					_transition_to_throwing_grenade(_pursuit_next_cover, _grenade_thrower.get_best_grenade_type())
+					return
 			else:
-				# No pursuit cover found - start approach phase if we can see player
 				_log_debug("No pursuit cover found, checking fallback options")
 				if _can_see_player and _player:
-					# Can see but can't hit (at last cover) - start approach phase
 					_log_debug("Can see player but can't hit, starting approach phase")
 					_pursuit_approaching = true
 					_pursuit_approach_timer = 0.0
@@ -2418,6 +2384,10 @@ func _process_pursuing_state(delta: float) -> void:
 				if _can_attempt_flanking() and _player:
 					_log_debug("Attempting flanking maneuver")
 					_transition_to_flanking()
+					return
+				# Issue #295: If solo and have last known player position, throw grenade there first
+				if _last_known_player_position != Vector2.ZERO and _should_throw_grenade_before_cover_entry(_last_known_player_position):
+					_transition_to_throwing_grenade(_last_known_player_position, _grenade_thrower.get_best_grenade_type())
 					return
 				# Last resort: move directly toward player
 				_log_debug("No cover options, transitioning to COMBAT")
@@ -3352,6 +3322,36 @@ func _count_enemies_in_combat() -> int:
 ## Check if this enemy is engaged in combat (can see player and in combat state).
 func is_in_combat_engagement() -> bool:
 	return _can_see_player and _current_state in [AIState.COMBAT, AIState.IN_COVER, AIState.ASSAULT]
+
+## Count allies within radius for solo grenade throw behavior (issue #295).
+func _count_allies_within_radius(radius: float) -> int:
+	var count := 0
+	for enemy in get_tree().get_nodes_in_group("enemies"):
+		if enemy != self and is_instance_valid(enemy) and global_position.distance_to(enemy.global_position) <= radius:
+			count += 1
+	return count
+
+## Check if should throw grenade before entering cover (issue #295: solo enemy pre-clears with grenade).
+func _should_throw_grenade_before_cover_entry(target_cover: Vector2) -> bool:
+	if _grenade_thrower == null or not _grenade_thrower.has_grenades() or _grenade_thrower.is_on_cooldown() or _grenade_thrower.is_throwing():
+		return false
+	var nearby_allies := _count_allies_within_radius(500.0)
+	if nearby_allies > 0:
+		_log_debug("Solo grenade skipped: %d allies within 500px" % nearby_allies)
+		return false
+	if _can_see_player or _last_known_player_position == Vector2.ZERO:
+		return false
+	var dist := target_cover.distance_to(_last_known_player_position)
+	if dist > _grenade_thrower.frag_blast_radius:
+		return false
+	if not _grenade_thrower.is_throw_path_clear(global_position, target_cover):
+		_log_debug("Solo grenade skipped: throw path blocked")
+		return false
+	if not _grenade_thrower.is_safe_throw_distance(global_position, target_cover):
+		_log_debug("Solo grenade skipped: too close")
+		return false
+	_log_debug("Solo grenade: throwing at %s (0 allies nearby)" % target_cover)
+	return true
 
 ## Find cover position closer to the player for pursuit.
 ## Used during PURSUING state to move cover-to-cover toward the player.
