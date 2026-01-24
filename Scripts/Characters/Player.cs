@@ -2025,17 +2025,50 @@ public partial class Player : BaseCharacter
         // Use velocity-based throwing if available, otherwise fall back to legacy
         // IMPORTANT: We pass a velocity vector with the correct DIRECTION (player-to-mouse)
         // but with the MAGNITUDE from the actual mouse velocity (for throw speed calculation)
-        if (_activeGrenade.HasMethod("throw_grenade_velocity_based"))
+        bool throwMethodCalled = false;
+        bool hasVelocityBased = _activeGrenade.HasMethod("throw_grenade_velocity_based");
+        bool hasLegacy = _activeGrenade.HasMethod("throw_grenade");
+
+        LogToFile($"[Player.Grenade.Throw] Method availability: velocity_based={hasVelocityBased}, legacy={hasLegacy}");
+
+        if (hasVelocityBased)
         {
             // Create corrected velocity: direction toward mouse, magnitude from mouse movement speed
             Vector2 correctedVelocity = throwDirection * velocityMagnitude;
+            LogToFile($"[Player.Grenade.Throw] Calling throw_grenade_velocity_based with velocity=({correctedVelocity.X:F1}, {correctedVelocity.Y:F1}), swing={_totalSwingDistance:F1}");
             _activeGrenade.Call("throw_grenade_velocity_based", correctedVelocity, _totalSwingDistance);
+            throwMethodCalled = true;
         }
-        else if (_activeGrenade.HasMethod("throw_grenade"))
+        else if (hasLegacy)
         {
             // Legacy fallback: convert velocity to drag distance approximation
             float legacyDistance = velocityMagnitude * 0.5f; // Rough conversion
+            LogToFile($"[Player.Grenade.Throw] Calling throw_grenade (legacy) with direction=({throwDirection.X:F3}, {throwDirection.Y:F3}), distance={legacyDistance:F1}");
             _activeGrenade.Call("throw_grenade", throwDirection, legacyDistance);
+            throwMethodCalled = true;
+        }
+
+        // CRITICAL FALLBACK: If no throw method was available, manually unfreeze and apply velocity
+        // This ensures the grenade flies even if there's a method resolution issue
+        if (!throwMethodCalled)
+        {
+            LogToFile("[Player.Grenade.Throw] WARNING: No throw method found! Using C# fallback to unfreeze and apply velocity");
+            _activeGrenade.Freeze = false;
+            _activeGrenade.LinearVelocity = throwDirection * Mathf.Clamp(velocityMagnitude * 0.5f, 100.0f, 850.0f);
+        }
+
+        // Verify grenade is unfrozen after throw method
+        bool stillFrozen = _activeGrenade.Freeze;
+        LogToFile($"[Player.Grenade.Throw] After throw: freeze={stillFrozen}, velocity=({_activeGrenade.LinearVelocity.X:F1}, {_activeGrenade.LinearVelocity.Y:F1})");
+
+        // SAFETY: If grenade is still frozen after method call, force unfreeze
+        if (stillFrozen)
+        {
+            LogToFile("[Player.Grenade.Throw] WARNING: Grenade still frozen after throw method! Forcing unfreeze");
+            _activeGrenade.Freeze = false;
+            // Reapply velocity since it might have been ignored while frozen
+            _activeGrenade.LinearVelocity = throwDirection * Mathf.Clamp(velocityMagnitude * 0.5f, 100.0f, 850.0f);
+            LogToFile($"[Player.Grenade.Throw] Force applied velocity: ({_activeGrenade.LinearVelocity.X:F1}, {_activeGrenade.LinearVelocity.Y:F1})");
         }
 
         // Emit signal
