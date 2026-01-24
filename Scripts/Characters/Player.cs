@@ -171,6 +171,22 @@ public partial class Player : BaseCharacter
     private bool _debugModeEnabled = false;
 
     /// <summary>
+    /// Whether detailed grenade throw debug logging is enabled (F8 toggle).
+    /// When enabled, logs every frame of mouse movement during aiming for debugging throw direction issues.
+    /// </summary>
+    private bool _grenadeDebugLoggingEnabled = false;
+
+    /// <summary>
+    /// Counter for debug log entries during a single throw (for readability).
+    /// </summary>
+    private int _grenadeDebugFrameCounter = 0;
+
+    /// <summary>
+    /// Store the player's global position at the start of aiming for relative calculations.
+    /// </summary>
+    private Vector2 _grenadeDebugAimStartPlayerPos = Vector2.Zero;
+
+    /// <summary>
     /// Target rotation for throw animation.
     /// </summary>
     private float _throwTargetRotation = 0.0f;
@@ -1767,6 +1783,19 @@ public partial class Player : BaseCharacter
             // Start transfer animation (grenade to throwing hand)
             StartGrenadeAnimPhase(GrenadeAnimPhase.Transfer, AnimTransferDuration);
             LogToFile("[Player.Grenade] Step 2 complete: G released, RMB held - now aiming (velocity-based throwing enabled)");
+
+            // Log aiming start with detailed context (F8 debug logging)
+            if (_grenadeDebugLoggingEnabled)
+            {
+                _grenadeDebugFrameCounter = 0; // Reset frame counter for new throw
+                _grenadeDebugAimStartPlayerPos = GlobalPosition; // Store start position
+                LogToFile("[Player.Grenade.Debug] ====== AIMING STARTED ======");
+                LogToFile($"[Player.Grenade.Debug] Player position: ({GlobalPosition.X:F1}, {GlobalPosition.Y:F1})");
+                LogToFile($"[Player.Grenade.Debug] Player rotation: {Rotation:F2} rad ({Mathf.RadToDeg(Rotation):F1} deg)");
+                LogToFile($"[Player.Grenade.Debug] Aim start mouse position: ({_grenadeDragStart.X:F1}, {_grenadeDragStart.Y:F1})");
+                Vector2 mouseRelative = _grenadeDragStart - GlobalPosition;
+                LogToFile($"[Player.Grenade.Debug] Mouse relative to player: ({mouseRelative.X:F1}, {mouseRelative.Y:F1})");
+            }
         }
     }
 
@@ -1950,6 +1979,36 @@ public partial class Player : BaseCharacter
         }
 
         LogToFile($"[Player.Grenade] Throwing toward mouse! Direction: {throwDirection}, Mouse velocity: {velocityMagnitude:F1} px/s, Swing: {_totalSwingDistance:F1}");
+
+        // Comprehensive debug logging at throw moment (F8 toggle, issue #310)
+        if (_grenadeDebugLoggingEnabled)
+        {
+            LogToFile("[Player.Grenade.Debug] ====== THROW EXECUTED ======");
+            LogToFile($"[Player.Grenade.Debug] Total frames tracked: {_grenadeDebugFrameCounter}");
+            LogToFile("[Player.Grenade.Debug] --- PLAYER STATE ---");
+            LogToFile($"[Player.Grenade.Debug] Player position at throw: ({GlobalPosition.X:F1}, {GlobalPosition.Y:F1})");
+            LogToFile($"[Player.Grenade.Debug] Player position at aim start: ({_grenadeDebugAimStartPlayerPos.X:F1}, {_grenadeDebugAimStartPlayerPos.Y:F1})");
+            Vector2 playerMovement = GlobalPosition - _grenadeDebugAimStartPlayerPos;
+            LogToFile($"[Player.Grenade.Debug] Player moved during aiming: ({playerMovement.X:F1}, {playerMovement.Y:F1})");
+            LogToFile($"[Player.Grenade.Debug] Player rotation: {Rotation:F2} rad ({Mathf.RadToDeg(Rotation):F1} deg)");
+            LogToFile("[Player.Grenade.Debug] --- MOUSE INPUT ---");
+            LogToFile($"[Player.Grenade.Debug] Aim start mouse: ({_grenadeDragStart.X:F1}, {_grenadeDragStart.Y:F1})");
+            LogToFile($"[Player.Grenade.Debug] Aim end mouse (drag_end): ({dragEnd.X:F1}, {dragEnd.Y:F1})");
+            Vector2 totalDragVector = dragEnd - _grenadeDragStart;
+            LogToFile($"[Player.Grenade.Debug] Total drag vector: ({totalDragVector.X:F1}, {totalDragVector.Y:F1})");
+            LogToFile($"[Player.Grenade.Debug] Total drag distance: {totalDragVector.Length():F1} px");
+            LogToFile($"[Player.Grenade.Debug] Total swing distance: {_totalSwingDistance:F1} px");
+            LogToFile("[Player.Grenade.Debug] --- VELOCITY CALCULATION ---");
+            LogToFile($"[Player.Grenade.Debug] Release mouse velocity: ({releaseVelocity.X:F1}, {releaseVelocity.Y:F1}) px/s");
+            LogToFile($"[Player.Grenade.Debug] Velocity magnitude: {velocityMagnitude:F1} px/s");
+            LogToFile($"[Player.Grenade.Debug] Velocity angle: {releaseVelocity.Angle():F2} rad ({Mathf.RadToDeg(releaseVelocity.Angle()):F1} deg)");
+            LogToFile("[Player.Grenade.Debug] --- THROW DIRECTION ---");
+            LogToFile($"[Player.Grenade.Debug] Mouse position at release: ({mousePos.X:F1}, {mousePos.Y:F1})");
+            LogToFile($"[Player.Grenade.Debug] Direction source: player_to_mouse (FIXED in issue #281)");
+            LogToFile($"[Player.Grenade.Debug] Throw direction: ({throwDirection.X:F3}, {throwDirection.Y:F3})");
+            LogToFile($"[Player.Grenade.Debug] Throw angle: {throwDirection.Angle():F2} rad ({Mathf.RadToDeg(throwDirection.Angle()):F1} deg)");
+            LogToFile("[Player.Grenade.Debug] ====== END THROW DATA ======");
+        }
 
         // Rotate player to face throw direction (prevents grenade hitting player when throwing upward)
         RotatePlayerForThrow(throwDirection);
@@ -2393,6 +2452,17 @@ public partial class Player : BaseCharacter
 
         _windUpIntensity = velocityIntensity;
 
+        // Detailed debug logging for throw debugging (F8 toggle, issue #310)
+        if (_grenadeDebugLoggingEnabled)
+        {
+            _grenadeDebugFrameCounter++;
+            // Log every frame with detailed mouse tracking data
+            // Format: Frame# | Mouse position (global) | Mouse position (relative to player) |
+            //         Delta from last frame | Instantaneous velocity | Smoothed velocity | Total swing
+            Vector2 mouseRelativeToPlayer = currentMouse - GlobalPosition;
+            LogToFile($"[Player.Grenade.Debug] Frame {_grenadeDebugFrameCounter} | MouseGlobal: ({currentMouse.X:F1}, {currentMouse.Y:F1}) | MouseRelPlayer: ({mouseRelativeToPlayer.X:F1}, {mouseRelativeToPlayer.Y:F1}) | Delta: ({mouseDelta.X:F1}, {mouseDelta.Y:F1}) | InstVel: ({instantaneousVelocity.X:F1}, {instantaneousVelocity.Y:F1}) px/s | SmoothVel: ({_currentMouseVelocity.X:F1}, {_currentMouseVelocity.Y:F1}) px/s | TotalSwing: {_totalSwingDistance:F1} px");
+        }
+
         // Update tracking for next frame
         _prevMousePos = currentMouse;
         _prevFrameTime = currentTime;
@@ -2624,7 +2694,8 @@ public partial class Player : BaseCharacter
     #region Debug Trajectory Visualization
 
     /// <summary>
-    /// Connects to GameManager's debug_mode_toggled signal for F7 toggle.
+    /// Connects to GameManager's debug_mode_toggled signal for F7 toggle
+    /// and grenade_debug_logging_toggled signal for F8 toggle.
     /// </summary>
     private void ConnectDebugModeSignal()
     {
@@ -2635,25 +2706,38 @@ public partial class Player : BaseCharacter
             return;
         }
 
-        if (!gameManager.HasSignal("debug_mode_toggled"))
+        // Connect to debug mode toggle signal (F7 - trajectory visualization)
+        if (gameManager.HasSignal("debug_mode_toggled"))
         {
-            LogToFile("[Player.Debug] WARNING: GameManager doesn't have debug_mode_toggled signal");
-            return;
-        }
-
-        // Connect to the signal using Callable
-        gameManager.Connect("debug_mode_toggled", Callable.From<bool>(OnDebugModeToggled));
-
-        // Check if debug mode is already enabled
-        if (gameManager.HasMethod("is_debug_mode_enabled"))
-        {
-            _debugModeEnabled = (bool)gameManager.Call("is_debug_mode_enabled");
-            LogToFile($"[Player.Debug] Connected to GameManager, debug mode: {_debugModeEnabled}");
+            gameManager.Connect("debug_mode_toggled", Callable.From<bool>(OnDebugModeToggled));
         }
         else
         {
-            LogToFile("[Player.Debug] Connected to GameManager (is_debug_mode_enabled not found)");
+            LogToFile("[Player.Debug] WARNING: GameManager doesn't have debug_mode_toggled signal");
         }
+
+        // Connect to grenade debug logging toggle signal (F8 - detailed throw logging)
+        if (gameManager.HasSignal("grenade_debug_logging_toggled"))
+        {
+            gameManager.Connect("grenade_debug_logging_toggled", Callable.From<bool>(OnGrenadeDebugLoggingToggled));
+        }
+        else
+        {
+            LogToFile("[Player.Debug] WARNING: GameManager doesn't have grenade_debug_logging_toggled signal");
+        }
+
+        // Sync with current debug mode states
+        if (gameManager.HasMethod("is_debug_mode_enabled"))
+        {
+            _debugModeEnabled = (bool)gameManager.Call("is_debug_mode_enabled");
+        }
+
+        if (gameManager.HasMethod("is_grenade_debug_logging_enabled"))
+        {
+            _grenadeDebugLoggingEnabled = (bool)gameManager.Call("is_grenade_debug_logging_enabled");
+        }
+
+        LogToFile($"[Player.Debug] Connected to GameManager, debug mode: {_debugModeEnabled}, grenade debug: {_grenadeDebugLoggingEnabled}");
     }
 
     /// <summary>
@@ -2668,13 +2752,33 @@ public partial class Player : BaseCharacter
     }
 
     /// <summary>
+    /// Called when grenade debug logging is toggled via F8 key.
+    /// </summary>
+    /// <param name="enabled">True if grenade debug logging is now enabled.</param>
+    private void OnGrenadeDebugLoggingToggled(bool enabled)
+    {
+        _grenadeDebugLoggingEnabled = enabled;
+        QueueRedraw(); // Update visual indicator
+        LogToFile($"[Player.Grenade.Debug] Detailed throw logging {(enabled ? "ENABLED" : "DISABLED")} (F8 toggle)");
+    }
+
+    /// <summary>
     /// Override _Draw to visualize grenade trajectory when debug mode is enabled.
     /// Shows predicted landing position based on current mouse velocity.
     /// Uses the same velocity-based calculation as ThrowGrenade() to ensure accuracy.
+    /// Also displays F8 grenade debug logging indicator.
     /// </summary>
     public override void _Draw()
     {
-        // Only draw when debug mode is enabled and we're aiming a grenade
+        // Draw F8 grenade debug logging indicator (always visible when enabled)
+        if (_grenadeDebugLoggingEnabled)
+        {
+            // Draw a small indicator in the top-right corner of the player
+            Vector2 indicatorPos = new Vector2(40, -60); // Above and to the right of player
+            DrawString(ThemeDB.FallbackFont, indicatorPos, "F8 DEBUG", HorizontalAlignment.Center, -1, 16, new Color(1.0f, 1.0f, 0.0f)); // Yellow text
+        }
+
+        // Only draw trajectory when debug mode (F7) is enabled and we're aiming a grenade
         if (!_debugModeEnabled)
         {
             return;
