@@ -921,7 +921,6 @@ func _on_debug_mode_toggled(enabled: bool) -> void:
 	_update_debug_label()
 	queue_redraw()  # Redraw to show/hide FOV cone
 
-
 ## Find the player node in the scene tree.
 func _find_player() -> void:
 	# Try to find the player by group first
@@ -2591,7 +2590,6 @@ func _transition_to_idle() -> void:
 	_idle_scan_timer = 0.0
 	_idle_scan_targets.clear()  # Will be re-initialized in _process_guard
 
-
 ## Transition to COMBAT state.
 func _transition_to_combat() -> void:
 	_current_state = AIState.COMBAT
@@ -3688,7 +3686,6 @@ func _get_wall_avoidance_weight(direction: Vector2) -> float:
 	var normalized_distance: float = clampf(closest_distance / WALL_CHECK_DISTANCE, 0.0, 1.0)
 	return lerpf(WALL_AVOIDANCE_MIN_WEIGHT, WALL_AVOIDANCE_MAX_WEIGHT, normalized_distance)
 
-
 ## Check if target is within FOV cone. FOV uses _enemy_model.global_rotation for facing.
 func _is_position_in_fov(target_pos: Vector2) -> bool:
 	var experimental_settings: Node = get_node_or_null("/root/ExperimentalSettings")
@@ -3701,7 +3698,6 @@ func _is_position_in_fov(target_pos: Vector2) -> bool:
 	var angle_to_target := rad_to_deg(acos(clampf(dot, -1.0, 1.0)))
 	var in_fov := angle_to_target <= fov_angle / 2.0
 	return in_fov
-
 
 ## Check if the player is visible using multi-point raycast. Updates visibility timer.
 func _check_player_visibility() -> void:
@@ -3854,7 +3850,6 @@ func reset_memory() -> void:
 			else:
 				_log_to_file("State reset: %s -> IDLE (no target)" % AIState.keys()[_current_state])
 				_transition_to_idle()
-
 
 ## Check if there is a clear line of sight to a position (enemy-to-enemy comms).
 func _has_line_of_sight_to_position(target_pos: Vector2) -> bool:
@@ -4153,7 +4148,6 @@ func _process_guard(delta: float) -> void:
 		if _idle_scan_targets.size() > 0:
 			_idle_scan_target_index = (_idle_scan_target_index + 1) % _idle_scan_targets.size()
 
-
 ## Initialize scan targets - detects passages using raycasts.
 func _initialize_idle_scan_targets() -> void:
 	_idle_scan_targets.clear()
@@ -4189,7 +4183,6 @@ func _initialize_idle_scan_targets() -> void:
 		_idle_scan_targets = [0.0, PI]
 	_idle_scan_target_index = randi() % _idle_scan_targets.size()
 
-
 ## Called when a bullet enters the threat sphere.
 func _on_threat_area_entered(area: Area2D) -> void:
 	if "shooter_id" in area and area.shooter_id == get_instance_id():
@@ -4198,21 +4191,17 @@ func _on_threat_area_entered(area: Area2D) -> void:
 	_threat_memory_timer = THREAT_MEMORY_DURATION
 	_log_debug("Bullet entered threat sphere, starting reaction delay...")
 
-
 ## Called when a bullet exits the threat sphere.
 func _on_threat_area_exited(area: Area2D) -> void:
 	_bullets_in_threat_sphere.erase(area)
-
 
 ## Called when the enemy is hit (by bullet.gd).
 func on_hit() -> void:
 	on_hit_with_info(Vector2.RIGHT, null)
 
-
 ## Called when the enemy is hit with extended hit information.
 func on_hit_with_info(hit_direction: Vector2, caliber_data: Resource) -> void:
 	on_hit_with_bullet_info(hit_direction, caliber_data, false, false)
-
 
 ## Called when the enemy is hit with full bullet information.
 func on_hit_with_bullet_info(hit_direction: Vector2, caliber_data: Resource, has_ricocheted: bool, has_penetrated: bool) -> void:
@@ -4759,22 +4748,18 @@ func get_total_ammo() -> int:
 ## Check if enemy is currently reloading.
 func is_reloading() -> bool:
 	return _is_reloading
-
 ## Check if enemy has any ammo left.
 func has_ammo() -> bool:
 	return _current_ammo > 0 or _reserve_ammo > 0
-
 ## Get current player visibility ratio (for debugging).
 ## Returns 0.0 if player is completely hidden, 1.0 if fully visible.
 func get_player_visibility_ratio() -> float:
 	return _player_visibility_ratio
-
 ## Draw debug visualization when debug mode is enabled.
 ## Shows: line to target (cover, clear shot, player), bullet spawn point status.
 func _draw() -> void:
 	if not debug_label_enabled:
 		return
-
 	# Colors for different debug elements
 	var color_to_cover := Color.CYAN  # Line to cover position
 	var color_to_player := Color.RED  # Line to player (when visible)
@@ -4783,17 +4768,14 @@ func _draw() -> void:
 	var color_flank := Color.MAGENTA  # Line to flank position
 	var color_bullet_spawn := Color.GREEN  # Bullet spawn point indicator
 	var color_blocked := Color.RED  # Blocked path indicator
-
 	# Draw FOV cone in debug mode - always visible to show FOV configuration
 	# Color indicates whether FOV is actually active (green) or just visualization (gray)
 	var experimental_settings: Node = get_node_or_null("/root/ExperimentalSettings")
 	var global_fov_enabled := false
 	if experimental_settings and experimental_settings.has_method("is_fov_enabled"):
 		global_fov_enabled = experimental_settings.is_fov_enabled()
-
 	# Determine if FOV is actually active for this enemy
 	var fov_active := global_fov_enabled and fov_enabled and fov_angle > 0.0
-
 	# Choose color based on whether FOV is active
 	# Green = FOV is active (100 degree vision)
 	# Gray = FOV is disabled (360 degree vision, but showing what the cone would be)
@@ -4805,16 +4787,13 @@ func _draw() -> void:
 	else:
 		color_fov = Color(0.5, 0.5, 0.5, 0.2)  # Semi-transparent gray (inactive)
 		color_fov_edge = Color(0.5, 0.5, 0.5, 0.5)  # Gray edge (inactive)
-
 	# Always draw FOV cone in debug mode (if fov_angle is set)
 	if fov_angle > 0.0:
 		_draw_fov_cone(color_fov, color_fov_edge)
-
 	# Draw line to player if visible
 	if _can_see_player and _player:
 		var to_player := _player.global_position - global_position
 		draw_line(Vector2.ZERO, to_player, color_to_player, 1.5)
-
 		# Draw bullet spawn point (actual muzzle position) and check if blocked
 		var weapon_forward := _get_weapon_forward_direction()
 		var muzzle_global := _get_bullet_spawn_position(weapon_forward)
@@ -4825,14 +4804,12 @@ func _draw() -> void:
 			# Draw X for blocked spawn point
 			draw_line(spawn_point + Vector2(-5, -5), spawn_point + Vector2(5, 5), color_blocked, 2.0)
 			draw_line(spawn_point + Vector2(-5, 5), spawn_point + Vector2(5, -5), color_blocked, 2.0)
-
 	# Draw line to cover position if we have one
 	if _has_valid_cover:
 		var to_cover := _cover_position - global_position
 		draw_line(Vector2.ZERO, to_cover, color_to_cover, 1.5)
 		# Draw small circle at cover position
 		draw_circle(to_cover, 8.0, color_to_cover)
-
 	# Draw line to clear shot target if seeking clear shot
 	if _seeking_clear_shot and _clear_shot_target != Vector2.ZERO:
 		var to_target := _clear_shot_target - global_position
@@ -4842,13 +4819,11 @@ func _draw() -> void:
 		draw_line(target_pos + Vector2(-6, 6), target_pos + Vector2(6, 6), color_clear_shot, 2.0)
 		draw_line(target_pos + Vector2(6, 6), target_pos + Vector2(0, -8), color_clear_shot, 2.0)
 		draw_line(target_pos + Vector2(0, -8), target_pos + Vector2(-6, 6), color_clear_shot, 2.0)
-
 	# Draw line to pursuit cover if pursuing
 	if _current_state == AIState.PURSUING and _has_pursuit_cover:
 		var to_pursuit := _pursuit_next_cover - global_position
 		draw_line(Vector2.ZERO, to_pursuit, color_pursuit, 2.0)
 		draw_circle(to_pursuit, 8.0, color_pursuit)
-
 	# Draw line to flank target if flanking
 	if _current_state == AIState.FLANKING:
 		if _has_flank_cover:
@@ -4864,7 +4839,6 @@ func _draw() -> void:
 			draw_line(flank_pos + Vector2(8, 0), flank_pos + Vector2(0, 8), color_flank, 2.0)
 			draw_line(flank_pos + Vector2(0, 8), flank_pos + Vector2(-8, 0), color_flank, 2.0)
 			draw_line(flank_pos + Vector2(-8, 0), flank_pos + Vector2(0, -8), color_flank, 2.0)
-
 	# Draw suspected position from memory system (Issue #297)
 	# The circle radius is inversely proportional to confidence (larger = less certain)
 	if _memory and _memory.has_target():
@@ -4887,8 +4861,6 @@ func _draw() -> void:
 			draw_line(p1, p2, confidence_color, 1.5)
 		# Draw small filled circle at center
 		draw_circle(to_suspected, 5.0, confidence_color)
-
-
 ## Draw FOV cone for debug visualization.
 func _draw_fov_cone(fill_color: Color, edge_color: Color) -> void:
 	var half_fov := deg_to_rad(fov_angle / 2.0)
@@ -4906,8 +4878,6 @@ func _draw_fov_cone(fill_color: Color, edge_color: Color) -> void:
 		var a1 := -half_fov + (float(i) / arc_segments) * 2 * half_fov
 		var a2 := -half_fov + (float(i + 1) / arc_segments) * 2 * half_fov
 		draw_line(Vector2.from_angle(a1) * cone_length, Vector2.from_angle(a2) * cone_length, edge_color, 1.5)
-
-
 ## Check if the player is "distracted" (not aiming at the enemy).
 ## A player is considered distracted if they can see the enemy but their aim direction
 ## is more than 23 degrees away from the direction toward the enemy.
@@ -4921,46 +4891,34 @@ func _is_player_distracted() -> bool:
 	# Player must be visible for this check to be relevant
 	if not _can_see_player or _player == null:
 		return false
-
 	# Get the player's aim direction by calculating from player to mouse cursor
 	# The player aims where their mouse is pointing
 	var player_pos: Vector2 = _player.global_position
 	var enemy_pos: Vector2 = global_position
-
 	# Get the mouse position in global coordinates from the player's viewport
 	var player_viewport: Viewport = _player.get_viewport()
 	if player_viewport == null:
 		return false
-
 	var mouse_pos: Vector2 = player_viewport.get_mouse_position()
 	# Convert from viewport coordinates to global coordinates
 	var canvas_transform: Transform2D = player_viewport.get_canvas_transform()
 	var global_mouse_pos: Vector2 = canvas_transform.affine_inverse() * mouse_pos
-
 	# Calculate the direction from player to enemy
 	var dir_to_enemy: Vector2 = (enemy_pos - player_pos).normalized()
-
 	# Calculate the direction from player to their aim target (mouse cursor)
 	var aim_direction: Vector2 = (global_mouse_pos - player_pos).normalized()
-
 	# Calculate the angle between the two directions
 	# Using dot product: cos(angle) = a · b / (|a| * |b|)
 	# Since both are normalized, |a| * |b| = 1
 	var dot: float = dir_to_enemy.dot(aim_direction)
-
 	# Clamp to handle floating point errors
 	dot = clampf(dot, -1.0, 1.0)
-
 	var angle: float = acos(dot)
-
 	# Player is distracted if their aim is more than 23 degrees away from the enemy
 	var is_distracted: bool = angle > PLAYER_DISTRACTION_ANGLE
-
 	if is_distracted:
 		_log_debug("Player distracted: aim angle %.1f° > %.1f° threshold" % [rad_to_deg(angle), rad_to_deg(PLAYER_DISTRACTION_ANGLE)])
-
 	return is_distracted
-
 ## Set a navigation target and get the direction to follow the path.
 ## Uses NavigationAgent2D for proper pathfinding around obstacles.
 ## Returns the direction to move, or Vector2.ZERO if navigation is not available.
@@ -4968,64 +4926,49 @@ func _get_nav_direction_to(target_pos: Vector2) -> Vector2:
 	if _nav_agent == null:
 		# Fall back to direct movement if no navigation agent
 		return (target_pos - global_position).normalized()
-
 	# Set the target for navigation
 	_nav_agent.target_position = target_pos
-
 	# Check if navigation is finished
 	if _nav_agent.is_navigation_finished():
 		return Vector2.ZERO
-
 	# Get the next position in the path
 	var next_pos: Vector2 = _nav_agent.get_next_path_position()
-
 	# Calculate direction to next path position
 	var direction: Vector2 = (next_pos - global_position).normalized()
 	return direction
-
 ## Move toward a target position using NavigationAgent2D pathfinding.
 ## This is the primary movement function that should be used instead of direct velocity assignment.
 ## Returns true if movement was applied, false if target was reached or navigation unavailable.
 func _move_to_target_nav(target_pos: Vector2, speed: float) -> bool:
 	var direction: Vector2 = _get_nav_direction_to(target_pos)
-
 	if direction == Vector2.ZERO:
 		velocity = Vector2.ZERO
 		return false
-
 	# Apply additional wall avoidance on top of navigation path for tight corners
 	direction = _apply_wall_avoidance(direction)
-
 	velocity = direction * speed
 	rotation = direction.angle()
 	return true
-
 ## Check if the navigation agent has a valid path to the target.
 func _has_nav_path_to(target_pos: Vector2) -> bool:
 	if _nav_agent == null:
 		return false
-
 	_nav_agent.target_position = target_pos
 	return not _nav_agent.is_navigation_finished()
-
 ## Get distance to target along the navigation path (more accurate than straight-line).
 func _get_nav_path_distance(target_pos: Vector2) -> float:
 	if _nav_agent == null:
 		return global_position.distance_to(target_pos)
-
 	_nav_agent.target_position = target_pos
 	return _nav_agent.distance_to_target()
-
 # ============================================================================
 # Status Effects (Blindness, Stun)
 # ============================================================================
-
 ## Set the blinded state (from flashbang grenade).
 ## When blinded, the enemy cannot see the player.
 func set_blinded(blinded: bool) -> void:
 	var was_blinded := _is_blinded
 	_is_blinded = blinded
-
 	if blinded and not was_blinded:
 		_log_debug("Enemy is now BLINDED - cannot see player")
 		_log_to_file("Status effect: BLINDED applied")
@@ -5035,13 +4978,11 @@ func set_blinded(blinded: bool) -> void:
 	elif not blinded and was_blinded:
 		_log_debug("Enemy is no longer blinded")
 		_log_to_file("Status effect: BLINDED removed")
-
 ## Set the stunned state (from flashbang grenade).
 ## When stunned, the enemy cannot move or take actions.
 func set_stunned(stunned: bool) -> void:
 	var was_stunned := _is_stunned
 	_is_stunned = stunned
-
 	if stunned and not was_stunned:
 		_log_debug("Enemy is now STUNNED - cannot move")
 		_log_to_file("Status effect: STUNNED applied")
@@ -5050,11 +4991,9 @@ func set_stunned(stunned: bool) -> void:
 	elif not stunned and was_stunned:
 		_log_debug("Enemy is no longer stunned")
 		_log_to_file("Status effect: STUNNED removed")
-
 ## Check if the enemy is currently blinded.
 func is_blinded() -> bool:
 	return _is_blinded
-
 ## Check if the enemy is currently stunned.
 func is_stunned() -> bool:
 	return _is_stunned
