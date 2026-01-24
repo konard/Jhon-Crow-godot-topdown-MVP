@@ -42,10 +42,7 @@ enum BehaviorMode {
 ## Detection range (0=unlimited, line-of-sight only).
 @export var detection_range: float = 0.0
 
-## Field of view angle in degrees.
-## Enemy can only see targets within this cone centered on their facing direction.
-## Set to 0 or negative to disable FOV check (360 degree vision).
-## Default is 100 degrees as requested in issue #66.
+## Field of view angle in degrees (cone centered on facing dir). 0 or negative = 360° vision. Default 100° per issue #66.
 @export var fov_angle: float = 100.0
 
 ## Whether FOV checking is enabled for this specific enemy.
@@ -231,6 +228,10 @@ var _patrol_points: Array[Vector2] = []  ## Patrol state
 var _current_patrol_index: int = 0
 var _is_waiting_at_patrol_point: bool = false
 var _patrol_wait_timer: float = 0.0
+var _corner_check_angle: float = 0.0  ## Angle to look toward when checking a corner
+var _corner_check_timer: float = 0.0  ## Timer for corner check duration
+const CORNER_CHECK_DURATION: float = 0.3  ## How long to look at a corner (seconds)
+const CORNER_CHECK_DISTANCE: float = 150.0  ## Max distance to detect openings
 var _initial_position: Vector2
 var _can_see_player: bool = false  ## Can see player
 var _current_state: AIState = AIState.IDLE  ## AI state
@@ -1082,69 +1083,6 @@ func _force_model_to_face_direction(direction: Vector2) -> void:
 		_enemy_model.global_rotation = target_angle
 		_enemy_model.scale = Vector2(enemy_model_scale, enemy_model_scale)
 
-## DEPRECATED: This function is no longer used.
-##
-## Previously used to calculate an aim direction that would compensate for the weapon's
-## offset from the enemy center. This caused issues because:
-## 1. The model rotation was different from the bullet direction
-## 2. The weapon would visually point in a different direction than bullets fly
-##
-## The new approach is simpler:
-## 1. Model faces the player (center-to-center direction)
-## 2. Bullets spawn from muzzle and fly FROM MUZZLE TO TARGET
-## 3. This ensures the weapon visually points where bullets go
-##
-## Kept for reference in case the iterative offset approach is needed elsewhere.
-##
-## @param target_pos: The position to aim at (typically the player's position).
-## @return: The direction vector the model should face for the weapon to point at target.
-func _calculate_aim_direction_from_weapon(target_pos: Vector2) -> Vector2:
-	# WeaponMount is at local position (0, 6) in EnemyModel
-	# This offset needs to be accounted for when calculating aim direction
-	var weapon_mount_local := Vector2(0, 6)
-
-	# Start with a rough estimate: direction from enemy center to target
-	var rough_direction := (target_pos - global_position)
-	var rough_distance := rough_direction.length()
-
-	# For distant targets, the offset error is negligible - use simple calculation
-	# threshold is ~3x the weapon offset to avoid unnecessary iteration
-	if rough_distance > 25.0 * enemy_model_scale:
-		return rough_direction.normalized()
-
-	# For close targets, iterate to find the correct rotation
-	# Start with the rough direction
-	var current_direction := rough_direction.normalized()
-
-	# Iterate to refine the aim direction (2 iterations is usually enough)
-	for _i in range(2):
-		var estimated_angle := current_direction.angle()
-
-		# Determine if we would flip (affects how weapon offset transforms)
-		var would_flip := absf(estimated_angle) > PI / 2
-
-		# Calculate weapon position with this estimated rotation
-		var weapon_offset_world: Vector2
-		if would_flip:
-			# When flipped, scale.y is negative, which affects the Y component of the offset
-			# Transform: scale then rotate
-			var scaled := Vector2(weapon_mount_local.x * enemy_model_scale, weapon_mount_local.y * -enemy_model_scale)
-			weapon_offset_world = scaled.rotated(estimated_angle)
-		else:
-			var scaled := weapon_mount_local * enemy_model_scale
-			weapon_offset_world = scaled.rotated(estimated_angle)
-
-		var weapon_global_pos := global_position + weapon_offset_world
-
-		# Calculate new direction from weapon to target
-		var new_direction := (target_pos - weapon_global_pos)
-		if new_direction.length_squared() < 0.01:
-			# Target is at weapon position, keep current direction
-			break
-		current_direction = new_direction.normalized()
-
-	return current_direction
-
 ## Updates the walking animation based on enemy movement state.
 ## Creates a natural bobbing motion for body parts during movement.
 ## @param delta: Time since last frame.
@@ -1931,6 +1869,10 @@ func _process_flanking_state(delta: float) -> void:
 	# This handles obstacles properly unlike direct movement with wall avoidance
 	_move_to_target_nav(_flank_target, combat_move_speed)
 
+	# Corner checking during FLANKING (Issue #332)
+	if velocity.length_squared() > 1.0:
+		_process_corner_check(delta, velocity.normalized(), "FLANKING")
+
 ## Process SUPPRESSED state - staying in cover under fire.
 func _process_suppressed_state(delta: float) -> void:
 	velocity = Vector2.ZERO
@@ -2266,6 +2208,9 @@ func _process_pursuing_state(delta: float) -> void:
 
 		# Use navigation-based pathfinding to move toward pursuit cover
 		_move_to_target_nav(_pursuit_next_cover, combat_move_speed)
+		# Corner checking during PURSUING (Issue #332)
+		if velocity.length_squared() > 1.0:
+			_process_corner_check(delta, velocity.normalized(), "PURSUING")
 		return
 
 	# No cover and no pursuit target - find initial pursuit cover
@@ -2295,6 +2240,9 @@ func _process_pursuing_state(delta: float) -> void:
 
 			# Otherwise, continue moving toward suspected position
 			_move_to_target_nav(target_pos, combat_move_speed)
+			# Corner checking during pursuit to suspected position (Issue #332)
+			if velocity.length_squared() > 1.0:
+				_process_corner_check(delta, velocity.normalized(), "PURSUING_MEMORY")
 			return
 
 		# Can't find cover to pursue, try flanking or combat
@@ -2425,6 +2373,8 @@ func _process_searching_state(delta: float) -> void:
 				move_and_slide()
 				if dir.length() > 0.1:
 					rotation = lerp_angle(rotation, dir.angle(), 5.0 * delta)
+					# Corner checking during SEARCHING movement (Issue #332)
+					_process_corner_check(delta, dir, "SEARCHING")
 	else:
 		_search_scan_timer += delta
 		rotation += delta * 1.5
@@ -4105,7 +4055,7 @@ func _calculate_lead_prediction() -> Vector2:
 
 	return predicted_pos
 
-## Process patrol behavior - move between patrol points.
+## Process patrol behavior - move between patrol points with corner checking.
 func _process_patrol(delta: float) -> void:
 	if _patrol_points.is_empty():
 		return
@@ -4126,16 +4076,37 @@ func _process_patrol(delta: float) -> void:
 	var distance := global_position.distance_to(target_point)
 
 	if distance < 5.0:
-		# Reached patrol point, start waiting
 		_is_waiting_at_patrol_point = true
 		velocity = Vector2.ZERO
 	else:
-		# Apply enhanced wall avoidance with dynamic weighting
 		direction = _apply_wall_avoidance(direction)
-
 		velocity = direction * move_speed
-		# Face movement direction when patrolling
 		rotation = direction.angle()
+		# Check for corners/openings perpendicular to movement direction
+		_process_corner_check(get_physics_process_delta_time(), direction, "PATROL")
+
+## Detect openings perpendicular to movement direction (for corner checking).
+func _detect_perpendicular_opening(move_dir: Vector2) -> bool:
+	var space_state := get_world_2d().direct_space_state
+	for side in [-1.0, 1.0]:
+		var perp_dir := move_dir.rotated(side * PI / 2)
+		var query := PhysicsRayQueryParameters2D.create(global_position, global_position + perp_dir * CORNER_CHECK_DISTANCE)
+		query.collision_mask = 0b100
+		query.exclude = [self]
+		if space_state.intersect_ray(query).is_empty():
+			_corner_check_angle = perp_dir.angle()
+			_force_model_to_face_direction(perp_dir)
+			return true
+	return false
+
+## Handle corner checking during movement (Issue #332).
+func _process_corner_check(delta: float, move_dir: Vector2, state_name: String) -> void:
+	if _corner_check_timer > 0:
+		_corner_check_timer -= delta
+		_force_model_to_face_direction(Vector2.from_angle(_corner_check_angle))
+	elif _detect_perpendicular_opening(move_dir):
+		_corner_check_timer = CORNER_CHECK_DURATION
+		_log_to_file("%s corner check: angle %.1f°" % [state_name, rad_to_deg(_corner_check_angle)])
 
 ## Process guard behavior - scan for threats every IDLE_SCAN_INTERVAL seconds.
 func _process_guard(delta: float) -> void:
@@ -4212,6 +4183,13 @@ func on_hit_with_bullet_info(hit_direction: Vector2, caliber_data: Resource, has
 
 	# Store hit direction for death animation
 	_last_hit_direction = hit_direction
+
+	# Turn toward attacker: the attacker is in the opposite direction of the bullet travel
+	# This makes the enemy face where the shot came from
+	var attacker_direction := -hit_direction.normalized()
+	if attacker_direction.length_squared() > 0.01:
+		_force_model_to_face_direction(attacker_direction)
+		_log_debug("Hit reaction: turning toward attacker (direction: %s)" % attacker_direction)
 
 	# Track hits for retreat behavior
 	_hits_taken_in_encounter += 1
@@ -4748,18 +4726,22 @@ func get_total_ammo() -> int:
 ## Check if enemy is currently reloading.
 func is_reloading() -> bool:
 	return _is_reloading
+
 ## Check if enemy has any ammo left.
 func has_ammo() -> bool:
 	return _current_ammo > 0 or _reserve_ammo > 0
+
 ## Get current player visibility ratio (for debugging).
 ## Returns 0.0 if player is completely hidden, 1.0 if fully visible.
 func get_player_visibility_ratio() -> float:
 	return _player_visibility_ratio
+
 ## Draw debug visualization when debug mode is enabled.
 ## Shows: line to target (cover, clear shot, player), bullet spawn point status.
 func _draw() -> void:
 	if not debug_label_enabled:
 		return
+
 	# Colors for different debug elements
 	var color_to_cover := Color.CYAN  # Line to cover position
 	var color_to_player := Color.RED  # Line to player (when visible)
@@ -4768,14 +4750,17 @@ func _draw() -> void:
 	var color_flank := Color.MAGENTA  # Line to flank position
 	var color_bullet_spawn := Color.GREEN  # Bullet spawn point indicator
 	var color_blocked := Color.RED  # Blocked path indicator
+
 	# Draw FOV cone in debug mode - always visible to show FOV configuration
 	# Color indicates whether FOV is actually active (green) or just visualization (gray)
 	var experimental_settings: Node = get_node_or_null("/root/ExperimentalSettings")
 	var global_fov_enabled := false
 	if experimental_settings and experimental_settings.has_method("is_fov_enabled"):
 		global_fov_enabled = experimental_settings.is_fov_enabled()
+
 	# Determine if FOV is actually active for this enemy
 	var fov_active := global_fov_enabled and fov_enabled and fov_angle > 0.0
+
 	# Choose color based on whether FOV is active
 	# Green = FOV is active (100 degree vision)
 	# Gray = FOV is disabled (360 degree vision, but showing what the cone would be)
@@ -4787,13 +4772,16 @@ func _draw() -> void:
 	else:
 		color_fov = Color(0.5, 0.5, 0.5, 0.2)  # Semi-transparent gray (inactive)
 		color_fov_edge = Color(0.5, 0.5, 0.5, 0.5)  # Gray edge (inactive)
+
 	# Always draw FOV cone in debug mode (if fov_angle is set)
 	if fov_angle > 0.0:
 		_draw_fov_cone(color_fov, color_fov_edge)
+
 	# Draw line to player if visible
 	if _can_see_player and _player:
 		var to_player := _player.global_position - global_position
 		draw_line(Vector2.ZERO, to_player, color_to_player, 1.5)
+
 		# Draw bullet spawn point (actual muzzle position) and check if blocked
 		var weapon_forward := _get_weapon_forward_direction()
 		var muzzle_global := _get_bullet_spawn_position(weapon_forward)
@@ -4804,12 +4792,14 @@ func _draw() -> void:
 			# Draw X for blocked spawn point
 			draw_line(spawn_point + Vector2(-5, -5), spawn_point + Vector2(5, 5), color_blocked, 2.0)
 			draw_line(spawn_point + Vector2(-5, 5), spawn_point + Vector2(5, -5), color_blocked, 2.0)
+
 	# Draw line to cover position if we have one
 	if _has_valid_cover:
 		var to_cover := _cover_position - global_position
 		draw_line(Vector2.ZERO, to_cover, color_to_cover, 1.5)
 		# Draw small circle at cover position
 		draw_circle(to_cover, 8.0, color_to_cover)
+
 	# Draw line to clear shot target if seeking clear shot
 	if _seeking_clear_shot and _clear_shot_target != Vector2.ZERO:
 		var to_target := _clear_shot_target - global_position
@@ -4819,11 +4809,13 @@ func _draw() -> void:
 		draw_line(target_pos + Vector2(-6, 6), target_pos + Vector2(6, 6), color_clear_shot, 2.0)
 		draw_line(target_pos + Vector2(6, 6), target_pos + Vector2(0, -8), color_clear_shot, 2.0)
 		draw_line(target_pos + Vector2(0, -8), target_pos + Vector2(-6, 6), color_clear_shot, 2.0)
+
 	# Draw line to pursuit cover if pursuing
 	if _current_state == AIState.PURSUING and _has_pursuit_cover:
 		var to_pursuit := _pursuit_next_cover - global_position
 		draw_line(Vector2.ZERO, to_pursuit, color_pursuit, 2.0)
 		draw_circle(to_pursuit, 8.0, color_pursuit)
+
 	# Draw line to flank target if flanking
 	if _current_state == AIState.FLANKING:
 		if _has_flank_cover:
@@ -4839,6 +4831,7 @@ func _draw() -> void:
 			draw_line(flank_pos + Vector2(8, 0), flank_pos + Vector2(0, 8), color_flank, 2.0)
 			draw_line(flank_pos + Vector2(0, 8), flank_pos + Vector2(-8, 0), color_flank, 2.0)
 			draw_line(flank_pos + Vector2(-8, 0), flank_pos + Vector2(0, -8), color_flank, 2.0)
+
 	# Draw suspected position from memory system (Issue #297)
 	# The circle radius is inversely proportional to confidence (larger = less certain)
 	if _memory and _memory.has_target():
@@ -4861,64 +4854,52 @@ func _draw() -> void:
 			draw_line(p1, p2, confidence_color, 1.5)
 		# Draw small filled circle at center
 		draw_circle(to_suspected, 5.0, confidence_color)
-## Draw FOV cone for debug visualization.
+
+## Draw FOV cone with obstacle occlusion. Follows model rotation, rays stop at walls.
 func _draw_fov_cone(fill_color: Color, edge_color: Color) -> void:
 	var half_fov := deg_to_rad(fov_angle / 2.0)
-	var cone_length := 400.0
-	var left_end := Vector2.from_angle(-half_fov) * cone_length
-	var right_end := Vector2.from_angle(half_fov) * cone_length
+	var global_facing := _enemy_model.global_rotation if _enemy_model else global_rotation
+	var local_facing := global_facing - global_rotation  # Convert to local space for drawing
+	var space_state := get_world_2d().direct_space_state
 	var cone_points: PackedVector2Array = [Vector2.ZERO]
-	var arc_segments := 16
-	for i in range(arc_segments + 1):
-		cone_points.append(Vector2.from_angle(-half_fov + (float(i) / arc_segments) * 2 * half_fov) * cone_length)
+	var ray_endpoints: Array[Vector2] = []
+	for i in range(33):  # 32 segments + 1
+		var t := float(i) / 32.0
+		var angle := local_facing - half_fov + t * 2 * half_fov
+		var ray_dir := Vector2.from_angle(angle)
+		var global_ray_end := global_position + Vector2.from_angle(global_facing - half_fov + t * 2 * half_fov) * 400.0
+		var query := PhysicsRayQueryParameters2D.create(global_position, global_ray_end)
+		query.collision_mask = 0b100
+		query.exclude = [self]
+		var result := space_state.intersect_ray(query)
+		var end_local := ray_dir * (global_position.distance_to(result.position) if not result.is_empty() else 400.0)
+		cone_points.append(end_local)
+		ray_endpoints.append(end_local)
 	draw_colored_polygon(cone_points, fill_color)
-	draw_line(Vector2.ZERO, left_end, edge_color, 2.0)
-	draw_line(Vector2.ZERO, right_end, edge_color, 2.0)
-	for i in range(arc_segments):
-		var a1 := -half_fov + (float(i) / arc_segments) * 2 * half_fov
-		var a2 := -half_fov + (float(i + 1) / arc_segments) * 2 * half_fov
-		draw_line(Vector2.from_angle(a1) * cone_length, Vector2.from_angle(a2) * cone_length, edge_color, 1.5)
-## Check if the player is "distracted" (not aiming at the enemy).
-## A player is considered distracted if they can see the enemy but their aim direction
-## is more than 23 degrees away from the direction toward the enemy.
-## This allows enemies to attack with highest priority when the player is not focused on them.
-##
-## Returns true if:
-## 1. The enemy can see the player (player is in line of sight)
-## 2. The player's aim direction (toward their mouse cursor) deviates more than 23 degrees
-##    from the direction toward the enemy
+	if ray_endpoints.size() > 0:
+		draw_line(Vector2.ZERO, ray_endpoints[0], edge_color, 2.0)
+		draw_line(Vector2.ZERO, ray_endpoints[ray_endpoints.size() - 1], edge_color, 2.0)
+	for i in range(ray_endpoints.size() - 1):
+		draw_line(ray_endpoints[i], ray_endpoints[i + 1], edge_color, 1.5)
+
+## Check if player is distracted (aim >23° away from this enemy). Used for priority attacks.
 func _is_player_distracted() -> bool:
-	# Player must be visible for this check to be relevant
 	if not _can_see_player or _player == null:
 		return false
-	# Get the player's aim direction by calculating from player to mouse cursor
-	# The player aims where their mouse is pointing
-	var player_pos: Vector2 = _player.global_position
-	var enemy_pos: Vector2 = global_position
-	# Get the mouse position in global coordinates from the player's viewport
 	var player_viewport: Viewport = _player.get_viewport()
 	if player_viewport == null:
 		return false
-	var mouse_pos: Vector2 = player_viewport.get_mouse_position()
-	# Convert from viewport coordinates to global coordinates
-	var canvas_transform: Transform2D = player_viewport.get_canvas_transform()
-	var global_mouse_pos: Vector2 = canvas_transform.affine_inverse() * mouse_pos
-	# Calculate the direction from player to enemy
-	var dir_to_enemy: Vector2 = (enemy_pos - player_pos).normalized()
-	# Calculate the direction from player to their aim target (mouse cursor)
-	var aim_direction: Vector2 = (global_mouse_pos - player_pos).normalized()
-	# Calculate the angle between the two directions
-	# Using dot product: cos(angle) = a · b / (|a| * |b|)
-	# Since both are normalized, |a| * |b| = 1
-	var dot: float = dir_to_enemy.dot(aim_direction)
-	# Clamp to handle floating point errors
-	dot = clampf(dot, -1.0, 1.0)
-	var angle: float = acos(dot)
-	# Player is distracted if their aim is more than 23 degrees away from the enemy
-	var is_distracted: bool = angle > PLAYER_DISTRACTION_ANGLE
+	var player_pos := _player.global_position
+	var mouse_pos := player_viewport.get_mouse_position()
+	var global_mouse_pos := player_viewport.get_canvas_transform().affine_inverse() * mouse_pos
+	var dir_to_enemy := (global_position - player_pos).normalized()
+	var aim_direction := (global_mouse_pos - player_pos).normalized()
+	var angle := acos(clampf(dir_to_enemy.dot(aim_direction), -1.0, 1.0))
+	var is_distracted := angle > PLAYER_DISTRACTION_ANGLE
 	if is_distracted:
 		_log_debug("Player distracted: aim angle %.1f° > %.1f° threshold" % [rad_to_deg(angle), rad_to_deg(PLAYER_DISTRACTION_ANGLE)])
 	return is_distracted
+
 ## Set a navigation target and get the direction to follow the path.
 ## Uses NavigationAgent2D for proper pathfinding around obstacles.
 ## Returns the direction to move, or Vector2.ZERO if navigation is not available.
@@ -4926,49 +4907,64 @@ func _get_nav_direction_to(target_pos: Vector2) -> Vector2:
 	if _nav_agent == null:
 		# Fall back to direct movement if no navigation agent
 		return (target_pos - global_position).normalized()
+
 	# Set the target for navigation
 	_nav_agent.target_position = target_pos
+
 	# Check if navigation is finished
 	if _nav_agent.is_navigation_finished():
 		return Vector2.ZERO
+
 	# Get the next position in the path
 	var next_pos: Vector2 = _nav_agent.get_next_path_position()
+
 	# Calculate direction to next path position
 	var direction: Vector2 = (next_pos - global_position).normalized()
 	return direction
+
 ## Move toward a target position using NavigationAgent2D pathfinding.
 ## This is the primary movement function that should be used instead of direct velocity assignment.
 ## Returns true if movement was applied, false if target was reached or navigation unavailable.
 func _move_to_target_nav(target_pos: Vector2, speed: float) -> bool:
 	var direction: Vector2 = _get_nav_direction_to(target_pos)
+
 	if direction == Vector2.ZERO:
 		velocity = Vector2.ZERO
 		return false
+
 	# Apply additional wall avoidance on top of navigation path for tight corners
 	direction = _apply_wall_avoidance(direction)
+
 	velocity = direction * speed
 	rotation = direction.angle()
 	return true
+
 ## Check if the navigation agent has a valid path to the target.
 func _has_nav_path_to(target_pos: Vector2) -> bool:
 	if _nav_agent == null:
 		return false
+
 	_nav_agent.target_position = target_pos
 	return not _nav_agent.is_navigation_finished()
+
 ## Get distance to target along the navigation path (more accurate than straight-line).
 func _get_nav_path_distance(target_pos: Vector2) -> float:
 	if _nav_agent == null:
 		return global_position.distance_to(target_pos)
+
 	_nav_agent.target_position = target_pos
 	return _nav_agent.distance_to_target()
+
 # ============================================================================
 # Status Effects (Blindness, Stun)
 # ============================================================================
+
 ## Set the blinded state (from flashbang grenade).
 ## When blinded, the enemy cannot see the player.
 func set_blinded(blinded: bool) -> void:
 	var was_blinded := _is_blinded
 	_is_blinded = blinded
+
 	if blinded and not was_blinded:
 		_log_debug("Enemy is now BLINDED - cannot see player")
 		_log_to_file("Status effect: BLINDED applied")
@@ -4978,11 +4974,13 @@ func set_blinded(blinded: bool) -> void:
 	elif not blinded and was_blinded:
 		_log_debug("Enemy is no longer blinded")
 		_log_to_file("Status effect: BLINDED removed")
+
 ## Set the stunned state (from flashbang grenade).
 ## When stunned, the enemy cannot move or take actions.
 func set_stunned(stunned: bool) -> void:
 	var was_stunned := _is_stunned
 	_is_stunned = stunned
+
 	if stunned and not was_stunned:
 		_log_debug("Enemy is now STUNNED - cannot move")
 		_log_to_file("Status effect: STUNNED applied")
@@ -4991,9 +4989,11 @@ func set_stunned(stunned: bool) -> void:
 	elif not stunned and was_stunned:
 		_log_debug("Enemy is no longer stunned")
 		_log_to_file("Status effect: STUNNED removed")
+
 ## Check if the enemy is currently blinded.
 func is_blinded() -> bool:
 	return _is_blinded
+
 ## Check if the enemy is currently stunned.
 func is_stunned() -> bool:
 	return _is_stunned
