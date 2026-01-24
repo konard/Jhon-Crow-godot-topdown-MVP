@@ -92,13 +92,45 @@ if _shoot_timer >= weapon.shoot_cooldown:
 - Run full test suite before committing
 - Check closed issues for functionality that must be preserved
 
+### 5. C# Build Failures (Issue #302, PR #275)
+**Problem**: C# compilation errors cause ".NET assemblies not found" in exports
+**Solution**:
+- Always run `dotnet build` locally before pushing C# changes
+- Check CI workflow `csharp-validation.yml` for build status
+- When modifying C# method signatures, search for all call sites
+
+```bash
+# Always verify C# builds before pushing
+dotnet build
+
+# Search for method usages before changing signatures
+grep -rn "MethodName" Scripts/
+```
+
+### 6. C#/GDScript Interoperability Issues (Issue #302)
+**Problem**: C# and GDScript components getting out of sync
+**Solution**:
+- Keep duplicate implementations intentional and documented
+- Use `interop-check.yml` CI workflow to detect issues
+- When calling C# from GDScript, use `node.call("MethodName")`
+
+```gdscript
+# Good: Safe cross-language call
+if node.has_method("TakeDamage"):
+    node.call("TakeDamage", damage_amount)
+
+# Bad: Assumes C# method exists
+node.TakeDamage(damage_amount)  # May crash if C# failed to compile
+```
+
 ## Pull Request Checklist
 
 Before submitting a PR, verify:
 
 - [ ] **Tests pass**: All unit and integration tests pass
 - [ ] **New tests added**: For new features or bug fixes
-- [ ] **CI passes**: Both `test.yml` and `architecture-check.yml` workflows pass
+- [ ] **CI passes**: All workflows pass (`test.yml`, `architecture-check.yml`, `csharp-validation.yml`, `interop-check.yml`)
+- [ ] **C# builds locally**: Run `dotnet build` for C# changes
 - [ ] **No regressions**: Related functionality still works
 - [ ] **Code follows style**: snake_case for GDScript, PascalCase for C#
 - [ ] **Line limits**: Scripts under 5000 lines (target: 800)
@@ -177,6 +209,19 @@ Verifies:
 - class_name declarations in components
 - Required folder structure
 - snake_case naming convention
+
+### csharp-validation.yml
+**Protection against C# build failures** (Issue #302):
+- Validates C# code compiles with `dotnet build`
+- Verifies assembly DLL is produced
+- Catches errors that would cause ".NET assemblies not found" in exports
+
+### interop-check.yml
+**Protection against C#/GDScript integration issues** (Issue #302):
+- Detects duplicate implementations across languages
+- Checks scene signal connections to C# scripts
+- Validates autoload references
+- Warns about potential interoperability issues
 
 ## Getting Help
 
