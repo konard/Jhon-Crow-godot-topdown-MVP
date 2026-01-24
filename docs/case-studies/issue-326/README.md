@@ -210,6 +210,165 @@ When invincibility mode is active:
 - `scripts/characters/player.gd` - Player health and damage system
 - `scripts/objects/enemy.gd` - Enemy AI (may need debug visualization updates)
 
+## Issue Investigation: Initial Implementation Bug
+
+### Problem Report
+
+After the initial implementation was deployed, the user reported that invincibility mode was **not working**:
+- F6 toggle activated successfully (logged in GameManager)
+- Player still took damage and died even with invincibility ON
+- Logs showed "Invincibility mode toggled: ON" but damage was still being applied
+
+### Root Cause Analysis
+
+#### Timeline of Events (from log files)
+
+**Log file: game_log_20260124_222925.txt**
+```
+[22:29:33] [INFO] [GameManager] Invincibility mode toggled: ON
+[22:29:35] [INFO] [PenultimateHit] Player damaged: 1.0 damage, current health: 3.0
+[22:29:36] [INFO] [PenultimateHit] Player damaged: 1.0 damage, current health: 2.0
+[22:29:36] [INFO] [PenultimateHit] Player damaged: 1.0 damage, current health: 1.0
+[22:29:36] [INFO] [PenultimateHit] Player damaged: 1.0 damage, current health: 0.0
+[22:29:36] [INFO] [LastChance] Player died
+```
+
+**Log file: game_log_20260124_223436.txt**
+```
+[22:34:43] [INFO] [GameManager] Invincibility mode toggled: ON
+[22:34:46] [INFO] [PenultimateHit] Player damaged: 1.0 damage, current health: 1.0
+[22:34:46] [INFO] [PenultimateHit] Player damaged: 1.0 damage, current health: 0.0
+[22:34:46] [INFO] [LastChance] Player died
+```
+
+#### Root Cause Identified
+
+The project uses a **dual-language architecture**:
+1. **GDScript** (`scripts/characters/player.gd`) - Original player implementation
+2. **C#** (`Scripts/Characters/Player.cs`) - C# player implementation with weapon system
+
+The initial fix was applied only to the **GDScript** player, but the game was using the **C# player**!
+
+**Evidence**:
+- Log entries show "Connected to player Damaged signal (C#)"
+- The `PenultimateHit` manager connects to C# signals
+- The C# `TakeDamage()` method had no invincibility check
+
+#### Technical Details
+
+The hit detection flow:
+```
+Bullet → HitArea.on_hit_with_info() → Player.on_hit() or Player.TakeDamage()
+```
+
+**GDScript player.gd** (lines 836-848):
+```gdscript
+func on_hit_with_info(hit_direction: Vector2, caliber_data: Resource) -> void:
+    # Check invincibility mode (F6 toggle)
+    if _invincibility_enabled:
+        FileLogger.info("[Player] Hit blocked by invincibility mode")
+        _show_hit_flash()  # Visual feedback preserved
+        return
+    # ... damage handling
+```
+
+**C# Player.cs** (lines 1529-1554) **BEFORE FIX**:
+```csharp
+public override void TakeDamage(float amount)
+{
+    if (HealthComponent == null || !IsAlive)
+    {
+        return;
+    }
+    // NO INVINCIBILITY CHECK!
+    GD.Print($"[Player] {Name}: Taking {amount} damage...");
+    base.TakeDamage(amount);
+}
+```
+
+### Solution Implemented
+
+Added invincibility support to the C# Player class:
+
+1. **Added field** (line 177):
+```csharp
+private bool _invincibilityEnabled = false;
+```
+
+2. **Connected to GameManager signal** in `ConnectDebugModeSignal()`:
+```csharp
+if (gameManager.HasSignal("invincibility_toggled"))
+{
+    gameManager.Connect("invincibility_toggled",
+        Callable.From<bool>(OnInvincibilityToggled));
+    if (gameManager.HasMethod("is_invincibility_enabled"))
+    {
+        _invincibilityEnabled = (bool)gameManager.Call("is_invincibility_enabled");
+    }
+}
+```
+
+3. **Added handler**:
+```csharp
+private void OnInvincibilityToggled(bool enabled)
+{
+    _invincibilityEnabled = enabled;
+    UpdateInvincibilityIndicator();
+    LogToFile($"[Player] Invincibility mode: {(enabled ? "ON" : "OFF")}");
+}
+```
+
+4. **Added check in TakeDamage()**:
+```csharp
+public override void TakeDamage(float amount)
+{
+    if (HealthComponent == null || !IsAlive)
+    {
+        return;
+    }
+
+    // Check invincibility mode (F6 toggle)
+    if (_invincibilityEnabled)
+    {
+        LogToFile("[Player] Hit blocked by invincibility mode (C#)");
+        ShowHitFlash(); // Still show visual feedback
+        return;
+    }
+    // ... rest of damage handling
+}
+```
+
+5. **Added visual indicator** (Russian text "БЕССМЕРТИЕ"):
+```csharp
+private void UpdateInvincibilityIndicator()
+{
+    // Create/update label above player showing invincibility status
+    _invincibilityLabel.Text = "БЕССМЕРТИЕ";
+    _invincibilityLabel.Visible = _invincibilityEnabled;
+}
+```
+
+### Lessons Learned
+
+1. **Dual-language projects require changes in both languages** - When fixing features that span GDScript and C#, always check both implementations.
+
+2. **Log files are invaluable for debugging** - The "(C#)" suffix in log messages helped identify which player implementation was active.
+
+3. **Signal-based architecture aids debugging** - The GameManager signal pattern makes it easy to add invincibility to any damage-receiving component.
+
+4. **Always test in the actual runtime environment** - The initial implementation was correct for GDScript but the game uses C# player.
+
+### Files Modified
+
+| File | Changes |
+|------|---------|
+| `scripts/autoload/game_manager.gd` | Added `invincibility_enabled`, F6 handler, signal |
+| `scripts/characters/player.gd` | Added invincibility check in `on_hit_with_info()` |
+| `Scripts/Characters/Player.cs` | Added invincibility field, signal connection, check in `TakeDamage()`, visual indicator |
+| `docs/case-studies/issue-326/logs/` | Added game log files from user testing |
+
 ## Conclusion
 
 The implementation of player invincibility mode is straightforward and low-risk. By following the existing debug mode pattern with F7, we ensure consistency and maintainability. The GameManager-based approach provides a solid foundation for future debug features while keeping the implementation clean and professional.
+
+**Important**: This project uses both GDScript and C# for the player character. Any features affecting player health/damage must be implemented in **both** `scripts/characters/player.gd` AND `Scripts/Characters/Player.cs` to work correctly.
