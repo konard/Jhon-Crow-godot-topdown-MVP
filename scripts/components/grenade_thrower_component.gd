@@ -438,21 +438,26 @@ func get_current_blast_radius() -> float:
 func should_throw(current_health: int, can_see_player: bool, is_suppressed: bool, distance_to_player: float, throw_origin: Vector2 = Vector2.ZERO, target_pos: Vector2 = Vector2.ZERO) -> bool:
 	# Must have grenades enabled and available
 	if not enabled:
+		_log("Grenade check: SKIP - not enabled")
 		return false
 
 	if not has_grenades():
+		_log("Grenade check: SKIP - no grenades (off=%d, flash=%d)" % [offensive_grenades, flashbang_grenades])
 		return false
 
 	# Must not be on cooldown
 	if _cooldown_timer > 0.0:
+		_log("Grenade check: SKIP - on cooldown (%.1fs remaining)" % _cooldown_timer)
 		return false
 
 	# Must not already be throwing
 	if _is_throwing:
+		_log("Grenade check: SKIP - already throwing")
 		return false
 
 	# Check distance (must be within throw range)
 	if distance_to_player > throw_range:
+		_log("Grenade check: SKIP - out of range (%.0f > %.0f)" % [distance_to_player, throw_range])
 		return false
 
 	# Safety check: don't throw if thrower would be in blast radius
@@ -462,7 +467,7 @@ func should_throw(current_health: int, can_see_player: bool, is_suppressed: bool
 			_log("Grenade throw blocked: too close to target (would be in blast radius)")
 			return false
 
-	# Trigger conditions from issue #273:
+	# Trigger conditions from issue #295:
 
 	# 1. Player suppressed enemies then hid for 6+ seconds
 	if _player_hidden_timer >= PLAYER_HIDDEN_TRIGGER_DURATION:
@@ -480,7 +485,7 @@ func should_throw(current_health: int, can_see_player: bool, is_suppressed: bool
 		return true
 
 	# 4. Thrower heard reload/empty magazine sound but can't see player
-	# (Handled externally via on_reload_sound_heard)
+	# (Handled externally via _try_grenade_throw_at_sound in enemy.gd)
 
 	# 5. Continuous gunfire for 10 seconds in zone
 	if _continuous_gunfire_timer >= CONTINUOUS_GUNFIRE_TRIGGER_DURATION:
@@ -492,6 +497,9 @@ func should_throw(current_health: int, can_see_player: bool, is_suppressed: bool
 		_log("Grenade trigger: critical health (%d HP)" % current_health)
 		return true
 
+	# No trigger conditions met
+	_log("Grenade check: no trigger (hp=%d, see=%s, supp=%s, hidden=%.1fs, deaths=%d, gunfire=%.1fs)" % [
+		current_health, can_see_player, is_suppressed, _player_hidden_timer, _witnessed_ally_deaths, _continuous_gunfire_timer])
 	return false
 
 

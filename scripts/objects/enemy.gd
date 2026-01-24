@@ -1105,11 +1105,9 @@ func _physics_process(delta: float) -> void:
 			# Reset failure count when cooldown expires
 			_flank_fail_count = 0
 
-	# Update grenade thrower component
-	if _grenade_thrower:
+	if _grenade_thrower:  # Update grenade thrower cooldown and player hidden timer
 		_grenade_thrower.update_cooldown(delta)
-		var was_suppression := _current_state == AIState.SUPPRESSED or _current_state == AIState.IN_COVER
-		_grenade_thrower.update_player_hidden_timer(delta, _can_see_player, was_suppression)
+		_grenade_thrower.update_player_hidden_timer(delta, _can_see_player, _under_fire)
 
 	# Check for player visibility and try to find player if not found
 	if _player == null:
@@ -1641,6 +1639,11 @@ func _process_combat_state(delta: float) -> void:
 	# Track time in COMBAT state (for preventing rapid state thrashing)
 	_combat_state_timer += delta
 
+	if _check_grenade_throw():  # Check grenade triggers (low HP, etc.)
+		_combat_exposed = false
+		_combat_approaching = false
+		_seeking_clear_shot = false
+		return
 	# Check for suppression - transition to retreating behavior
 	# BUT: When pursuing a vulnerability sound (player reloading/out of ammo),
 	# ignore suppression and continue the attack - this is the best time to strike!
@@ -1878,6 +1881,8 @@ func _calculate_clear_shot_exit_position(direction_to_player: Vector2) -> Vector
 
 ## Process SEEKING_COVER state - moving to cover position.
 func _process_seeking_cover_state(_delta: float) -> void:
+	if _check_grenade_throw():  # Check grenade triggers (low HP, etc.)
+		return
 	if not _has_valid_cover:
 		# Try to find cover
 		_find_cover_position()
@@ -2144,6 +2149,8 @@ func _process_suppressed_state(delta: float) -> void:
 
 ## Process RETREATING state - moving to cover with behavior based on damage taken.
 func _process_retreating_state(delta: float) -> void:
+	if _check_grenade_throw():  # Check grenade triggers (low HP, etc.)
+		return
 	if not _has_valid_cover:
 		# Try to find cover
 		_find_cover_position()
@@ -2351,8 +2358,7 @@ func _process_pursuing_state(delta: float) -> void:
 			_find_pursuit_cover_toward_player()
 			if _has_pursuit_cover:
 				_log_debug("Found pursuit cover at %s" % _pursuit_next_cover)
-				# Issue #295: Solo enemy throws grenade before entering cover near player's hiding spot
-				if _should_throw_grenade_before_cover_entry(_pursuit_next_cover):
+				if _should_throw_grenade_before_cover_entry(_pursuit_next_cover):  # Solo grenade before cover
 					_transition_to_throwing_grenade(_pursuit_next_cover, _grenade_thrower.get_best_grenade_type())
 					return
 			else:
@@ -2367,8 +2373,7 @@ func _process_pursuing_state(delta: float) -> void:
 					_log_debug("Attempting flanking maneuver")
 					_transition_to_flanking()
 					return
-				# Issue #295: If solo and have last known player position, throw grenade there first
-				if _last_known_player_position != Vector2.ZERO and _should_throw_grenade_before_cover_entry(_last_known_player_position):
+				if _last_known_player_position != Vector2.ZERO and _should_throw_grenade_before_cover_entry(_last_known_player_position):  # Solo grenade
 					_transition_to_throwing_grenade(_last_known_player_position, _grenade_thrower.get_best_grenade_type())
 					return
 				# Last resort: move directly toward player

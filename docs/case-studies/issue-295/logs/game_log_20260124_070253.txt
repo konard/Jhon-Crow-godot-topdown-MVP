@@ -1,0 +1,400 @@
+[07:02:53] [INFO] ============================================================
+[07:02:53] [INFO] GAME LOG STARTED
+[07:02:53] [INFO] ============================================================
+[07:02:53] [INFO] Timestamp: 2026-01-24T07:02:53
+[07:02:53] [INFO] Log file: I:/Загрузки/godot exe/game_log_20260124_070253.txt
+[07:02:53] [INFO] Executable: I:/Загрузки/godot exe/Godot-Top-Down-Template.exe
+[07:02:53] [INFO] OS: Windows
+[07:02:53] [INFO] Debug build: false
+[07:02:53] [INFO] Engine version: 4.3-stable (official)
+[07:02:53] [INFO] Project: Godot Top-Down Template
+[07:02:53] [INFO] ------------------------------------------------------------
+[07:02:53] [INFO] [GameManager] GameManager ready
+[07:02:53] [INFO] [ScoreManager] ScoreManager ready
+[07:02:53] [INFO] [SoundPropagation] SoundPropagation autoload initialized
+[07:02:53] [INFO] [ImpactEffects] Scenes loaded: DustEffect, BloodEffect, SparksEffect, BloodDecal
+[07:02:53] [INFO] [ImpactEffects] ImpactEffectsManager ready - FULL VERSION with blood effects enabled
+[07:02:53] [INFO] [PenultimateHit] Resetting all effects (scene change detected)
+[07:02:53] [INFO] [PenultimateHit] Saturation shader loaded successfully
+[07:02:53] [INFO] [PenultimateHit] PenultimateHitEffectsManager ready - Configuration:
+[07:02:53] [INFO] [PenultimateHit]   Time scale: 0.10 (10x slowdown)
+[07:02:53] [INFO] [PenultimateHit]   Saturation boost: 2.0 (3.0x)
+[07:02:53] [INFO] [PenultimateHit]   Contrast boost: 1.0 (2.0x)
+[07:02:53] [INFO] [PenultimateHit]   Effect duration: 3.0 real seconds
+[07:02:53] [INFO] [LastChance] Resetting all effects (scene change detected)
+[07:02:53] [INFO] [LastChance] Last chance shader loaded successfully
+[07:02:53] [INFO] [LastChance] LastChanceEffectsManager ready - Configuration:
+[07:02:53] [INFO] [LastChance]   Freeze duration: 6.0 real seconds
+[07:02:53] [INFO] [LastChance]   Sepia intensity: 0.70
+[07:02:53] [INFO] [LastChance]   Brightness: 0.60
+[07:02:53] [INFO] [GrenadeManager] Loaded grenade scene: res://scenes/projectiles/FlashbangGrenade.tscn
+[07:02:53] [INFO] [GrenadeManager] Loaded grenade scene: res://scenes/projectiles/FragGrenade.tscn
+[07:02:53] [ENEMY] [Enemy1] Death animation component initialized
+[07:02:53] [ENEMY] [Enemy2] Death animation component initialized
+[07:02:53] [ENEMY] [Enemy3] Death animation component initialized
+[07:02:53] [ENEMY] [Enemy4] Death animation component initialized
+[07:02:53] [ENEMY] [Enemy5] Death animation component initialized
+[07:02:53] [ENEMY] [Enemy6] Death animation component initialized
+[07:02:53] [ENEMY] [Enemy7] Death animation component initialized
+[07:02:53] [ENEMY] [Enemy8] Death animation component initialized
+[07:02:53] [ENEMY] [Enemy9] Death animation component initialized
+[07:02:53] [ENEMY] [Enemy10] Death animation component initialized
+[07:02:53] [INFO] [Player.Grenade] Grenade scene loaded from GrenadeManager: Flashbang
+[07:02:53] [INFO] [Player.Grenade] Normal level - starting with 1 grenade
+[07:02:53] [INFO] [Player.Init] Body sprite found at position: (-4, 0)
+[07:02:53] [INFO] [Player.Init] Head sprite found at position: (-6, -2)
+[07:02:53] [INFO] [Player.Init] Left arm sprite found at position: (24, 6)
+[07:02:53] [INFO] [Player.Init] Right arm sprite found at position: (-2, 6)
+[07:02:53] [INFO] [Player.Debug] Connected to GameManager, debug mode: False
+[07:02:53] [INFO] [Player] Ready! Ammo: 30/30, Grenades: 1/3, Health: 3/4
+[07:02:53] [INFO] [Player.Grenade] Throwing system: VELOCITY-BASED (v2.0 - mouse velocity at release)
+[07:02:53] [INFO] [BuildingLevel] BuildingLevel _ready() started
+[07:02:53] [INFO] [BuildingLevel] Enemy tracking: Found 10 children under Environment/Enemies
+[07:02:53] [INFO] [BuildingLevel] Enemy node 'Enemy1': class=CharacterBody2D, script=<GDScript#-9223372007276542736>, has_died=true
+[07:02:53] [INFO] [BuildingLevel] Enemy 'Enemy1' registered with died signal
+[07:02:53] [INFO] [BuildingLevel] Enemy node 'Enemy2': class=CharacterBody2D, script=<GDScript#-9223372007276542736>, has_died=true
+[07:02:53] [INFO] [BuildingLevel] Enemy 'Enemy2' registered with died signal
+[07:02:53] [INFO] [BuildingLevel] Enemy node 'Enemy3': class=CharacterBody2D, script=<GDScript#-9223372007276542736>, has_died=true
+[07:02:53] [INFO] [BuildingLevel] Enemy 'Enemy3' registered with died signal
+[07:02:53] [INFO] [BuildingLevel] Enemy node 'Enemy4': class=CharacterBody2D, script=<GDScript#-9223372007276542736>, has_died=true
+[07:02:53] [INFO] [BuildingLevel] Enemy 'Enemy4' registered with died signal
+[07:02:53] [INFO] [BuildingLevel] Enemy node 'Enemy5': class=CharacterBody2D, script=<GDScript#-9223372007276542736>, has_died=true
+[07:02:53] [INFO] [BuildingLevel] Enemy 'Enemy5' registered with died signal
+[07:02:53] [INFO] [BuildingLevel] Enemy node 'Enemy6': class=CharacterBody2D, script=<GDScript#-9223372007276542736>, has_died=true
+[07:02:53] [INFO] [BuildingLevel] Enemy 'Enemy6' registered with died signal
+[07:02:53] [INFO] [BuildingLevel] Enemy node 'Enemy7': class=CharacterBody2D, script=<GDScript#-9223372007276542736>, has_died=true
+[07:02:53] [INFO] [BuildingLevel] Enemy 'Enemy7' registered with died signal
+[07:02:53] [INFO] [BuildingLevel] Enemy node 'Enemy8': class=CharacterBody2D, script=<GDScript#-9223372007276542736>, has_died=true
+[07:02:53] [INFO] [BuildingLevel] Enemy 'Enemy8' registered with died signal
+[07:02:53] [INFO] [BuildingLevel] Enemy node 'Enemy9': class=CharacterBody2D, script=<GDScript#-9223372007276542736>, has_died=true
+[07:02:53] [INFO] [BuildingLevel] Enemy 'Enemy9' registered with died signal
+[07:02:53] [INFO] [BuildingLevel] Enemy node 'Enemy10': class=CharacterBody2D, script=<GDScript#-9223372007276542736>, has_died=true
+[07:02:53] [INFO] [BuildingLevel] Enemy 'Enemy10' registered with died signal
+[07:02:53] [INFO] [BuildingLevel] Enemy tracking complete: 10/10 enemies registered
+[07:02:53] [INFO] [ScoreManager] Level started with 10 enemies
+[07:02:53] [INFO] [BuildingLevel] BuildingLevel initialization complete: 10 enemies, player found
+[07:02:53] [INFO] [SoundPropagation] Registered listener: Enemy1 (total: 1)
+[07:02:53] [ENEMY] [Enemy1] Registered as sound listener
+[07:02:53] [ENEMY] [Enemy1] Enemy spawned at (300, 350), health: 4, behavior: GUARD, player_found: yes
+[07:02:53] [INFO] [SoundPropagation] Registered listener: Enemy2 (total: 2)
+[07:02:53] [ENEMY] [Enemy2] Registered as sound listener
+[07:02:53] [ENEMY] [Enemy2] Enemy spawned at (400, 550), health: 2, behavior: GUARD, player_found: yes
+[07:02:53] [INFO] [SoundPropagation] Registered listener: Enemy3 (total: 3)
+[07:02:53] [ENEMY] [Enemy3] Registered as sound listener
+[07:02:53] [ENEMY] [Enemy3] Enemy spawned at (700, 750), health: 3, behavior: GUARD, player_found: yes
+[07:02:53] [INFO] [SoundPropagation] Registered listener: Enemy4 (total: 4)
+[07:02:53] [ENEMY] [Enemy4] Registered as sound listener
+[07:02:53] [ENEMY] [Enemy4] Enemy spawned at (800, 900), health: 4, behavior: GUARD, player_found: yes
+[07:02:53] [INFO] [SoundPropagation] Registered listener: Enemy5 (total: 5)
+[07:02:53] [ENEMY] [Enemy5] Registered as sound listener
+[07:02:53] [ENEMY] [Enemy5] Enemy spawned at (1700, 350), health: 4, behavior: GUARD, player_found: yes
+[07:02:53] [INFO] [SoundPropagation] Registered listener: Enemy6 (total: 6)
+[07:02:53] [ENEMY] [Enemy6] Registered as sound listener
+[07:02:53] [ENEMY] [Enemy6] Enemy spawned at (1950, 450), health: 2, behavior: GUARD, player_found: yes
+[07:02:53] [INFO] [SoundPropagation] Registered listener: Enemy7 (total: 7)
+[07:02:53] [ENEMY] [Enemy7] Registered as sound listener
+[07:02:53] [ENEMY] [Enemy7] Enemy spawned at (1606.114, 893.8859), health: 4, behavior: PATROL, player_found: yes
+[07:02:53] [INFO] [SoundPropagation] Registered listener: Enemy8 (total: 8)
+[07:02:53] [ENEMY] [Enemy8] Registered as sound listener
+[07:02:53] [ENEMY] [Enemy8] Enemy spawned at (1900, 1450), health: 3, behavior: GUARD, player_found: yes
+[07:02:53] [INFO] [SoundPropagation] Registered listener: Enemy9 (total: 9)
+[07:02:53] [ENEMY] [Enemy9] Registered as sound listener
+[07:02:53] [ENEMY] [Enemy9] Enemy spawned at (2100, 1550), health: 2, behavior: GUARD, player_found: yes
+[07:02:53] [INFO] [SoundPropagation] Registered listener: Enemy10 (total: 10)
+[07:02:53] [ENEMY] [Enemy10] Registered as sound listener
+[07:02:53] [ENEMY] [Enemy10] Enemy spawned at (1200, 1550), health: 4, behavior: PATROL, player_found: yes
+[07:02:53] [INFO] [Player] Detecting weapon pose (frame 3)...
+[07:02:53] [INFO] [Player] Detected weapon: Rifle (default pose)
+[07:02:53] [INFO] [Player] Applied Rifle arm pose: Left=(24, 6), Right=(-2, 6)
+[07:02:53] [INFO] [PenultimateHit] Found player: Player (class: CharacterBody2D)
+[07:02:53] [INFO] [PenultimateHit] Connected to player Damaged signal (C#)
+[07:02:53] [INFO] [PenultimateHit] Connected to player Died signal (C#)
+[07:02:53] [INFO] [LastChance] Found player: Player
+[07:02:53] [INFO] [LastChance] Connected to ThreatSphere threat_detected signal
+[07:02:53] [INFO] [LastChance] Connected to player Damaged signal (C#)
+[07:02:53] [INFO] [LastChance] Connected to player Died signal (C#)
+[07:02:57] [INFO] [ImpactEffects] Scene changed - clearing all stale effect references
+[07:02:57] [INFO] [ImpactEffects] Scene changed - clearing all stale effect references
+[07:02:57] [INFO] [PenultimateHit] Resetting all effects (scene change detected)
+[07:02:57] [INFO] [LastChance] Resetting all effects (scene change detected)
+[07:02:57] [ENEMY] [TutorialEnemy] Death animation component initialized
+[07:02:57] [INFO] [Player.Grenade] Grenade scene loaded from GrenadeManager: Flashbang
+[07:02:57] [INFO] [Player.Grenade] Tutorial level detected - infinite grenades enabled
+[07:02:57] [INFO] [Player.Init] Body sprite found at position: (-4, 0)
+[07:02:57] [INFO] [Player.Init] Head sprite found at position: (-6, -2)
+[07:02:57] [INFO] [Player.Init] Left arm sprite found at position: (24, 6)
+[07:02:57] [INFO] [Player.Init] Right arm sprite found at position: (-2, 6)
+[07:02:57] [INFO] [Player.Debug] Connected to GameManager, debug mode: False
+[07:02:57] [INFO] [Player] Ready! Ammo: 30/30, Grenades: 3/3, Health: 3/4
+[07:02:57] [INFO] [Player.Grenade] Throwing system: VELOCITY-BASED (v2.0 - mouse velocity at release)
+[07:02:57] [INFO] [SoundPropagation] Registered listener: TutorialEnemy (total: 11)
+[07:02:57] [ENEMY] [TutorialEnemy] Registered as sound listener
+[07:02:57] [ENEMY] [TutorialEnemy] Enemy spawned at (700, 900), health: 4, behavior: GUARD, player_found: yes
+[07:02:57] [INFO] [Player] Detecting weapon pose (frame 3)...
+[07:02:57] [INFO] [Player] Detected weapon: Rifle (default pose)
+[07:02:57] [INFO] [Player] Applied Rifle arm pose: Left=(24, 6), Right=(-2, 6)
+[07:02:57] [INFO] [PenultimateHit] Found player: Player (class: CharacterBody2D)
+[07:02:57] [INFO] [PenultimateHit] Connected to player Damaged signal (C#)
+[07:02:57] [INFO] [PenultimateHit] Connected to player Died signal (C#)
+[07:02:57] [INFO] [LastChance] Found player: Player
+[07:02:57] [INFO] [LastChance] Connected to ThreatSphere threat_detected signal
+[07:02:57] [INFO] [LastChance] Connected to player Damaged signal (C#)
+[07:02:57] [INFO] [LastChance] Connected to player Died signal (C#)
+[07:02:58] [ENEMY] [TutorialEnemy] State: IDLE -> COMBAT
+[07:03:01] [ENEMY] [TutorialEnemy] State: COMBAT -> SEEKING_COVER
+[07:03:02] [INFO] [Player.Debug] Debug mode toggled: ON
+[07:03:02] [INFO] [GameManager] Debug mode toggled: ON
+[07:03:04] [INFO] [SoundPropagation] Sound emitted: type=GUNSHOT, pos=(827.8167, 752.7421), source=PLAYER (AssaultRifle), range=1469, listeners=11
+[07:03:04] [INFO] [SoundPropagation] Cleaned up 10 invalid listeners
+[07:03:04] [INFO] [SoundPropagation] Sound result: notified=1, out_of_range=0, self=0, below_threshold=0
+[07:03:04] [INFO] [Bullet] _get_distance_to_shooter: shooter_position=(827.81665, 752.74207), shooter_id=154853706131, bullet_pos=(541.1115, 887.1967)
+[07:03:04] [INFO] [Bullet] Using shooter_position, distance=316,66684
+[07:03:04] [INFO] [Bullet] Distance to wall: 316,66684 (21,56243% of viewport)
+[07:03:04] [INFO] [Bullet] Within ricochet range - trying ricochet first
+[07:03:04] [ENEMY] [TutorialEnemy] Hit taken, health: 3/4
+[07:03:04] [INFO] [ImpactEffects] spawn_blood_effect called at (509.4663, 859.9335), dir=(1, 0), lethal=false
+[07:03:04] [INFO] [ImpactEffects] Blood particle effect instantiated successfully
+[07:03:04] [INFO] [ImpactEffects] Blood decals scheduled: 4 to spawn at particle landing times
+[07:03:04] [INFO] [ImpactEffects] Blood effect spawned at (509.4663, 859.9335) (scale=1)
+[07:03:09] [ENEMY] [TutorialEnemy] State: SEEKING_COVER -> IN_COVER
+[07:03:09] [ENEMY] [TutorialEnemy] State: IN_COVER -> PURSUING
+[07:03:09] [ENEMY] [TutorialEnemy] State: PURSUING -> COMBAT
+[07:03:10] [ENEMY] [TutorialEnemy] State: COMBAT -> PURSUING
+[07:03:10] [ENEMY] [TutorialEnemy] State: PURSUING -> COMBAT
+[07:03:11] [INFO] [SoundPropagation] Sound emitted: type=GUNSHOT, pos=(353.8401, 1189.924), source=PLAYER (AssaultRifle), range=1469, listeners=1
+[07:03:11] [INFO] [SoundPropagation] Sound result: notified=1, out_of_range=0, self=0, below_threshold=0
+[07:03:11] [ENEMY] [TutorialEnemy] Hit taken, health: 2/4
+[07:03:11] [INFO] [ImpactEffects] spawn_blood_effect called at (384.4343, 965.3294), dir=(1, 0), lethal=false
+[07:03:11] [INFO] [ImpactEffects] Blood particle effect instantiated successfully
+[07:03:11] [INFO] [ImpactEffects] Blood decals scheduled: 4 to spawn at particle landing times
+[07:03:11] [INFO] [ImpactEffects] Blood effect spawned at (384.4343, 965.3294) (scale=1)
+[07:03:11] [ENEMY] [TutorialEnemy] State: COMBAT -> RETREATING
+[07:03:14] [INFO] [Player.Reload.Anim] Phase changed to: GrabMagazine (duration: 0,25s)
+[07:03:14] [INFO] [Player.Reload.Anim] Phase changed to: InsertMagazine (duration: 0,30s)
+[07:03:14] [INFO] [Player.Reload.Anim] Phase changed to: PullBolt (duration: 0,35s)
+[07:03:14] [INFO] [Player.Reload.Anim] Phase changed to: ReturnIdle (duration: 0,20s)
+[07:03:14] [INFO] [Player.Reload.Anim] Animation complete, returning to normal
+[07:03:18] [INFO] [PauseMenu] Armory button pressed
+[07:03:18] [INFO] [PauseMenu] Creating new armory menu instance
+[07:03:18] [INFO] [PauseMenu] armory_menu_scene resource path: res://scenes/ui/ArmoryMenu.tscn
+[07:03:18] [INFO] [PauseMenu] Instance created, class: CanvasLayer, name: ArmoryMenu
+[07:03:18] [INFO] [PauseMenu] Script attached: res://scripts/ui/armory_menu.gd
+[07:03:18] [INFO] [PauseMenu] back_pressed signal exists on instance
+[07:03:18] [INFO] [PauseMenu] back_pressed signal connected
+[07:03:18] [INFO] [PauseMenu] Armory menu instance added as child, is_inside_tree: true
+[07:03:18] [INFO] [PauseMenu] _populate_weapon_grid method exists
+[07:03:19] [INFO] [GameManager] Weapon selected: mini_uzi
+[07:03:19] [INFO] [ImpactEffects] Scene changed - clearing all stale effect references
+[07:03:19] [INFO] [ImpactEffects] Scene changed - clearing all stale effect references
+[07:03:19] [INFO] [PenultimateHit] Resetting all effects (scene change detected)
+[07:03:19] [INFO] [LastChance] Resetting all effects (scene change detected)
+[07:03:19] [ENEMY] [TutorialEnemy] Death animation component initialized
+[07:03:19] [INFO] [Player.Grenade] Grenade scene loaded from GrenadeManager: Flashbang
+[07:03:19] [INFO] [Player.Grenade] Tutorial level detected - infinite grenades enabled
+[07:03:19] [INFO] [Player.Init] Body sprite found at position: (-4, 0)
+[07:03:19] [INFO] [Player.Init] Head sprite found at position: (-6, -2)
+[07:03:19] [INFO] [Player.Init] Left arm sprite found at position: (24, 6)
+[07:03:19] [INFO] [Player.Init] Right arm sprite found at position: (-2, 6)
+[07:03:19] [INFO] [Player.Debug] Connected to GameManager, debug mode: True
+[07:03:19] [INFO] [Player] Ready! Ammo: 30/30, Grenades: 3/3, Health: 3/4
+[07:03:19] [INFO] [Player.Grenade] Throwing system: VELOCITY-BASED (v2.0 - mouse velocity at release)
+[07:03:19] [INFO] [SoundPropagation] Registered listener: TutorialEnemy (total: 2)
+[07:03:19] [ENEMY] [TutorialEnemy] Registered as sound listener
+[07:03:19] [ENEMY] [TutorialEnemy] Enemy spawned at (700, 900), health: 2, behavior: GUARD, player_found: yes
+[07:03:19] [INFO] [SoundPropagation] Sound emitted: type=GUNSHOT, pos=(150, 360), source=PLAYER (MiniUzi), range=1469, listeners=2
+[07:03:19] [INFO] [SoundPropagation] Cleaned up 1 invalid listeners
+[07:03:19] [INFO] [SoundPropagation] Sound result: notified=0, out_of_range=0, self=0, below_threshold=1
+[07:03:19] [INFO] [PenultimateHit] Found player: Player (class: CharacterBody2D)
+[07:03:19] [INFO] [PenultimateHit] Connected to player Damaged signal (C#)
+[07:03:19] [INFO] [PenultimateHit] Connected to player Died signal (C#)
+[07:03:19] [INFO] [LastChance] Found player: Player
+[07:03:19] [INFO] [LastChance] Connected to ThreatSphere threat_detected signal
+[07:03:19] [INFO] [LastChance] Connected to player Damaged signal (C#)
+[07:03:19] [INFO] [LastChance] Connected to player Died signal (C#)
+[07:03:19] [INFO] [Player] Detecting weapon pose (frame 3)...
+[07:03:19] [INFO] [Player] Detected weapon: Mini UZI (SMG pose)
+[07:03:19] [INFO] [Player] Applied SMG arm pose: Left=(14, 6), Right=(1, 6)
+[07:03:20] [INFO] [Bullet] _get_distance_to_shooter: shooter_position=(150, 360), shooter_id=374903671381, bullet_pos=(490, 360)
+[07:03:20] [INFO] [Bullet] Using shooter_position, distance=340
+[07:03:20] [INFO] [Bullet] Distance to wall: 340 (23.1512252048708% of viewport)
+[07:03:20] [INFO] [Bullet] Within ricochet range - trying ricochet first
+[07:03:20] [INFO] [Bullet] Caliber cannot penetrate walls
+[07:03:20] [ENEMY] [TutorialEnemy] State: IDLE -> COMBAT
+[07:03:21] [INFO] [ImpactEffects] Scene changed - clearing all stale effect references
+[07:03:21] [INFO] [ImpactEffects] Scene changed - clearing all stale effect references
+[07:03:21] [INFO] [PenultimateHit] Resetting all effects (scene change detected)
+[07:03:21] [INFO] [LastChance] Resetting all effects (scene change detected)
+[07:03:21] [ENEMY] [TutorialEnemy] Death animation component initialized
+[07:03:21] [INFO] [Player.Grenade] Grenade scene loaded from GrenadeManager: Flashbang
+[07:03:21] [INFO] [Player.Grenade] Tutorial level detected - infinite grenades enabled
+[07:03:21] [INFO] [Player.Init] Body sprite found at position: (-4, 0)
+[07:03:21] [INFO] [Player.Init] Head sprite found at position: (-6, -2)
+[07:03:21] [INFO] [Player.Init] Left arm sprite found at position: (24, 6)
+[07:03:21] [INFO] [Player.Init] Right arm sprite found at position: (-2, 6)
+[07:03:21] [INFO] [Player.Debug] Connected to GameManager, debug mode: True
+[07:03:21] [INFO] [Player] Ready! Ammo: 30/30, Grenades: 3/3, Health: 4/4
+[07:03:21] [INFO] [Player.Grenade] Throwing system: VELOCITY-BASED (v2.0 - mouse velocity at release)
+[07:03:21] [INFO] [SoundPropagation] Registered listener: TutorialEnemy (total: 2)
+[07:03:21] [ENEMY] [TutorialEnemy] Registered as sound listener
+[07:03:21] [ENEMY] [TutorialEnemy] Enemy spawned at (700, 900), health: 4, behavior: GUARD, player_found: yes
+[07:03:21] [INFO] [PenultimateHit] Found player: Player (class: CharacterBody2D)
+[07:03:21] [INFO] [PenultimateHit] Connected to player Damaged signal (C#)
+[07:03:21] [INFO] [PenultimateHit] Connected to player Died signal (C#)
+[07:03:21] [INFO] [LastChance] Found player: Player
+[07:03:21] [INFO] [LastChance] Connected to ThreatSphere threat_detected signal
+[07:03:21] [INFO] [LastChance] Connected to player Damaged signal (C#)
+[07:03:21] [INFO] [LastChance] Connected to player Died signal (C#)
+[07:03:21] [INFO] [Player] Detecting weapon pose (frame 3)...
+[07:03:21] [INFO] [Player] Detected weapon: Mini UZI (SMG pose)
+[07:03:21] [INFO] [Player] Applied SMG arm pose: Left=(14, 6), Right=(1, 6)
+[07:03:21] [ENEMY] [TutorialEnemy] State: IDLE -> COMBAT
+[07:03:24] [INFO] [SoundPropagation] Sound emitted: type=GUNSHOT, pos=(373.695, 747.2089), source=PLAYER (MiniUzi), range=1469, listeners=2
+[07:03:24] [INFO] [SoundPropagation] Cleaned up 1 invalid listeners
+[07:03:24] [INFO] [SoundPropagation] Sound result: notified=1, out_of_range=0, self=0, below_threshold=0
+[07:03:24] [ENEMY] [TutorialEnemy] Hit taken, health: 3/4
+[07:03:24] [INFO] [ImpactEffects] spawn_blood_effect called at (488.5321, 811.1484), dir=(0.848152, 0.529754), lethal=false
+[07:03:24] [INFO] [ImpactEffects] Blood particle effect instantiated successfully
+[07:03:24] [INFO] [ImpactEffects] Blood decals scheduled: 4 to spawn at particle landing times
+[07:03:24] [INFO] [ImpactEffects] Blood effect spawned at (488.5321, 811.1484) (scale=0.9)
+[07:03:25] [ENEMY] [TutorialEnemy] State: COMBAT -> RETREATING
+[07:03:26] [INFO] [SoundPropagation] Sound emitted: type=GUNSHOT, pos=(373.695, 747.2089), source=PLAYER (MiniUzi), range=1469, listeners=1
+[07:03:26] [INFO] [SoundPropagation] Sound result: notified=1, out_of_range=0, self=0, below_threshold=0
+[07:03:26] [INFO] [SoundPropagation] Sound emitted: type=GUNSHOT, pos=(373.695, 747.2089), source=PLAYER (MiniUzi), range=1469, listeners=1
+[07:03:26] [INFO] [SoundPropagation] Sound result: notified=1, out_of_range=0, self=0, below_threshold=0
+[07:03:26] [ENEMY] [TutorialEnemy] Hit taken, health: 2/4
+[07:03:26] [INFO] [ImpactEffects] spawn_blood_effect called at (488.5321, 811.1484), dir=(0.848151, 0.529754), lethal=false
+[07:03:26] [INFO] [ImpactEffects] Blood particle effect instantiated successfully
+[07:03:26] [INFO] [ImpactEffects] Blood decals scheduled: 4 to spawn at particle landing times
+[07:03:26] [INFO] [ImpactEffects] Blood effect spawned at (488.5321, 811.1484) (scale=0.9)
+[07:03:26] [ENEMY] [TutorialEnemy] Hit taken, health: 1/4
+[07:03:26] [INFO] [ImpactEffects] spawn_blood_effect called at (488.5321, 811.1484), dir=(0.822011, 0.569471), lethal=false
+[07:03:26] [INFO] [ImpactEffects] Blood particle effect instantiated successfully
+[07:03:26] [INFO] [ImpactEffects] Blood decals scheduled: 4 to spawn at particle landing times
+[07:03:26] [INFO] [ImpactEffects] Blood effect spawned at (488.5321, 811.1484) (scale=0.9)
+[07:03:27] [INFO] [SoundPropagation] Sound emitted: type=GUNSHOT, pos=(373.695, 747.2089), source=PLAYER (MiniUzi), range=1469, listeners=1
+[07:03:27] [INFO] [SoundPropagation] Sound result: notified=1, out_of_range=0, self=0, below_threshold=0
+[07:03:27] [ENEMY] [TutorialEnemy] Hit taken, health: 0/4
+[07:03:27] [INFO] [ImpactEffects] spawn_blood_effect called at (488.5321, 811.1484), dir=(0.848151, 0.529754), lethal=true
+[07:03:27] [INFO] [ImpactEffects] Blood particle effect instantiated successfully
+[07:03:27] [INFO] [ImpactEffects] Blood decals scheduled: 8 to spawn at particle landing times
+[07:03:27] [INFO] [ImpactEffects] Blood effect spawned at (488.5321, 811.1484) (scale=1.35)
+[07:03:27] [ENEMY] [TutorialEnemy] Enemy died (ricochet: false, penetration: false)
+[07:03:27] [INFO] [SoundPropagation] Unregistered listener: TutorialEnemy (remaining: 0)
+[07:03:27] [INFO] [DeathAnim] Started - Angle: 32.0 deg, Index: 14
+[07:03:27] [ENEMY] [TutorialEnemy] Death animation started with hit direction: (0.848151, 0.529754)
+[07:03:28] [ENEMY] [TutorialEnemy] Ragdoll activated
+[07:03:28] [INFO] [DeathAnim] Ragdoll activated at 60% fall progress
+[07:03:28] [INFO] [ImpactEffects] Scene changed - clearing all stale effect references
+[07:03:28] [INFO] [ImpactEffects] Scene changed - clearing all stale effect references
+[07:03:28] [INFO] [PenultimateHit] Resetting all effects (scene change detected)
+[07:03:28] [INFO] [LastChance] Resetting all effects (scene change detected)
+[07:03:28] [ENEMY] [TutorialEnemy] Death animation component initialized
+[07:03:28] [INFO] [Player.Grenade] Grenade scene loaded from GrenadeManager: Flashbang
+[07:03:28] [INFO] [Player.Grenade] Tutorial level detected - infinite grenades enabled
+[07:03:28] [INFO] [Player.Init] Body sprite found at position: (-4, 0)
+[07:03:28] [INFO] [Player.Init] Head sprite found at position: (-6, -2)
+[07:03:28] [INFO] [Player.Init] Left arm sprite found at position: (24, 6)
+[07:03:28] [INFO] [Player.Init] Right arm sprite found at position: (-2, 6)
+[07:03:28] [INFO] [Player.Debug] Connected to GameManager, debug mode: True
+[07:03:28] [INFO] [Player] Ready! Ammo: 30/30, Grenades: 3/3, Health: 4/4
+[07:03:28] [INFO] [Player.Grenade] Throwing system: VELOCITY-BASED (v2.0 - mouse velocity at release)
+[07:03:28] [INFO] [SoundPropagation] Registered listener: TutorialEnemy (total: 1)
+[07:03:28] [ENEMY] [TutorialEnemy] Registered as sound listener
+[07:03:28] [ENEMY] [TutorialEnemy] Enemy spawned at (700, 900), health: 2, behavior: GUARD, player_found: yes
+[07:03:28] [INFO] [PenultimateHit] Found player: Player (class: CharacterBody2D)
+[07:03:28] [INFO] [PenultimateHit] Connected to player Damaged signal (C#)
+[07:03:28] [INFO] [PenultimateHit] Connected to player Died signal (C#)
+[07:03:28] [INFO] [LastChance] Found player: Player
+[07:03:28] [INFO] [LastChance] Connected to ThreatSphere threat_detected signal
+[07:03:28] [INFO] [LastChance] Connected to player Damaged signal (C#)
+[07:03:28] [INFO] [LastChance] Connected to player Died signal (C#)
+[07:03:28] [INFO] [Player] Detecting weapon pose (frame 3)...
+[07:03:28] [INFO] [Player] Detected weapon: Mini UZI (SMG pose)
+[07:03:28] [INFO] [Player] Applied SMG arm pose: Left=(14, 6), Right=(1, 6)
+[07:03:28] [ENEMY] [TutorialEnemy] State: IDLE -> COMBAT
+[07:03:31] [INFO] [SoundPropagation] Sound emitted: type=GUNSHOT, pos=(354.2495, 766.2634), source=PLAYER (MiniUzi), range=1469, listeners=1
+[07:03:31] [INFO] [SoundPropagation] Sound result: notified=1, out_of_range=0, self=0, below_threshold=0
+[07:03:31] [ENEMY] [TutorialEnemy] Hit taken, health: 1/2
+[07:03:31] [INFO] [ImpactEffects] spawn_blood_effect called at (481.5506, 818.3324), dir=(0.861895, 0.507087), lethal=false
+[07:03:31] [INFO] [ImpactEffects] Blood particle effect instantiated successfully
+[07:03:31] [INFO] [ImpactEffects] Blood decals scheduled: 4 to spawn at particle landing times
+[07:03:31] [INFO] [ImpactEffects] Blood effect spawned at (481.5506, 818.3324) (scale=0.9)
+[07:03:31] [ENEMY] [TutorialEnemy] State: COMBAT -> RETREATING
+[07:03:34] [ENEMY] [TutorialEnemy] State: RETREATING -> IN_COVER
+[07:03:34] [ENEMY] [TutorialEnemy] State: IN_COVER -> PURSUING
+[07:03:36] [ENEMY] [TutorialEnemy] State: PURSUING -> COMBAT
+[07:03:36] [ENEMY] [TutorialEnemy] State: COMBAT -> PURSUING
+[07:03:42] [ENEMY] [TutorialEnemy] State: PURSUING -> COMBAT
+[07:03:42] [ENEMY] [TutorialEnemy] State: COMBAT -> PURSUING
+[07:03:57] [ENEMY] [TutorialEnemy] State: PURSUING -> COMBAT
+[07:03:59] [ENEMY] [TutorialEnemy] State: COMBAT -> PURSUING
+[07:04:05] [ENEMY] [TutorialEnemy] State: PURSUING -> COMBAT
+[07:04:05] [ENEMY] [TutorialEnemy] State: COMBAT -> PURSUING
+[07:04:10] [ENEMY] [TutorialEnemy] State: PURSUING -> COMBAT
+[07:04:11] [ENEMY] [TutorialEnemy] State: COMBAT -> PURSUING
+[07:04:13] [ENEMY] [TutorialEnemy] State: PURSUING -> COMBAT
+[07:04:14] [ENEMY] [TutorialEnemy] State: COMBAT -> PURSUING
+[07:04:20] [ENEMY] [TutorialEnemy] State: PURSUING -> COMBAT
+[07:04:20] [ENEMY] [TutorialEnemy] State: COMBAT -> PURSUING
+[07:04:31] [ENEMY] [TutorialEnemy] State: PURSUING -> COMBAT
+[07:04:31] [ENEMY] [TutorialEnemy] State: COMBAT -> PURSUING
+[07:04:34] [ENEMY] [TutorialEnemy] State: PURSUING -> COMBAT
+[07:04:36] [ENEMY] [TutorialEnemy] State: COMBAT -> SEEKING_COVER
+[07:04:37] [ENEMY] [TutorialEnemy] State: SEEKING_COVER -> IN_COVER
+[07:04:37] [ENEMY] [TutorialEnemy] State: IN_COVER -> PURSUING
+[07:04:41] [INFO] [SoundPropagation] Sound emitted: type=GUNSHOT, pos=(581.6688, 932.0662), source=PLAYER (MiniUzi), range=1469, listeners=1
+[07:04:41] [INFO] [SoundPropagation] Sound result: notified=0, out_of_range=0, self=0, below_threshold=1
+[07:04:41] [INFO] [SoundPropagation] Sound emitted: type=GUNSHOT, pos=(581.6688, 932.0662), source=PLAYER (MiniUzi), range=1469, listeners=1
+[07:04:41] [INFO] [SoundPropagation] Sound result: notified=0, out_of_range=0, self=0, below_threshold=1
+[07:04:41] [INFO] [Bullet] _get_distance_to_shooter: shooter_position=(581.6688, 932.0662), shooter_id=460853347841, bullet_pos=(493.0964, 1197.688)
+[07:04:41] [INFO] [Bullet] Using shooter_position, distance=280.000274658203
+[07:04:41] [INFO] [Bullet] Distance to wall: 280.000274658203 (19.0657335765816% of viewport)
+[07:04:41] [INFO] [Bullet] Within ricochet range - trying ricochet first
+[07:04:41] [INFO] [Bullet] Caliber cannot penetrate walls
+[07:04:41] [INFO] [Bullet] _get_distance_to_shooter: shooter_position=(581.6688, 932.0662), shooter_id=460853347841, bullet_pos=(483.8092, 1215.656)
+[07:04:41] [INFO] [Bullet] Using shooter_position, distance=299.999725341797
+[07:04:41] [INFO] [Bullet] Distance to wall: 299.999725341797 (20.4275329493745% of viewport)
+[07:04:41] [INFO] [Bullet] Within ricochet range - trying ricochet first
+[07:04:41] [INFO] [Bullet] Caliber cannot penetrate walls
+[07:04:41] [INFO] [Player.Reload.Anim] Phase changed to: GrabMagazine (duration: 0,25s)
+[07:04:41] [INFO] [Player.Reload.Anim] Phase changed to: InsertMagazine (duration: 0,30s)
+[07:04:41] [INFO] [Player.Reload.Anim] LeftArm: pos=(-1.3525456, 4.316991), target=(2, 6), base=(14, 6)
+[07:04:41] [INFO] [Player.Reload.Anim] RightArm: pos=(1.0000001, 7.15625), target=(1, 8), base=(1, 6)
+[07:04:42] [INFO] [Player.Reload.Anim] Phase changed to: PullBolt (duration: 0,35s)
+[07:04:42] [INFO] [Player.Reload.Anim] Phase changed to: ReturnIdle (duration: 0,20s)
+[07:04:42] [INFO] [Player.Reload.Anim] Animation complete, returning to normal
+[07:04:43] [ENEMY] [TutorialEnemy] State: PURSUING -> COMBAT
+[07:04:45] [ENEMY] [TutorialEnemy] State: COMBAT -> PURSUING
+[07:04:46] [ENEMY] [TutorialEnemy] State: PURSUING -> COMBAT
+[07:04:47] [ENEMY] [TutorialEnemy] State: COMBAT -> PURSUING
+[07:04:48] [ENEMY] [TutorialEnemy] State: PURSUING -> COMBAT
+[07:04:49] [INFO] [SoundPropagation] Sound emitted: type=GUNSHOT, pos=(394.3224, 825.4704), source=PLAYER (MiniUzi), range=1469, listeners=1
+[07:04:49] [INFO] [SoundPropagation] Sound result: notified=1, out_of_range=0, self=0, below_threshold=0
+[07:04:49] [INFO] [SoundPropagation] Sound emitted: type=GUNSHOT, pos=(394.3224, 825.4704), source=PLAYER (MiniUzi), range=1469, listeners=1
+[07:04:49] [INFO] [SoundPropagation] Sound result: notified=1, out_of_range=0, self=0, below_threshold=0
+[07:04:49] [ENEMY] [TutorialEnemy] State: COMBAT -> RETREATING
+[07:04:50] [INFO] [Bullet] _get_distance_to_shooter: shooter_position=(394.3224, 825.4704), shooter_id=460853347841, bullet_pos=(861.4449, 56.18829)
+[07:04:50] [INFO] [Bullet] Using shooter_position, distance=899.999084472656
+[07:04:50] [INFO] [Bullet] Distance to wall: 899.999084472656 (61.2825926141295% of viewport)
+[07:04:50] [INFO] [Bullet] Distance-based penetration chance: 75.1703086168489%
+[07:04:50] [INFO] [Bullet] Penetration failed (distance roll)
+[07:04:51] [ENEMY] [TutorialEnemy] State: RETREATING -> IN_COVER
+[07:04:51] [ENEMY] [TutorialEnemy] State: IN_COVER -> SUPPRESSED
+[07:04:51] [INFO] [Player.Reload.Anim] Phase changed to: GrabMagazine (duration: 0,25s)
+[07:04:51] [INFO] [Player.Reload.Anim] Phase changed to: InsertMagazine (duration: 0,30s)
+[07:04:51] [INFO] [Player.Reload.Anim] Phase changed to: PullBolt (duration: 0,35s)
+[07:04:51] [INFO] [Player.Reload.Anim] Phase changed to: ReturnIdle (duration: 0,20s)
+[07:04:51] [INFO] [Player.Reload.Anim] Animation complete, returning to normal
+[07:04:52] [ENEMY] [TutorialEnemy] State: SUPPRESSED -> IN_COVER
+[07:04:52] [ENEMY] [TutorialEnemy] State: IN_COVER -> PURSUING
+[07:04:58] [ENEMY] [TutorialEnemy] State: PURSUING -> COMBAT
+[07:05:01] [ENEMY] [TutorialEnemy] State: COMBAT -> SEEKING_COVER
+[07:05:01] [ENEMY] [TutorialEnemy] State: SEEKING_COVER -> IN_COVER
+[07:05:01] [ENEMY] [TutorialEnemy] State: IN_COVER -> PURSUING
+[07:05:06] [ENEMY] [TutorialEnemy] State: PURSUING -> COMBAT
+[07:05:07] [ENEMY] [TutorialEnemy] State: COMBAT -> PURSUING
+[07:05:12] [ENEMY] [TutorialEnemy] State: PURSUING -> COMBAT
+[07:05:13] [ENEMY] [TutorialEnemy] State: COMBAT -> PURSUING
+[07:05:19] [INFO] ------------------------------------------------------------
+[07:05:19] [INFO] GAME LOG ENDED: 2026-01-24T07:05:19
+[07:05:19] [INFO] ============================================================
