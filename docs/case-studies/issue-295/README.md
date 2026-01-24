@@ -327,3 +327,81 @@ if not blast_result.is_empty():
 **Next step:** User should download the new Windows Export artifact and verify:
 1. Enemies are working (should be - confirmed working in earlier test)
 2. Enemies no longer throw grenades into walls where blast can't reach player
+
+### 2026-01-24 ~06:00 UTC - ADDITIONAL FEATURES IMPLEMENTED
+
+Based on user feedback (3 new comments on PR), the following features were implemented:
+
+#### 1. Ricochet Calculation for Timer Grenades
+- **Problem**: Enemies couldn't throw flashbangs around corners to reach targets behind cover
+- **Solution**: Added ricochet simulation that calculates 1-2 wall bounces
+- **Implementation** in `grenade_thrower_component.gd`:
+  - `calculate_ricochet_throw()` - Main function to find ricochet path
+  - `_simulate_ricochet()` - Simulates grenade bouncing off walls (bounce factor = 0.4)
+  - `_calculate_throw_distance()` - Estimates travel distance based on grenade physics
+  - `_can_blast_reach_target()` - Verifies blast can reach target from final position
+  - `find_optimal_throw()` - Unified entry point: tries direct throw first, then ricochet
+
+**Physics constants used:**
+```gdscript
+const GRENADE_WALL_BOUNCE: float = 0.4  # From grenade_base.gd wall_bounce
+const MAX_RICOCHET_BOUNCES: int = 2
+const GRENADE_THROW_SPEED: float = 850.0  # From grenade_base.gd max_throw_speed
+const GRENADE_GROUND_FRICTION: float = 300.0  # From grenade_base.gd ground_friction
+```
+
+#### 2. Grenade Cooldown Scaling
+- **Problem**: Enemies with multiple grenades should throw more frequently
+- **Solution**: Dynamic cooldown based on remaining grenade count
+- **Implementation**:
+```gdscript
+func _calculate_cooldown() -> float:
+    var total := offensive_grenades + flashbang_grenades
+    if total >= 2:
+        return BASE_COOLDOWN_DURATION / 2.0  # 5 seconds instead of 10
+    return BASE_COOLDOWN_DURATION  # 10 seconds
+```
+
+#### 3. Infinite Grenades Support
+- **Purpose**: For tutorial/testing scenarios
+- **Implementation**: Grenades with count >= 999 are not decremented when thrown
+```gdscript
+# Don't decrement if infinite (999 or more)
+if flashbang_grenades < 999:
+    flashbang_grenades -= 1
+```
+
+#### 4. Tutorial Enemy Added to TestTier.tscn
+- **Position**: Vector2(700, 1544) - near player spawn area
+- **Configuration**:
+  - Empty weapon: `magazine_size = 0`, `total_magazines = 0`
+  - Infinite flashbangs: `flashbang_grenades = 999`
+  - Guard behavior: `behavior_mode = 1`
+  - Grenades enabled: `enable_grenades = true`
+- **Purpose**: Test grenade mechanics without getting shot
+
+#### 5. Tutorial Obstacles Added
+Three new obstacles near the tutorial area for testing grenade bounces:
+- `TutorialObstacle1`: Vector2(400, 1344) - wide cover above player
+- `TutorialObstacle2`: Vector2(400, 1744) - wide cover below player
+- `TutorialCorner`: Vector2(300, 1444) - square cover for bounce testing
+
+#### 6. Enemy.gd Integration
+- Modified `_check_grenade_throw()` to use `find_optimal_throw()`
+- Modified `_try_grenade_throw_at_sound()` to use `find_optimal_throw()`
+- Added `_transition_to_throwing_grenade_optimal()` for ricochet throws with explicit direction
+
+## Files Changed (This Session)
+
+| File | Changes |
+|------|---------|
+| `scripts/components/grenade_thrower_component.gd` | Ricochet calculation, cooldown scaling, infinite grenade support |
+| `scripts/objects/enemy.gd` | Integration with optimal throw system |
+| `scenes/levels/TestTier.tscn` | Tutorial enemy with infinite flashbangs, test obstacles |
+
+## Test Plan Updates
+
+- [ ] Test ricochet throws: enemy should throw flashbang around corner to hit player behind cover
+- [ ] Test cooldown scaling: enemy with 2+ grenades should throw faster (5s vs 10s cooldown)
+- [ ] Test tutorial enemy: should only throw flashbangs, never shoot (empty weapon)
+- [ ] Test tutorial obstacles: grenades should bounce off added obstacles

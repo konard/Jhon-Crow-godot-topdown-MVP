@@ -1247,6 +1247,51 @@ color = Color(0.5, 0.6, 0.45, 0.3)
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Environment/Cover/SpawnCover"]
 shape = SubResource("RectangleShape2D_spawn_cover")
 
+[node name="TutorialObstacle1" type="StaticBody2D" parent="Environment/Cover"]
+position = Vector2(400, 1344)
+collision_layer = 4
+collision_mask = 0
+
+[node name="ColorRect" type="ColorRect" parent="Environment/Cover/TutorialObstacle1"]
+offset_left = -48.0
+offset_top = -16.0
+offset_right = 48.0
+offset_bottom = 16.0
+color = Color(0.45, 0.35, 0.28, 1)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Environment/Cover/TutorialObstacle1"]
+shape = SubResource("RectangleShape2D_cover_wide")
+
+[node name="TutorialObstacle2" type="StaticBody2D" parent="Environment/Cover"]
+position = Vector2(400, 1744)
+collision_layer = 4
+collision_mask = 0
+
+[node name="ColorRect" type="ColorRect" parent="Environment/Cover/TutorialObstacle2"]
+offset_left = -48.0
+offset_top = -16.0
+offset_right = 48.0
+offset_bottom = 16.0
+color = Color(0.45, 0.35, 0.28, 1)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Environment/Cover/TutorialObstacle2"]
+shape = SubResource("RectangleShape2D_cover_wide")
+
+[node name="TutorialCorner" type="StaticBody2D" parent="Environment/Cover"]
+position = Vector2(300, 1444)
+collision_layer = 4
+collision_mask = 0
+
+[node name="ColorRect" type="ColorRect" parent="Environment/Cover/TutorialCorner"]
+offset_left = -32.0
+offset_top = -32.0
+offset_right = 32.0
+offset_bottom = 32.0
+color = Color(0.45, 0.35, 0.28, 1)
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Environment/Cover/TutorialCorner"]
+shape = SubResource("RectangleShape2D_cover_square")
+
 [node name="Enemies" type="Node2D" parent="Environment"]
 
 [node name="GuardEnemy1" parent="Environment/Enemies" instance=ExtResource("5_enemy")]
@@ -1322,6 +1367,17 @@ patrol_offsets = Array[Vector2]([Vector2(0, 200), Vector2(0, -200)])
 destroy_on_death = true
 enable_flanking = true
 enable_cover = true
+
+[node name="TutorialEnemy" parent="Environment/Enemies" instance=ExtResource("5_enemy")]
+position = Vector2(700, 1544)
+behavior_mode = 1
+destroy_on_death = true
+enable_flanking = false
+enable_cover = true
+enable_grenades = true
+flashbang_grenades = 999
+magazine_size = 0
+total_magazines = 0
 
 [node name="NavigationRegion2D" type="NavigationRegion2D" parent="."]
 navigation_polygon = SubResource("NavigationPolygon_level")

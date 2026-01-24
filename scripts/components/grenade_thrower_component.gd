@@ -65,8 +65,21 @@ signal grenade_exploded(explosion_position: Vector2)
 ## Duration for grenade preparation phase (seconds).
 const PREP_DURATION: float = 0.5
 
-## Duration of cooldown between grenade throws (seconds).
-const COOLDOWN_DURATION: float = 10.0
+## Base duration of cooldown between grenade throws (seconds).
+## Actual cooldown scales with grenade count: more grenades = shorter cooldown.
+const BASE_COOLDOWN_DURATION: float = 10.0
+
+## Wall bounce coefficient for ricochet calculations (must match GrenadeBase.wall_bounce).
+const GRENADE_WALL_BOUNCE: float = 0.4
+
+## Maximum number of ricochets to attempt when direct throw is blocked.
+const MAX_RICOCHET_BOUNCES: int = 2
+
+## Grenade throw speed for ricochet distance calculations (must match GrenadeBase max_throw_speed).
+const GRENADE_THROW_SPEED: float = 850.0
+
+## Ground friction for ricochet distance calculations (must match GrenadeBase ground_friction).
+const GRENADE_GROUND_FRICTION: float = 300.0
 
 ## Duration player must be hidden after suppression to trigger grenade (6 seconds per issue).
 const PLAYER_HIDDEN_TRIGGER_DURATION: float = 6.0
@@ -112,6 +125,9 @@ var _explosion_timer: float = 0.0
 
 ## Whether the grenade was offensive (impacts post-throw behavior).
 var _last_grenade_was_offensive: bool = true
+
+## Explicit throw direction for ricochet throws (if set, overrides target-based direction).
+var _explicit_throw_direction: Vector2 = Vector2.ZERO
 
 
 ## Initialize the component.
@@ -277,6 +293,127 @@ func is_throw_path_clear(throw_origin: Vector2, target_pos: Vector2, grenade_typ
 	return true
 
 
+## Calculate a ricochet throw trajectory that can reach target via 1-2 wall bounces.
+## Returns optimal throw direction and landing position if a valid ricochet is found.
+## This is for timer grenades (flashbangs) that bounce off walls before detonating.
+## @param throw_origin: Position where the enemy is throwing from
+## @param target_pos: Target position to reach via ricochet
+## @param grenade_type: Type of grenade (used for blast radius)
+## @return Dictionary with "success", "throw_direction", "landing_position", "bounces"
+func calculate_ricochet_throw(throw_origin: Vector2, target_pos: Vector2, grenade_type: int = -1) -> Dictionary:
+	var result := {"success": false, "throw_direction": Vector2.ZERO, "landing_position": Vector2.ZERO, "bounces": 0}
+	var parent_node: Node = get_parent()
+	if parent_node == null:
+		return result
+	var world_2d: World2D = parent_node.get_world_2d()
+	if world_2d == null:
+		return result
+	var space_state: PhysicsDirectSpaceState2D = world_2d.direct_space_state
+	if space_state == null:
+		return result
+	var actual_type := grenade_type if grenade_type >= 0 else get_best_grenade_type()
+	var blast_radius := get_blast_radius_for_type(actual_type)
+	# Try different throw angles to find a ricochet path
+	var angle_steps := 16
+	var best_ricochet: Dictionary = result.duplicate()
+	var best_score := 999999.0
+	for i in range(angle_steps):
+		var angle := (float(i) / angle_steps) * TAU
+		var throw_dir := Vector2.from_angle(angle)
+		var ricochet := _simulate_ricochet(throw_origin, throw_dir, target_pos, blast_radius, space_state)
+		if ricochet["success"]:
+			var dist := ricochet["landing_position"].distance_to(target_pos)
+			if dist < best_score:
+				best_score = dist
+				best_ricochet = ricochet
+	if best_ricochet["success"]:
+		_log("Ricochet found: %d bounces, landing %.1f px from target" % [best_ricochet["bounces"], best_score])
+	return best_ricochet
+
+
+## Simulate a ricochet trajectory from throw_origin in throw_direction.
+## @return Dictionary with simulation result
+func _simulate_ricochet(throw_origin: Vector2, throw_dir: Vector2, target_pos: Vector2, blast_radius: float, space_state: PhysicsDirectSpaceState2D) -> Dictionary:
+	var result := {"success": false, "throw_direction": throw_dir, "landing_position": Vector2.ZERO, "bounces": 0}
+	var current_pos := throw_origin + throw_dir * grenade_spawn_offset
+	var current_dir := throw_dir
+	var remaining_distance := _calculate_throw_distance(GRENADE_THROW_SPEED)
+	for bounce in range(MAX_RICOCHET_BOUNCES + 1):
+		var query := PhysicsRayQueryParameters2D.new()
+		query.from = current_pos
+		query.to = current_pos + current_dir * remaining_distance
+		query.collision_mask = 4  # Obstacles
+		var ray_result: Dictionary = space_state.intersect_ray(query)
+		if ray_result.is_empty():
+			# No wall hit - grenade lands at end of trajectory
+			var landing := current_pos + current_dir * remaining_distance
+			if landing.distance_to(target_pos) <= blast_radius:
+				result["success"] = true
+				result["landing_position"] = landing
+				result["bounces"] = bounce
+				# Verify blast can reach target (no wall blocking)
+				if _can_blast_reach_target(landing, target_pos, space_state):
+					return result
+			return result
+		# Wall hit - check if we can bounce
+		var hit_pos: Vector2 = ray_result["position"]
+		var hit_normal: Vector2 = ray_result["normal"]
+		var traveled := current_pos.distance_to(hit_pos)
+		remaining_distance = (remaining_distance - traveled) * GRENADE_WALL_BOUNCE
+		if remaining_distance < 50.0:
+			# Not enough energy to continue - grenade lands near wall
+			var landing := hit_pos + hit_normal * 10.0
+			if landing.distance_to(target_pos) <= blast_radius and _can_blast_reach_target(landing, target_pos, space_state):
+				result["success"] = true
+				result["landing_position"] = landing
+				result["bounces"] = bounce + 1
+			return result
+		# Calculate bounce direction
+		current_pos = hit_pos + hit_normal * 5.0
+		current_dir = current_dir.bounce(hit_normal)
+		result["bounces"] = bounce + 1
+	return result
+
+
+## Calculate the maximum throw distance based on throw speed and friction.
+## Formula: distance = speed² / (2 × friction)
+func _calculate_throw_distance(throw_speed: float) -> float:
+	return (throw_speed * throw_speed) / (2.0 * GRENADE_GROUND_FRICTION)
+
+
+## Check if blast from explosion position can reach target (line of sight check).
+func _can_blast_reach_target(explosion_pos: Vector2, target_pos: Vector2, space_state: PhysicsDirectSpaceState2D) -> bool:
+	var query := PhysicsRayQueryParameters2D.new()
+	query.from = explosion_pos
+	query.to = target_pos
+	query.collision_mask = 4
+	return space_state.intersect_ray(query).is_empty()
+
+
+## Find optimal throw for reaching target - tries direct throw first, then ricochet.
+## @return Dictionary with "success", "throw_direction", "landing_position", "is_ricochet", "bounces"
+func find_optimal_throw(throw_origin: Vector2, target_pos: Vector2, grenade_type: int = -1) -> Dictionary:
+	var result := {"success": false, "throw_direction": Vector2.ZERO, "landing_position": target_pos, "is_ricochet": false, "bounces": 0}
+	# First try direct throw
+	if is_throw_path_clear(throw_origin, target_pos, grenade_type):
+		result["success"] = true
+		result["throw_direction"] = (target_pos - throw_origin).normalized()
+		result["landing_position"] = target_pos
+		return result
+	# Direct throw blocked - try ricochet for timer grenades (flashbangs)
+	var actual_type := grenade_type if grenade_type >= 0 else get_best_grenade_type()
+	if actual_type == GrenadeType.FLASHBANG:
+		var ricochet := calculate_ricochet_throw(throw_origin, target_pos, actual_type)
+		if ricochet["success"]:
+			result["success"] = true
+			result["throw_direction"] = ricochet["throw_direction"]
+			result["landing_position"] = ricochet["landing_position"]
+			result["is_ricochet"] = true
+			result["bounces"] = ricochet["bounces"]
+			_log("Using ricochet throw: %d bounces to reach target" % ricochet["bounces"])
+	return result
+
+
 ## Get the blast radius for a specific grenade type.
 func get_blast_radius_for_type(grenade_type: int) -> float:
 	if grenade_type == GrenadeType.OFFENSIVE:
@@ -379,6 +516,7 @@ func begin_throw(target_pos: Vector2, grenade_type: int) -> void:
 	_prep_timer = 0.0
 	_is_throwing = true
 	_last_grenade_was_offensive = (grenade_type == GrenadeType.OFFENSIVE)
+	_explicit_throw_direction = Vector2.ZERO  # No explicit direction, use target-based
 
 	var type_name: String = "frag" if grenade_type == GrenadeType.OFFENSIVE else "flashbang"
 	_log("Preparing to throw %s grenade at %s" % [type_name, target_pos])
@@ -387,6 +525,23 @@ func begin_throw(target_pos: Vector2, grenade_type: int) -> void:
 	var blast_radius := get_current_blast_radius()
 	notify_allies_of_grenade.emit(target_pos, blast_radius)
 	_log("Notifying allies: blast zone at %s, radius %.0f" % [target_pos, blast_radius])
+
+
+## Begin throwing a grenade with explicit throw direction (for ricochet throws).
+func begin_throw_with_direction(landing_pos: Vector2, grenade_type: int, throw_dir: Vector2) -> void:
+	_target_position = landing_pos
+	_type_to_throw = grenade_type
+	_prep_timer = 0.0
+	_is_throwing = true
+	_last_grenade_was_offensive = (grenade_type == GrenadeType.OFFENSIVE)
+	_explicit_throw_direction = throw_dir.normalized()
+
+	var type_name: String = "frag" if grenade_type == GrenadeType.OFFENSIVE else "flashbang"
+	_log("Preparing ricochet throw: %s grenade toward %s, landing at %s" % [type_name, throw_dir, landing_pos])
+
+	var blast_radius := get_current_blast_radius()
+	notify_allies_of_grenade.emit(landing_pos, blast_radius)
+	_log("Notifying allies: blast zone at %s, radius %.0f" % [landing_pos, blast_radius])
 
 
 ## Update throw preparation. Returns true when throw should execute.
@@ -412,7 +567,9 @@ func execute_throw(throw_origin: Vector2) -> RigidBody2D:
 		if offensive_grenades <= 0:
 			_log("Cannot throw frag grenade - none left")
 			return null
-		offensive_grenades -= 1
+		# Don't decrement if infinite (999 or more)
+		if offensive_grenades < 999:
+			offensive_grenades -= 1
 
 		if frag_grenade_scene:
 			grenade_scene = frag_grenade_scene
@@ -423,7 +580,9 @@ func execute_throw(throw_origin: Vector2) -> RigidBody2D:
 		if flashbang_grenades <= 0:
 			_log("Cannot throw flashbang - none left")
 			return null
-		flashbang_grenades -= 1
+		# Don't decrement if infinite (999 or more)
+		if flashbang_grenades < 999:
+			flashbang_grenades -= 1
 
 		if flashbang_grenade_scene:
 			grenade_scene = flashbang_grenade_scene
@@ -440,26 +599,26 @@ func execute_throw(throw_origin: Vector2) -> RigidBody2D:
 		_log("ERROR: Failed to instantiate grenade")
 		return null
 
+	# Determine throw direction: use explicit direction for ricochet, otherwise target-based
+	var base_direction: Vector2
+	if _explicit_throw_direction != Vector2.ZERO:
+		base_direction = _explicit_throw_direction
+		_log("Using explicit ricochet direction: %s" % base_direction)
+	else:
+		base_direction = (_target_position - throw_origin).normalized()
+
 	# Apply throw deviation (±5° per issue requirement)
-	var direction_to_target := (_target_position - throw_origin).normalized()
 	var deviation_radians := deg_to_rad(randf_range(-throw_deviation, throw_deviation))
-	var deviated_direction := direction_to_target.rotated(deviation_radians)
+	var deviated_direction := base_direction.rotated(deviation_radians)
 
 	# Calculate throw distance (clamped to throw range)
 	var distance_to_target := throw_origin.distance_to(_target_position)
 	var actual_distance := minf(distance_to_target, throw_range)
 
 	# Position grenade at throw origin with larger offset to avoid collision with thrower
-	# This prevents the grenade from immediately colliding with the enemy who threw it
 	grenade.global_position = throw_origin + deviated_direction * grenade_spawn_offset
 
 	# Store throw data for deferred execution (after grenade is added to scene)
-	# NOTE: Using actual_distance directly (not * 0.5) for proper throw strength
-	# The legacy throw_grenade() uses drag_distance * drag_to_speed_multiplier (2.0)
-	# So for a 400px target, we need 200 drag_distance to get 400 speed
-	# Adjusted formula: actual_distance / drag_to_speed_multiplier = actual_distance / 2.0
-	# But this was causing weak throws. The real issue is the speed calculation.
-	# For proper throw: use actual_distance as-is, the grenade physics will handle it.
 	grenade.set_meta("throw_direction", deviated_direction)
 	grenade.set_meta("throw_distance", actual_distance)
 
@@ -505,10 +664,21 @@ static func activate_thrown_grenade(grenade: RigidBody2D) -> void:
 
 
 ## Finish throwing and start cooldown.
+## Cooldown scales with remaining grenades: more grenades = shorter cooldown.
 func _finish_throw() -> void:
-	_cooldown_timer = COOLDOWN_DURATION
+	_cooldown_timer = _calculate_cooldown()
 	_is_throwing = false
 	throw_completed.emit()
+
+
+## Calculate cooldown duration based on remaining grenade count.
+## Per issue #295: if enemy has 2+ grenades, cooldown is halved (each grenade worth less).
+## Formula: cooldown = base_cooldown / max(1, total_grenades)
+func _calculate_cooldown() -> float:
+	var total := offensive_grenades + flashbang_grenades
+	if total >= 2:
+		return BASE_COOLDOWN_DURATION / 2.0
+	return BASE_COOLDOWN_DURATION
 
 
 ## Cancel the current throw.

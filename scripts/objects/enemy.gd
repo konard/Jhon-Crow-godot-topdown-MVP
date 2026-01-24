@@ -848,9 +848,7 @@ func _setup_threat_sphere() -> void:
 	_threat_sphere.area_entered.connect(_on_threat_area_entered)
 	_threat_sphere.area_exited.connect(_on_threat_area_exited)
 
-## Register this enemy as a listener for in-game sound propagation.
-## This allows the enemy to react to sounds like gunshots even when not in direct combat.
-## Uses call_deferred to ensure SoundPropagation autoload is fully initialized.
+## Register this enemy as a listener for in-game sound propagation (deferred for autoload init).
 func _register_sound_listener() -> void:
 	call_deferred("_deferred_register_sound_listener")
 
@@ -871,28 +869,12 @@ func _unregister_sound_listener() -> void:
 	if sound_propagation and sound_propagation.has_method("unregister_listener"):
 		sound_propagation.unregister_listener(self)
 
-## Called by SoundPropagation when a sound is heard within range.
-## This is the callback that allows the enemy to react to in-game sounds.
-##
-## Parameters:
-## - sound_type: The type of sound (from SoundPropagation.SoundType enum)
-## - position: World position where the sound originated
-## - source_type: Whether sound is from PLAYER, ENEMY, or NEUTRAL (from SoundPropagation.SourceType)
-## - source_node: The node that produced the sound (can be null)
+## Called by SoundPropagation when a sound is heard within range (delegates to intensity version).
 func on_sound_heard(sound_type: int, position: Vector2, source_type: int, source_node: Node2D) -> void:
 	# Default to full intensity if called without intensity parameter
 	on_sound_heard_with_intensity(sound_type, position, source_type, source_node, 1.0)
 
-## Called by SoundPropagation when a sound is heard within range (with intensity).
-## This version includes physically-calculated sound intensity.
-##
-## Parameters:
-## - sound_type: The type of sound (from SoundPropagation.SoundType enum)
-##   0=GUNSHOT, 1=EXPLOSION, 2=FOOTSTEP, 3=RELOAD, 4=IMPACT, 5=EMPTY_CLICK, 6=RELOAD_COMPLETE
-## - position: World position where the sound originated
-## - source_type: Whether sound is from PLAYER, ENEMY, or NEUTRAL (from SoundPropagation.SourceType)
-## - source_node: The node that produced the sound (can be null)
-## - intensity: Sound intensity from 0.0 to 1.0 based on inverse square law
+## Called by SoundPropagation when a sound is heard (with physically-calculated intensity 0.0-1.0).
 func on_sound_heard_with_intensity(sound_type: int, position: Vector2, source_type: int, source_node: Node2D, intensity: float) -> void:
 	# Only react if alive
 	if not _is_alive:
@@ -2808,19 +2790,23 @@ func _exit_cover_for_grenade_throw() -> void:
 		_needs_grenade_throw_position = false
 
 ## Try to throw a grenade at a sound position (trigger #4: reload/empty click).
+## Uses optimal throw calculation which includes ricochet for timer grenades.
 func _try_grenade_throw_at_sound(sound_position: Vector2) -> void:
 	if not _grenade_thrower:
 		return
 	var distance := global_position.distance_to(sound_position)
 	if distance > _grenade_thrower.throw_range or _grenade_thrower.is_on_cooldown():
 		return
-	if not _grenade_thrower.is_throw_path_clear(global_position, sound_position):
+	var grenade_type := _grenade_thrower.get_best_grenade_type()
+	var optimal := _grenade_thrower.find_optimal_throw(global_position, sound_position, grenade_type)
+	if optimal["success"]:
+		_transition_to_throwing_grenade_optimal(optimal["landing_position"], grenade_type, optimal["throw_direction"])
+	else:
 		_needs_grenade_throw_position = true
 		_grenade_throw_target = sound_position
-		return
-	_transition_to_throwing_grenade(sound_position, _grenade_thrower.get_best_grenade_type())
 
 ## Check if grenade throw should happen. Returns true if transitioned.
+## Uses optimal throw calculation which includes ricochet for timer grenades.
 func _check_grenade_throw() -> bool:
 	if not _grenade_thrower or not _player:
 		return false
@@ -2828,12 +2814,14 @@ func _check_grenade_throw() -> bool:
 	var is_suppressed := _current_state == AIState.SUPPRESSED
 	if not _grenade_thrower.should_throw(_current_health, _can_see_player, is_suppressed, dist, global_position, _player.global_position):
 		return false
-	if not _grenade_thrower.is_throw_path_clear(global_position, _player.global_position):
-		_needs_grenade_throw_position = true
-		_grenade_throw_target = _player.global_position
-		return false
-	_transition_to_throwing_grenade(_player.global_position, _grenade_thrower.get_best_grenade_type())
-	return true
+	var grenade_type := _grenade_thrower.get_best_grenade_type()
+	var optimal := _grenade_thrower.find_optimal_throw(global_position, _player.global_position, grenade_type)
+	if optimal["success"]:
+		_transition_to_throwing_grenade_optimal(optimal["landing_position"], grenade_type, optimal["throw_direction"])
+		return true
+	_needs_grenade_throw_position = true
+	_grenade_throw_target = _player.global_position
+	return false
 
 ## Transition to THROWING_GRENADE state.
 func _transition_to_throwing_grenade(target_pos: Vector2, grenade_type: int) -> void:
@@ -2841,6 +2829,13 @@ func _transition_to_throwing_grenade(target_pos: Vector2, grenade_type: int) -> 
 	if _grenade_thrower:
 		_grenade_thrower.begin_throw(target_pos, grenade_type)
 	_log_debug("Entering THROWING_GRENADE state: target=%s" % target_pos)
+
+## Transition to THROWING_GRENADE state with explicit throw direction (for ricochet throws).
+func _transition_to_throwing_grenade_optimal(landing_pos: Vector2, grenade_type: int, throw_dir: Vector2) -> void:
+	_current_state = AIState.THROWING_GRENADE
+	if _grenade_thrower:
+		_grenade_thrower.begin_throw_with_direction(landing_pos, grenade_type, throw_dir)
+	_log_debug("Entering THROWING_GRENADE state (optimal): landing=%s, dir=%s" % [landing_pos, throw_dir])
 
 ## Process THROWING_GRENADE state - prepare, throw, then post-throw behavior.
 func _process_throwing_grenade_state(delta: float) -> void:
