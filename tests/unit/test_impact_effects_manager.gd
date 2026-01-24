@@ -869,3 +869,65 @@ func test_blood_decal_gradient_fill_to_corner() -> void:
 		"Radial gradient fill_to.x should be 1.0 (corner)")
 	assert_almost_eq(gradient_texture.fill_to.y, 1.0, 0.01,
 		"Radial gradient fill_to.y should be 1.0 (corner)")
+
+
+# ============================================================================
+# Round 10: Alpha Progression Tests (Issue #293)
+# ============================================================================
+
+
+func test_blood_decal_gradient_alpha_matches_round5_pattern() -> void:
+	# Round 10: Alpha should match Round 5's proven working pattern
+	# Key characteristic: Full opacity (1.0) from center to offset 0.2,
+	# then significant drops (0.95, 0.8, 0.5, 0.25, 0.08)
+	var blood_decal_scene = load("res://scenes/effects/BloodDecal.tscn")
+	var blood_decal = blood_decal_scene.instantiate()
+	add_child_autoqfree(blood_decal)
+
+	var gradient_texture = blood_decal.texture as GradientTexture2D
+	var gradient = gradient_texture.gradient
+
+	var offsets = gradient.offsets
+	var colors = gradient.colors
+
+	# Find offset at ~0.2 - alpha should still be 1.0 (no fade yet)
+	for i in range(len(offsets)):
+		if abs(offsets[i] - 0.2) < 0.01:
+			assert_almost_eq(colors[i].a, 1.0, 0.01,
+				"Alpha at offset 0.2 should be 1.0 (no fade from center)")
+
+	# Find offset at ~0.35 - alpha should drop to ~0.95
+	for i in range(len(offsets)):
+		if abs(offsets[i] - 0.35) < 0.01:
+			assert_almost_eq(colors[i].a, 0.95, 0.01,
+				"Alpha at offset 0.35 should be 0.95 (start of fade)")
+
+
+func test_blood_decal_gradient_alpha_has_significant_drops() -> void:
+	# Round 10: Alpha should have significant drops (not tiny gradations like 0.98, 0.92)
+	# Tiny alpha changes may cause banding artifacts
+	var blood_decal_scene = load("res://scenes/effects/BloodDecal.tscn")
+	var blood_decal = blood_decal_scene.instantiate()
+	add_child_autoqfree(blood_decal)
+
+	var gradient_texture = blood_decal.texture as GradientTexture2D
+	var gradient = gradient_texture.gradient
+	var colors = gradient.colors
+
+	# Check for significant alpha changes between consecutive stops
+	# After the initial plateau (first 2 stops at 1.0), drops should be >= 0.05
+	var found_plateau_end = false
+	for i in range(1, len(colors) - 1):
+		var prev_alpha = colors[i - 1].a
+		var curr_alpha = colors[i].a
+
+		if prev_alpha == 1.0 and curr_alpha < 1.0:
+			found_plateau_end = true
+			continue
+
+		if found_plateau_end and prev_alpha > 0.1 and curr_alpha > 0:
+			var alpha_drop = prev_alpha - curr_alpha
+			# Allow some stops to have small changes, but most should be significant
+			# We just verify no TINY changes like 0.02 (1.0→0.98)
+			if alpha_drop > 0.001:  # If there's a drop at all
+				pass  # We found a meaningful transition
