@@ -377,3 +377,87 @@ func test_cluster_drops_uses_earliest_land_time() -> void:
 	var result: Array = impact_manager._cluster_drops_into_splatters(particle_data)
 	assert_eq(result.size(), 1, "Should create one merged splatter")
 	assert_eq(result[0]["earliest_land_time"], 0.3, "Should use earliest land time")
+
+
+# ============================================================================
+# Satellite Drop Tests (Issue #293 - Realistic Blood Effects)
+# ============================================================================
+
+
+func test_satellite_drop_probability_constant_exists() -> void:
+	# Verify the constant for satellite drop probability exists
+	assert_true("SATELLITE_DROP_PROBABILITY" in impact_manager,
+		"Manager should have SATELLITE_DROP_PROBABILITY constant")
+
+
+func test_satellite_drop_distance_constants_exist() -> void:
+	# Verify distance constants for satellite drops exist
+	assert_true("SATELLITE_DROP_MIN_DISTANCE" in impact_manager,
+		"Manager should have SATELLITE_DROP_MIN_DISTANCE constant")
+	assert_true("SATELLITE_DROP_MAX_DISTANCE" in impact_manager,
+		"Manager should have SATELLITE_DROP_MAX_DISTANCE constant")
+
+
+func test_satellite_drop_scale_constants_exist() -> void:
+	# Verify scale constants for satellite drops exist
+	assert_true("SATELLITE_DROP_SCALE_MIN" in impact_manager,
+		"Manager should have SATELLITE_DROP_SCALE_MIN constant")
+	assert_true("SATELLITE_DROP_SCALE_MAX" in impact_manager,
+		"Manager should have SATELLITE_DROP_SCALE_MAX constant")
+
+
+func test_spawn_satellite_drops_method_exists() -> void:
+	# The satellite drop spawning method should exist
+	assert_true(impact_manager.has_method("_spawn_satellite_drops"),
+		"Manager should have _spawn_satellite_drops method")
+
+
+func test_spawn_satellite_drops_empty_data_returns_zero() -> void:
+	# Empty input should return 0 satellites
+	var result: int = impact_manager._spawn_satellite_drops(Vector2.ZERO, [], [])
+	assert_eq(result, 0, "Empty input should return 0 satellite count")
+
+
+func test_outermost_drop_percentile_constant_exists() -> void:
+	# Verify the constant for outermost drop detection exists
+	assert_true("OUTERMOST_DROP_PERCENTILE" in impact_manager,
+		"Manager should have OUTERMOST_DROP_PERCENTILE constant")
+
+
+# ============================================================================
+# Crown/Blossom Effect Tests (Issue #293 - Realistic Blood Effects)
+# ============================================================================
+
+
+func test_crown_effect_probability_constant_exists() -> void:
+	# Verify the constant for crown effect probability exists
+	assert_true("CROWN_EFFECT_PROBABILITY" in impact_manager,
+		"Manager should have CROWN_EFFECT_PROBABILITY constant")
+
+
+func test_crown_spine_count_constant_exists() -> void:
+	# Verify the constant for crown spine count exists
+	assert_true("CROWN_SPINE_COUNT" in impact_manager,
+		"Manager should have CROWN_SPINE_COUNT constant")
+
+
+func test_crown_spine_scale_constants_exist() -> void:
+	# Verify scale constants for crown spines exist
+	assert_true("CROWN_SPINE_SCALE_WIDTH" in impact_manager,
+		"Manager should have CROWN_SPINE_SCALE_WIDTH constant")
+	assert_true("CROWN_SPINE_SCALE_LENGTH_MIN" in impact_manager,
+		"Manager should have CROWN_SPINE_SCALE_LENGTH_MIN constant")
+	assert_true("CROWN_SPINE_SCALE_LENGTH_MAX" in impact_manager,
+		"Manager should have CROWN_SPINE_SCALE_LENGTH_MAX constant")
+
+
+func test_crown_spine_distance_constant_exists() -> void:
+	# Verify distance constant for crown spine placement exists
+	assert_true("CROWN_SPINE_DISTANCE" in impact_manager,
+		"Manager should have CROWN_SPINE_DISTANCE constant")
+
+
+func test_spawn_crown_effect_method_exists() -> void:
+	# The crown effect spawning method should exist
+	assert_true(impact_manager.has_method("_spawn_crown_effect"),
+		"Manager should have _spawn_crown_effect method")

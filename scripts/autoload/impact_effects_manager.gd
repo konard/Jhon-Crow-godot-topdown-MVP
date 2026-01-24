@@ -34,6 +34,39 @@ const DECAL_MERGE_DISTANCE: float = 12.0
 ## Maximum number of merged decals (splatters) to create from nearby drops.
 const MAX_MERGED_SPLATTERS: int = 10
 
+## Probability of spawning satellite drops near main drops (0.0 to 1.0).
+const SATELLITE_DROP_PROBABILITY: float = 0.4
+
+## Maximum distance for satellite drops from their parent drop (in pixels).
+const SATELLITE_DROP_MAX_DISTANCE: float = 8.0
+
+## Minimum distance for satellite drops from their parent drop (in pixels).
+const SATELLITE_DROP_MIN_DISTANCE: float = 3.0
+
+## Scale range for satellite drops (smaller than main drops).
+const SATELLITE_DROP_SCALE_MIN: float = 0.15
+const SATELLITE_DROP_SCALE_MAX: float = 0.35
+
+## Number of satellite drops to spawn per main outermost drop.
+const SATELLITE_DROPS_PER_MAIN: int = 3
+
+## Distance threshold to consider a drop as "outermost" (percentile from center).
+const OUTERMOST_DROP_PERCENTILE: float = 0.7
+
+## Probability of spawning crown/blossom spines around larger drops.
+const CROWN_EFFECT_PROBABILITY: float = 0.25
+
+## Number of spines in a crown/blossom effect.
+const CROWN_SPINE_COUNT: int = 5
+
+## Scale range for crown spines (thin elongated drops).
+const CROWN_SPINE_SCALE_WIDTH: float = 0.12
+const CROWN_SPINE_SCALE_LENGTH_MIN: float = 0.4
+const CROWN_SPINE_SCALE_LENGTH_MAX: float = 0.7
+
+## Distance from center for crown spine placement.
+const CROWN_SPINE_DISTANCE: float = 4.0
+
 ## Maximum distance to check for walls for blood splatters (in pixels).
 const WALL_SPLATTER_CHECK_DISTANCE: float = 100.0
 
@@ -410,7 +443,9 @@ func _spawn_decals_with_params(origin: Vector2, hit_direction: Vector2, initial_
 	# Third pass: spawn individual drops with directional elongation and merged splatters
 	var decals_scheduled := 0
 
-	# Spawn merged splatters (larger combined drops)
+	# Spawn merged splatters (complex blobs from multiple overlapping decals)
+	# When drops merge, they create irregular blob shapes, not perfect circles.
+	# We achieve this by spawning multiple overlapping decals with slight offsets.
 	for splatter in merged_splatters:
 		var center_pos: Vector2 = splatter["center"]
 		var avg_velocity: Vector2 = splatter["avg_velocity"]
@@ -423,15 +458,44 @@ func _spawn_decals_with_params(origin: Vector2, hit_direction: Vector2, initial_
 		var elongation: float = clampf(1.0 + speed / 300.0, 1.0, 3.0)
 
 		# Rotation aligned with velocity direction for splash effect
-		var decal_rotation: float = avg_velocity.angle() if speed > 10.0 else randf() * TAU
+		var base_rotation: float = avg_velocity.angle() if speed > 10.0 else randf() * TAU
 
 		# Scale based on number of merged drops (more drops = larger splatter)
-		var base_scale: float = 0.8 + (drop_count * 0.15)
-		var decal_scale_x: float = base_scale * elongation
-		var decal_scale_y: float = base_scale
+		var base_scale: float = 0.8 + (drop_count * 0.12)
 
-		_schedule_delayed_decal_directional(origin, center_pos, decal_rotation, decal_scale_x, decal_scale_y, earliest_land_time)
-		decals_scheduled += 1
+		# For merged puddles with 3+ drops, create complex blob by spawning multiple overlapping decals
+		# This creates the "unified blob with gradient contour" effect requested
+		var num_overlapping_decals := 1
+		if drop_count >= 3:
+			num_overlapping_decals = mini(drop_count - 1, 4)  # 2-4 overlapping decals for complex shape
+
+		for k in range(num_overlapping_decals):
+			var offset := Vector2.ZERO
+			var rotation_offset: float = 0.0
+			var scale_variation: float = 1.0
+
+			if k > 0:
+				# Offset subsequent decals slightly for irregular blob shape
+				var offset_angle: float = randf() * TAU
+				var offset_dist: float = randf_range(2.0, 5.0)
+				offset = Vector2.RIGHT.rotated(offset_angle) * offset_dist
+
+				# Vary rotation slightly for more organic shape
+				rotation_offset = randf_range(-0.3, 0.3)
+
+				# Vary scale slightly
+				scale_variation = randf_range(0.85, 1.15)
+
+			var decal_pos: Vector2 = center_pos + offset
+			var decal_rotation: float = base_rotation + rotation_offset
+			var decal_scale_x: float = base_scale * elongation * scale_variation
+			var decal_scale_y: float = base_scale * scale_variation
+
+			# Stagger timing slightly for overlapping decals
+			var time_offset: float = k * 0.01
+
+			_schedule_delayed_decal_directional(origin, decal_pos, decal_rotation, decal_scale_x, decal_scale_y, earliest_land_time + time_offset)
+			decals_scheduled += 1
 
 	# Spawn remaining individual drops with directional elongation
 	for particle in particle_data:
@@ -458,9 +522,19 @@ func _spawn_decals_with_params(origin: Vector2, hit_direction: Vector2, initial_
 		_schedule_delayed_decal_directional(origin, landing_pos, decal_rotation, decal_scale_x, decal_scale_y, land_time)
 		decals_scheduled += 1
 
-	_log_info("Blood decals scheduled: %d (%d merged splatters)" % [decals_scheduled, merged_splatters.size()])
+		# Crown/blossom effect: larger drops may have radiating spines
+		# This occurs when blood impacts at nearly 90 degrees and creates a crown-like splash
+		if base_scale > 0.9 and randf() < CROWN_EFFECT_PROBABILITY:
+			var crown_count := _spawn_crown_effect(origin, landing_pos, decal_rotation, base_scale, land_time)
+			decals_scheduled += crown_count
+
+	# Fourth pass: spawn satellite drops near outermost drops for realistic secondary spatter
+	var satellite_count := _spawn_satellite_drops(origin, particle_data, merged_splatters)
+	decals_scheduled += satellite_count
+
+	_log_info("Blood decals scheduled: %d (%d merged splatters, %d satellite drops)" % [decals_scheduled, merged_splatters.size(), satellite_count])
 	if _debug_effects:
-		print("[ImpactEffectsManager] Blood decals scheduled: ", decals_scheduled, " (", merged_splatters.size(), " merged)")
+		print("[ImpactEffectsManager] Blood decals scheduled: ", decals_scheduled, " (", merged_splatters.size(), " merged, ", satellite_count, " satellites)")
 
 
 ## Clusters nearby drops into merged splatters.
@@ -524,6 +598,135 @@ func _cluster_drops_into_splatters(particle_data: Array) -> Array:
 			particle_data[i]["merged"] = false
 
 	return splatters
+
+
+## Spawns satellite drops near outermost main drops for realistic secondary spatter effect.
+## Satellite drops are small secondary drops that form when blood impacts a surface.
+## Based on forensic blood spatter analysis: "satellite spatter" forms as blood separates
+## from the rim of the main drop during impact, creating small splashes around the main stain.
+## @param origin: The origin point of the blood spray.
+## @param particle_data: Array of particle landing data.
+## @param merged_splatters: Array of merged splatter data.
+## @return: Number of satellite drops spawned.
+func _spawn_satellite_drops(origin: Vector2, particle_data: Array, merged_splatters: Array) -> int:
+	if _blood_decal_scene == null:
+		return 0
+
+	var satellite_count := 0
+
+	# Calculate center of all drops to determine "outermost" drops
+	var center := Vector2.ZERO
+	var valid_drops: Array = []
+
+	for particle in particle_data:
+		if not particle["merged"]:
+			valid_drops.append(particle)
+			center += particle["position"]
+
+	for splatter in merged_splatters:
+		valid_drops.append({"position": splatter["center"], "velocity": splatter["avg_velocity"], "land_time": splatter["earliest_land_time"]})
+		center += splatter["center"]
+
+	if valid_drops.size() == 0:
+		return 0
+
+	center /= valid_drops.size()
+
+	# Calculate distances from center for each drop
+	var distances: Array = []
+	for drop in valid_drops:
+		distances.append(drop["position"].distance_to(center))
+
+	# Sort distances to find the threshold for "outermost" drops
+	var sorted_distances := distances.duplicate()
+	sorted_distances.sort()
+	var threshold_index := int(sorted_distances.size() * OUTERMOST_DROP_PERCENTILE)
+	var distance_threshold: float = sorted_distances[threshold_index] if threshold_index < sorted_distances.size() else 0.0
+
+	# Spawn satellite drops near outermost drops
+	for i in range(valid_drops.size()):
+		if distances[i] < distance_threshold:
+			continue  # Skip non-outermost drops
+
+		var drop = valid_drops[i]
+		var drop_pos: Vector2 = drop["position"]
+		var drop_velocity: Vector2 = drop["velocity"]
+		var drop_land_time: float = drop["land_time"]
+
+		# Probability check for spawning satellites
+		if randf() > SATELLITE_DROP_PROBABILITY:
+			continue
+
+		# Spawn multiple small satellite drops around this main drop
+		for _j in range(SATELLITE_DROPS_PER_MAIN):
+			# Random angle, biased toward the direction of velocity (splash direction)
+			var velocity_angle: float = drop_velocity.angle() if drop_velocity.length() > 10.0 else randf() * TAU
+			var angle_spread: float = PI * 0.8  # Allow satellites in a wide arc
+			var satellite_angle: float = velocity_angle + randf_range(-angle_spread, angle_spread)
+
+			# Random distance from parent drop
+			var satellite_dist: float = randf_range(SATELLITE_DROP_MIN_DISTANCE, SATELLITE_DROP_MAX_DISTANCE)
+
+			# Calculate satellite position
+			var satellite_pos: Vector2 = drop_pos + Vector2.RIGHT.rotated(satellite_angle) * satellite_dist
+
+			# Random small scale for satellite drops
+			var satellite_scale: float = randf_range(SATELLITE_DROP_SCALE_MIN, SATELLITE_DROP_SCALE_MAX)
+
+			# Satellites land slightly after main drop
+			var satellite_delay: float = drop_land_time + randf_range(0.02, 0.08)
+
+			# Random rotation for variety
+			var satellite_rotation: float = randf() * TAU
+
+			# Schedule the satellite decal
+			_schedule_delayed_decal_directional(origin, satellite_pos, satellite_rotation, satellite_scale, satellite_scale, satellite_delay)
+			satellite_count += 1
+
+	return satellite_count
+
+
+## Spawns crown/blossom effect spines around a main blood drop.
+## When blood drops land at nearly 90 degrees, they create a crown-like splash pattern
+## with thin spines radiating outward from the main drop. This is a well-documented
+## forensic blood pattern phenomenon.
+## @param origin: The origin point of the blood spray (for wall collision checks).
+## @param drop_pos: Position of the main blood drop.
+## @param drop_rotation: Rotation of the main drop.
+## @param drop_scale: Scale of the main drop.
+## @param land_time: When the main drop lands.
+## @return: Number of crown spines spawned.
+func _spawn_crown_effect(origin: Vector2, drop_pos: Vector2, drop_rotation: float, drop_scale: float, land_time: float) -> int:
+	if _blood_decal_scene == null:
+		return 0
+
+	var spine_count := 0
+
+	# Spines radiate evenly around the drop
+	var angle_step: float = TAU / CROWN_SPINE_COUNT
+
+	for i in range(CROWN_SPINE_COUNT):
+		# Calculate spine angle (evenly distributed with slight randomization)
+		var spine_angle: float = i * angle_step + randf_range(-0.2, 0.2)
+
+		# Calculate spine position (at edge of main drop)
+		var spine_distance: float = CROWN_SPINE_DISTANCE * drop_scale
+		var spine_pos: Vector2 = drop_pos + Vector2.RIGHT.rotated(spine_angle) * spine_distance
+
+		# Spine is elongated and thin, pointing outward from the center
+		var spine_length: float = randf_range(CROWN_SPINE_SCALE_LENGTH_MIN, CROWN_SPINE_SCALE_LENGTH_MAX)
+		var spine_width: float = CROWN_SPINE_SCALE_WIDTH
+
+		# Rotation points outward from center
+		var spine_rotation: float = spine_angle
+
+		# Spines appear slightly after the main drop lands
+		var spine_delay: float = land_time + randf_range(0.01, 0.03)
+
+		_schedule_delayed_decal_directional(origin, spine_pos, spine_rotation, spine_length, spine_width, spine_delay)
+		spine_count += 1
+
+	return spine_count
 
 
 ## Schedules a single blood decal with directional scaling (elongation) to spawn after a delay.
