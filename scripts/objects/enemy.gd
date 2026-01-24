@@ -276,6 +276,33 @@ var _walk_anim_time: float = 0.0
 ## Whether the enemy is currently walking (for animation state).
 var _is_walking: bool = false
 
+## Target rotation angle for smooth rotation interpolation (radians).
+## The enemy model smoothly rotates towards this target angle.
+var _target_model_rotation: float = 0.0
+
+## Whether the model is currently flipped for left-facing direction.
+var _model_facing_left: bool = false
+
+## Maximum rotation speed for the enemy model in radians per second.
+## This is the visual rotation speed (head/body turning), not aim speed.
+## 3.0 rad/s ≈ 172°/s - realistic human head turning speed.
+## Humans can turn their head about 90° in ~0.5 seconds.
+const MODEL_ROTATION_SPEED: float = 3.0
+
+## --- IDLE Scanning Behavior (for GUARD enemies) ---
+## Timer for idle scanning - looking at different passages.
+var _idle_scan_timer: float = 0.0
+
+## Current scan target index in the list of scan targets.
+var _idle_scan_target_index: int = 0
+
+## List of scan target angles (radians) for GUARD enemies.
+## Populated when the enemy enters IDLE state based on nearby passages.
+var _idle_scan_targets: Array[float] = []
+
+## Interval between changing scan targets (seconds).
+const IDLE_SCAN_INTERVAL: float = 10.0
+
 ## Base positions for body parts (stored on ready for animation offsets).
 var _base_body_pos: Vector2 = Vector2.ZERO
 var _base_head_pos: Vector2 = Vector2.ZERO
@@ -1099,37 +1126,66 @@ func _update_goap_state() -> void:
 ## IMPORTANT: When aiming at the player, we calculate the direction from the WEAPON position
 ## to the player, not from the enemy center. This ensures the weapon barrel actually points
 ## at the player, accounting for the weapon's offset from the enemy center.
+##
+## FIX for issue #66: Model rotation is now smooth (not instant) using MODEL_ROTATION_SPEED.
+## This provides realistic head/body turning speed.
 func _update_enemy_model_rotation() -> void:
 	if not _enemy_model:
 		return
 
+	var delta := get_physics_process_delta_time()
+
 	# Determine the direction to face:
 	# - If can see player, face the player (simple direction from enemy center)
 	# - Otherwise, face the movement direction
+	# - In IDLE state without movement/player, use idle scan targets
 	#
 	# NOTE: We use simple center-to-player direction, NOT offset-compensated direction.
 	# This ensures the weapon visually points in the same direction as bullets fly.
 	# The bullets are fired from the muzzle toward the target, and the muzzle is
 	# positioned along the direction the model faces.
-	var face_direction: Vector2
+	var has_target := false
 
 	if _player != null and _can_see_player:
 		# Simple direction from enemy center to player (like player character does)
-		face_direction = (_player.global_position - global_position).normalized()
+		var face_direction := (_player.global_position - global_position).normalized()
+		_target_model_rotation = face_direction.angle()
+		has_target = true
 	elif velocity.length_squared() > 1.0:
 		# Face movement direction
-		face_direction = velocity.normalized()
-	else:
-		# Keep current rotation
-		return
+		var face_direction := velocity.normalized()
+		_target_model_rotation = face_direction.angle()
+		has_target = true
+	elif _current_state == AIState.IDLE and _idle_scan_targets.size() > 0:
+		# In IDLE, use scan targets for looking at passages
+		_target_model_rotation = _idle_scan_targets[_idle_scan_target_index]
+		has_target = true
 
-	# Calculate target rotation angle
-	# Enemy sprites face RIGHT (same as player sprites, 0 radians)
-	var target_angle := face_direction.angle()
+	# If no target to face, keep current rotation (don't update)
+	if not has_target:
+		return
 
 	# Handle sprite flipping for left/right aim
 	# When aiming left (angle > 90° or < -90°), flip vertically to avoid upside-down appearance
-	var aiming_left := absf(target_angle) > PI / 2
+	var aiming_left := absf(_target_model_rotation) > PI / 2
+	_model_facing_left = aiming_left
+
+	# Smoothly interpolate current rotation towards target rotation
+	# Use MODEL_ROTATION_SPEED for realistic head/body turning
+	var current_rotation := _enemy_model.global_rotation
+
+	# Calculate the shortest rotation direction (handle wrap-around at ±PI)
+	var angle_diff := wrapf(_target_model_rotation - current_rotation, -PI, PI)
+
+	# Apply gradual rotation based on MODEL_ROTATION_SPEED
+	var new_rotation: float
+	if abs(angle_diff) <= MODEL_ROTATION_SPEED * delta:
+		# Close enough to snap to target
+		new_rotation = _target_model_rotation
+	elif angle_diff > 0:
+		new_rotation = current_rotation + MODEL_ROTATION_SPEED * delta
+	else:
+		new_rotation = current_rotation - MODEL_ROTATION_SPEED * delta
 
 	# Apply rotation to the enemy model using GLOBAL rotation.
 	# IMPORTANT: We use global_rotation instead of (local) rotation because the Enemy
@@ -1148,11 +1204,10 @@ func _update_enemy_model_rotation() -> void:
 	# - Without flip: global_rotation = -135°, scale.y = 1.3  -> faces down-right (wrong)
 	# - With flip, OLD code: global_rotation = 135°, scale.y = -1.3 -> faces up-left (visual ok, but bullets go wrong)
 	# - With flip, NEW code: global_rotation = -135°, scale.y = -1.3 -> faces up-left (visual matches bullets) ✓
+	_enemy_model.global_rotation = new_rotation
 	if aiming_left:
-		_enemy_model.global_rotation = target_angle
 		_enemy_model.scale = Vector2(enemy_model_scale, -enemy_model_scale)
 	else:
-		_enemy_model.global_rotation = target_angle
 		_enemy_model.scale = Vector2(enemy_model_scale, enemy_model_scale)
 
 
@@ -2554,6 +2609,9 @@ func _transition_to_idle() -> void:
 	# Reset alarm mode when returning to idle
 	_in_alarm_mode = false
 	_cover_burst_pending = false
+	# Reset idle scanning state for GUARD enemies
+	_idle_scan_timer = 0.0
+	_idle_scan_targets.clear()  # Will be re-initialized in _process_guard
 
 
 ## Transition to COMBAT state.
@@ -3681,8 +3739,14 @@ func _is_position_in_fov(target_pos: Vector2) -> bool:
 	# Calculate direction to target
 	var direction_to_target := (target_pos - global_position).normalized()
 
-	# Get facing direction from enemy's rotation
-	var facing_vector := Vector2.from_angle(rotation)
+	# Get facing direction from enemy model's visual rotation (not CharacterBody2D rotation).
+	# The enemy model is what visually shows where the enemy is looking, so FOV should
+	# be based on that. We also need to account for sprite flipping (scale.y negative
+	# means facing left).
+	# FIX for issue #66: Previously used CharacterBody2D's rotation which was incorrect
+	# because the visual facing is controlled by _enemy_model.global_rotation.
+	var facing_angle := _enemy_model.global_rotation if _enemy_model else rotation
+	var facing_vector := Vector2.from_angle(facing_angle)
 
 	# Calculate angle between facing direction and direction to target
 	# Using dot product: cos(angle) = a · b for normalized vectors
@@ -4027,10 +4091,105 @@ func _process_patrol(delta: float) -> void:
 		rotation = direction.angle()
 
 
-## Process guard behavior - stand still and look around.
-func _process_guard(_delta: float) -> void:
+## Process guard behavior - stand still and scan for threats.
+## GUARD enemies look at different passages/directions every IDLE_SCAN_INTERVAL seconds.
+## This makes them more realistic and gives players stealth opportunities.
+func _process_guard(delta: float) -> void:
 	velocity = Vector2.ZERO
-	# In guard mode, enemy doesn't move but can still aim at player when visible
+
+	# Initialize scan targets if not already done
+	if _idle_scan_targets.is_empty():
+		_initialize_idle_scan_targets()
+
+	# Update scan timer and switch targets
+	_idle_scan_timer += delta
+	if _idle_scan_timer >= IDLE_SCAN_INTERVAL:
+		_idle_scan_timer = 0.0
+		# Move to next scan target
+		if _idle_scan_targets.size() > 0:
+			_idle_scan_target_index = (_idle_scan_target_index + 1) % _idle_scan_targets.size()
+			_log_debug("Scanning new direction: %d/%d (angle: %.1f°)" % [
+				_idle_scan_target_index + 1,
+				_idle_scan_targets.size(),
+				rad_to_deg(_idle_scan_targets[_idle_scan_target_index])
+			])
+
+
+## Initialize scan targets for GUARD enemies.
+## Detects nearby passages/openings using raycasts and creates scan targets for them.
+## If no passages are detected, uses default cardinal directions.
+func _initialize_idle_scan_targets() -> void:
+	_idle_scan_targets.clear()
+
+	# Detect passages/openings using raycasts in all directions
+	var space_state := get_world_2d().direct_space_state
+	var check_distance := 500.0  # Distance to check for openings
+	var num_directions := 16  # Number of directions to check
+	var opening_angles: Array[float] = []
+
+	for i in range(num_directions):
+		var angle := (float(i) / float(num_directions)) * TAU
+		var direction := Vector2.from_angle(angle)
+		var end_point := global_position + direction * check_distance
+
+		var query := PhysicsRayQueryParameters2D.create(global_position, end_point)
+		query.collision_mask = 0b100  # Layer 3 (walls/obstacles)
+		query.exclude = [self]
+
+		var result := space_state.intersect_ray(query)
+
+		# If raycast doesn't hit anything within check_distance, it's likely an opening/passage
+		if result.is_empty():
+			opening_angles.append(angle)
+		else:
+			# If hit is far away (> 200 pixels), it could be a wider opening
+			var hit_distance := global_position.distance_to(result.position)
+			if hit_distance > 200.0:
+				opening_angles.append(angle)
+
+	# Cluster nearby angles to find distinct passages
+	if opening_angles.size() > 0:
+		# Group angles that are within 30° of each other into single scan targets
+		var clusters: Array[Array] = []
+		opening_angles.sort()
+
+		for angle in opening_angles:
+			var found_cluster := false
+			for cluster in clusters:
+				# Check if angle is close to any angle in cluster
+				var cluster_avg: float = 0.0
+				for a in cluster:
+					cluster_avg += a
+				cluster_avg /= cluster.size()
+
+				var diff := wrapf(angle - cluster_avg, -PI, PI)
+				if abs(diff) < deg_to_rad(30.0):
+					cluster.append(angle)
+					found_cluster = true
+					break
+
+			if not found_cluster:
+				clusters.append([angle])
+
+		# Use cluster centers as scan targets
+		for cluster in clusters:
+			var avg_angle: float = 0.0
+			for a in cluster:
+				avg_angle += a
+			avg_angle /= cluster.size()
+			_idle_scan_targets.append(avg_angle)
+
+	# If no passages found or only one, use default directions
+	if _idle_scan_targets.size() < 2:
+		_idle_scan_targets.clear()
+		# Default: look left and right
+		_idle_scan_targets.append(0.0)      # Right
+		_idle_scan_targets.append(PI)       # Left
+
+	# Randomize starting target
+	_idle_scan_target_index = randi() % _idle_scan_targets.size()
+
+	_log_debug("Initialized %d scan targets for GUARD behavior" % _idle_scan_targets.size())
 
 
 ## Called when a bullet enters the threat sphere.

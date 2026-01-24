@@ -470,7 +470,111 @@ ae53de2 - Revert "Initial commit with task details"
 
 ---
 
-**Document Version**: 2.0
+## Session 4: Additional Findings and Fixes (2026-01-24 04:43)
+
+### New User Feedback
+
+User reported three additional issues:
+1. **Enemies automatically turn towards player when they shouldn't** - With FOV enabled, enemies were still facing the player even when the player wasn't in their FOV
+2. **GUARD enemies need scanning behavior** - Enemies in IDLE state should scan passages/openings every 10 seconds
+3. **Head movement should have speed limit** - Rotation should be smooth, not instant
+
+### Root Causes Identified
+
+#### Issue 6: FOV Check Using Wrong Rotation Value
+
+**Evidence**: The `_is_position_in_fov()` function at line 3685 used:
+```gdscript
+var facing_vector := Vector2.from_angle(rotation)
+```
+
+**Problem**: This uses the CharacterBody2D's `rotation` property, but the actual visual facing direction is controlled by `_enemy_model.global_rotation`. These are two different values:
+- `rotation` - CharacterBody2D rotation (used for aiming/bullets)
+- `_enemy_model.global_rotation` - Visual model rotation (what the enemy appears to be looking at)
+
+**Impact**: FOV check was based on wrong rotation value, allowing enemies to "see" players even when visually facing away.
+
+**Solution Applied**:
+```gdscript
+# Get facing direction from enemy model's visual rotation (not CharacterBody2D rotation).
+var facing_angle := _enemy_model.global_rotation if _enemy_model else rotation
+var facing_vector := Vector2.from_angle(facing_angle)
+```
+
+#### Issue 7: Instant Model Rotation
+
+**Problem**: The `_update_enemy_model_rotation()` function applied rotation instantly:
+```gdscript
+_enemy_model.global_rotation = target_angle  # Instant!
+```
+
+**Impact**: Enemies turned instantly to face player, which is unrealistic and prevents stealth gameplay.
+
+**Solution Applied**: Added smooth rotation interpolation using `MODEL_ROTATION_SPEED` (3.0 rad/s ≈ 172°/s):
+```gdscript
+# Smoothly interpolate current rotation towards target rotation
+var angle_diff := wrapf(_target_model_rotation - current_rotation, -PI, PI)
+if abs(angle_diff) <= MODEL_ROTATION_SPEED * delta:
+    new_rotation = _target_model_rotation
+elif angle_diff > 0:
+    new_rotation = current_rotation + MODEL_ROTATION_SPEED * delta
+else:
+    new_rotation = current_rotation - MODEL_ROTATION_SPEED * delta
+```
+
+#### Issue 8: No IDLE Scanning Behavior
+
+**Problem**: GUARD enemies in IDLE state just stood still without scanning their environment.
+
+**Solution Applied**: Added scanning behavior to `_process_guard()`:
+1. **Passage detection** - Raycasts detect nearby openings/passages
+2. **Scan target clustering** - Groups nearby angles into distinct targets
+3. **Timer-based scanning** - Changes scan direction every 10 seconds (configurable via `IDLE_SCAN_INTERVAL`)
+4. **Smooth rotation** - Uses `MODEL_ROTATION_SPEED` for realistic head turning
+
+### New Variables Added
+
+```gdscript
+## Target rotation angle for smooth rotation interpolation (radians).
+var _target_model_rotation: float = 0.0
+
+## Maximum rotation speed for the enemy model in radians per second.
+## 3.0 rad/s ≈ 172°/s - realistic human head turning speed.
+const MODEL_ROTATION_SPEED: float = 3.0
+
+## Timer for idle scanning - looking at different passages.
+var _idle_scan_timer: float = 0.0
+
+## Current scan target index in the list of scan targets.
+var _idle_scan_target_index: int = 0
+
+## List of scan target angles (radians) for GUARD enemies.
+var _idle_scan_targets: Array[float] = []
+
+## Interval between changing scan targets (seconds).
+const IDLE_SCAN_INTERVAL: float = 10.0
+```
+
+### New Log File Collected
+
+**game_log_20260124_073807.txt**
+- User's test session after previous fixes
+- Shows all enemies still spawning with `player_found: yes`
+- ExperimentalSettings now logging: `[ExperimentalSettings] ExperimentalSettings initialized - FOV enabled: false`
+- Enemies entering COMBAT state very quickly
+
+### Updated Testing Plan
+
+After this session's fixes:
+- [ ] Verify enemies don't instantly turn toward player
+- [ ] Verify GUARD enemies scan passages every 10 seconds
+- [ ] Verify rotation is smooth (about 0.5 seconds for 90° turn)
+- [ ] Verify FOV check now uses visual model rotation
+- [ ] Test that enemies with FOV enabled cannot see player outside cone
+
+---
+
+**Document Version**: 3.0
 **Last Updated**: 2026-01-24
 **Updated By**: AI Issue Solver (Claude Code)
-**Session ID**: 1769228235256
+**Session ID**: 1769229875917
