@@ -3635,7 +3635,7 @@ func _get_wall_avoidance_weight(direction: Vector2) -> float:
 ## Check if target is within FOV cone. FOV uses _enemy_model.global_rotation for facing.
 func _is_position_in_fov(target_pos: Vector2) -> bool:
 	var experimental_settings: Node = get_node_or_null("/root/ExperimentalSettings")
-	var global_fov_enabled := experimental_settings and experimental_settings.has_method("is_fov_enabled") and experimental_settings.is_fov_enabled()
+	var global_fov_enabled: bool = experimental_settings != null and experimental_settings.has_method("is_fov_enabled") and experimental_settings.is_fov_enabled()
 	if not global_fov_enabled or not fov_enabled or fov_angle <= 0.0:
 		return true  # FOV disabled - 360 degree vision
 	var facing_angle := _enemy_model.global_rotation if _enemy_model else rotation
