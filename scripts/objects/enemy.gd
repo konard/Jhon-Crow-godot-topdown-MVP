@@ -604,6 +604,31 @@ var _last_known_player_position: Vector2 = Vector2.ZERO
 ## to that position even without line of sight to the player.
 var _pursuing_vulnerability_sound: bool = false
 
+## --- Enemy Memory System (Issue #297) ---
+## Memory system that tracks suspected player position with confidence level.
+## Confidence ranges from 0.0 (no information) to 1.0 (direct visual contact).
+## The memory influences AI behavior:
+## - High confidence (>0.8): Direct pursuit to suspected position
+## - Medium confidence (0.5-0.8): Cautious approach with cover checks
+## - Low confidence (<0.5): Return to patrol/guard behavior
+var _memory: EnemyMemory = null
+
+## Confidence values for different detection sources.
+const VISUAL_DETECTION_CONFIDENCE: float = 1.0
+const SOUND_GUNSHOT_CONFIDENCE: float = 0.7
+const SOUND_RELOAD_CONFIDENCE: float = 0.6
+const SOUND_EMPTY_CLICK_CONFIDENCE: float = 0.6
+const INTEL_SHARE_FACTOR: float = 0.9  ## Confidence reduction when sharing intel
+
+## Communication range for enemy-to-enemy information sharing.
+## 660px with direct line of sight, 300px without line of sight.
+const INTEL_SHARE_RANGE_LOS: float = 660.0
+const INTEL_SHARE_RANGE_NO_LOS: float = 300.0
+
+## Timer for periodic intel sharing (to avoid per-frame overhead).
+var _intel_share_timer: float = 0.0
+const INTEL_SHARE_INTERVAL: float = 0.5  ## Share intel every 0.5 seconds
+
 ## --- Score Tracking ---
 ## Whether the last hit that killed this enemy was from a ricocheted bullet.
 var _killed_by_ricochet: bool = false
@@ -641,6 +666,7 @@ func _ready() -> void:
 	_setup_cover_detection()
 	_setup_threat_sphere()
 	_initialize_goap_state()
+	_initialize_memory()
 	_connect_debug_mode_signal()
 	_update_debug_label()
 	_register_sound_listener()
@@ -826,6 +852,10 @@ func on_sound_heard_with_intensity(sound_type: int, position: Vector2, source_ty
 		# Set flag to pursue to sound position even without line of sight
 		_pursuing_vulnerability_sound = true
 
+		# Update memory system with sound-based detection (Issue #297)
+		if _memory:
+			_memory.update_position(position, SOUND_RELOAD_CONFIDENCE)
+
 		# React to vulnerable player sound - transition to combat/pursuing
 		# All enemies in hearing range should pursue the vulnerable player!
 		# This makes reload sounds a high-risk action when enemies are nearby.
@@ -852,6 +882,10 @@ func on_sound_heard_with_intensity(sound_type: int, position: Vector2, source_ty
 		_last_known_player_position = position
 		# Set flag to pursue to sound position even without line of sight
 		_pursuing_vulnerability_sound = true
+
+		# Update memory system with sound-based detection (Issue #297)
+		if _memory:
+			_memory.update_position(position, SOUND_EMPTY_CLICK_CONFIDENCE)
 
 		# React to vulnerable player sound - transition to combat/pursuing
 		# All enemies in hearing range should pursue the vulnerable player!
@@ -942,6 +976,10 @@ func on_sound_heard_with_intensity(sound_type: int, position: Vector2, source_ty
 	# The enemy will investigate this location
 	_last_known_player_position = position
 
+	# Update memory system with sound-based detection (Issue #297)
+	if _memory:
+		_memory.update_position(position, SOUND_GUNSHOT_CONFIDENCE)
+
 	# Transition to combat mode to investigate the sound
 	_transition_to_combat()
 
@@ -965,8 +1003,19 @@ func _initialize_goap_state() -> void:
 		"enemies_in_combat": 0,
 		"player_distracted": false,
 		"player_reloading": false,
-		"player_ammo_empty": false
+		"player_ammo_empty": false,
+		# Memory system states (Issue #297)
+		"has_suspected_position": false,
+		"position_confidence": 0.0,
+		"confidence_high": false,
+		"confidence_medium": false,
+		"confidence_low": false
 	}
+
+
+## Initialize the enemy memory system (Issue #297).
+func _initialize_memory() -> void:
+	_memory = EnemyMemory.new()
 
 
 ## Connect to GameManager's debug mode signal for F7 toggle.
@@ -1035,6 +1084,7 @@ func _physics_process(delta: float) -> void:
 		_find_player()
 
 	_check_player_visibility()
+	_update_memory(delta)
 	_update_goap_state()
 	_update_suppression(delta)
 
@@ -1077,6 +1127,14 @@ func _update_goap_state() -> void:
 	_goap_world_state["can_hit_from_cover"] = _can_hit_player_from_current_position()
 	_goap_world_state["enemies_in_combat"] = _count_enemies_in_combat()
 	_goap_world_state["player_distracted"] = _is_player_distracted()
+
+	# Memory system states (Issue #297)
+	if _memory:
+		_goap_world_state["has_suspected_position"] = _memory.has_target()
+		_goap_world_state["position_confidence"] = _memory.confidence
+		_goap_world_state["confidence_high"] = _memory.is_high_confidence()
+		_goap_world_state["confidence_medium"] = _memory.is_medium_confidence()
+		_goap_world_state["confidence_low"] = _memory.is_low_confidence()
 
 
 ## Updates the enemy model rotation to face the aim/movement direction.
@@ -1550,6 +1608,23 @@ func _process_idle_state(delta: float) -> void:
 	if _can_see_player and _player:
 		_transition_to_combat()
 		return
+
+	# Check memory system for suspected player position (Issue #297)
+	# If we have high/medium confidence about player location, investigate
+	if _memory and _memory.has_target():
+		if _memory.is_high_confidence():
+			# High confidence: Go investigate directly
+			_log_debug("High confidence (%.0f%%) - investigating suspected position" % (_memory.confidence * 100))
+			_log_to_file("Memory: high confidence (%.2f) - transitioning to PURSUING" % _memory.confidence)
+			_transition_to_pursuing()
+			return
+		elif _memory.is_medium_confidence():
+			# Medium confidence: Investigate cautiously (also use pursuing with cover-to-cover)
+			_log_debug("Medium confidence (%.0f%%) - cautiously investigating" % (_memory.confidence * 100))
+			_log_to_file("Memory: medium confidence (%.2f) - transitioning to PURSUING" % _memory.confidence)
+			_transition_to_pursuing()
+			return
+		# Low confidence: Continue normal patrol but may wander toward suspected area
 
 	# Execute idle behavior
 	match behavior_mode:
@@ -2366,6 +2441,27 @@ func _process_pursuing_state(delta: float) -> void:
 	# No cover and no pursuit target - find initial pursuit cover
 	_find_pursuit_cover_toward_player()
 	if not _has_pursuit_cover:
+		# Check if we should investigate memory-based target (Issue #297)
+		if _memory and _memory.has_target() and not _can_see_player:
+			var target_pos := _memory.suspected_position
+			var distance_to_target := global_position.distance_to(target_pos)
+
+			# If we're close to the suspected position but haven't found the player
+			if distance_to_target < 100.0:
+				# We've investigated but player isn't here - reduce confidence
+				_memory.decay(0.3)  # Significant confidence reduction
+				_log_debug("Reached suspected position but player not found - reducing confidence")
+
+				# If confidence is now low, return to idle
+				if not _memory.has_target() or _memory.is_low_confidence():
+					_log_to_file("Memory confidence too low after investigation - returning to IDLE")
+					_transition_to_idle()
+					return
+
+			# Otherwise, continue moving toward suspected position
+			_move_to_target_nav(target_pos, combat_move_speed)
+			return
+
 		# Can't find cover to pursue, try flanking or combat
 		if _can_attempt_flanking() and _player:
 			_transition_to_flanking()
@@ -3097,6 +3193,28 @@ func _is_player_close() -> bool:
 	return global_position.distance_to(_player.global_position) <= CLOSE_COMBAT_DISTANCE
 
 
+## Get the best known target position to move toward (Issue #297).
+## Priority: 1. Direct player position (if visible), 2. Memory suspected position, 3. Last known position
+func _get_target_position() -> Vector2:
+	# If we can see the player, use their actual position
+	if _can_see_player and _player:
+		return _player.global_position
+
+	# If memory has a target with reasonable confidence, use that
+	if _memory and _memory.has_target():
+		return _memory.suspected_position
+
+	# Fallback to legacy last known position
+	if _last_known_player_position != Vector2.ZERO:
+		return _last_known_player_position
+
+	# Last resort: if player exists, use their position (even if can't see them)
+	if _player:
+		return _player.global_position
+
+	return global_position  # Stay in place if no target
+
+
 ## Check if the enemy can hit the player from their current position.
 ## Returns true if there's a clear line of fire to the player.
 func _can_hit_player_from_current_position() -> bool:
@@ -3153,11 +3271,16 @@ func is_in_combat_engagement() -> bool:
 ## - Requires minimum progress toward player to skip insignificant moves
 ## - Verifies the path to cover is clear (no walls blocking)
 func _find_pursuit_cover_toward_player() -> void:
-	if _player == null:
+	# Use memory-based target position instead of direct player position (Issue #297)
+	# This allows pursuing toward a suspected position even when player is not visible
+	var target_pos := _get_target_position()
+
+	# If no valid target and no player, can't pursue
+	if target_pos == global_position and _player == null:
 		_has_pursuit_cover = false
 		return
 
-	var player_pos := _player.global_position
+	var player_pos := target_pos
 	var best_cover: Vector2 = Vector2.ZERO
 	var best_score: float = -INF
 	var best_obstacle: Object = null
@@ -3699,6 +3822,111 @@ func _check_player_visibility() -> void:
 		# Lost line of sight - reset the timer and visibility ratio
 		_continuous_visibility_timer = 0.0
 		_player_visibility_ratio = 0.0
+
+
+## Update the enemy memory system (Issue #297).
+## - Updates memory with visual detection (confidence 1.0) when player is visible
+## - Applies confidence decay over time
+## - Shares intel with nearby enemies periodically
+func _update_memory(delta: float) -> void:
+	if _memory == null:
+		return
+
+	# Visual detection: Update memory with player position at full confidence
+	if _can_see_player and _player:
+		_memory.update_position(_player.global_position, VISUAL_DETECTION_CONFIDENCE)
+		# Also update the legacy _last_known_player_position for compatibility
+		_last_known_player_position = _player.global_position
+
+	# Apply confidence decay over time
+	_memory.decay(delta)
+
+	# Periodic intel sharing with nearby enemies
+	_intel_share_timer += delta
+	if _intel_share_timer >= INTEL_SHARE_INTERVAL:
+		_intel_share_timer = 0.0
+		_share_intel_with_nearby_enemies()
+
+
+## Share intelligence with nearby enemies (Issue #297).
+## Enemies can share information if:
+## - Within 660px AND have direct line of sight, OR
+## - Within 300px regardless of line of sight
+func _share_intel_with_nearby_enemies() -> void:
+	if _memory == null or not _memory.has_target():
+		return
+
+	var enemies := get_tree().get_nodes_in_group("enemies")
+	for node in enemies:
+		if node == self or not is_instance_valid(node):
+			continue
+
+		var other_enemy: Node2D = node as Node2D
+		if other_enemy == null:
+			continue
+
+		var distance := global_position.distance_to(other_enemy.global_position)
+
+		# Check if within communication range
+		var can_share := false
+		if distance <= INTEL_SHARE_RANGE_NO_LOS:
+			# Close enough to share without LOS
+			can_share = true
+		elif distance <= INTEL_SHARE_RANGE_LOS:
+			# Need to check LOS for longer range
+			can_share = _has_line_of_sight_to_position(other_enemy.global_position)
+
+		if can_share and other_enemy.has_method("receive_intel_from_ally"):
+			other_enemy.receive_intel_from_ally(_memory)
+
+
+## Receive intelligence from an allied enemy (Issue #297).
+## Called by other enemies when they share intel.
+func receive_intel_from_ally(ally_memory: EnemyMemory) -> void:
+	if _memory == null or ally_memory == null:
+		return
+
+	# Only update if ally has better or newer information
+	if _memory.receive_intel(ally_memory, INTEL_SHARE_FACTOR):
+		_log_debug("Received intel from ally: suspected pos=%s, conf=%.2f" % [
+			_memory.suspected_position, _memory.confidence
+		])
+		# Update legacy position for compatibility
+		_last_known_player_position = _memory.suspected_position
+
+
+## Check if there is a clear line of sight to a position.
+## Used for enemy-to-enemy communication range checking.
+func _has_line_of_sight_to_position(target_pos: Vector2) -> bool:
+	if _raycast == null:
+		return false
+
+	# Save current raycast state
+	var original_target := _raycast.target_position
+	var original_enabled := _raycast.enabled
+
+	# Configure raycast to check LOS
+	var direction := target_pos - global_position
+	_raycast.target_position = direction
+	_raycast.enabled = true
+	_raycast.force_raycast_update()
+
+	# Check if anything blocks the path
+	var has_los := not _raycast.is_colliding()
+
+	# If something is in the way, check if it's the target position or beyond
+	if _raycast.is_colliding():
+		var collision_point := _raycast.get_collision_point()
+		var distance_to_target := global_position.distance_to(target_pos)
+		var distance_to_collision := global_position.distance_to(collision_point)
+		# Has LOS if collision is at or beyond target
+		has_los = distance_to_collision >= distance_to_target - 10.0
+
+	# Restore raycast state
+	_raycast.target_position = original_target
+	_raycast.enabled = original_enabled
+
+	return has_los
 
 
 ## Aim the enemy sprite/direction at the player using gradual rotation.
@@ -4556,6 +4784,11 @@ func _update_debug_label() -> void:
 		else:
 			state_text += "\n(%s DIRECT)" % side_label
 
+	# Add memory confidence info (Issue #297)
+	if _memory and _memory.has_target():
+		var mode := _memory.get_behavior_mode()
+		state_text += "\n[%.0f%% %s]" % [_memory.confidence * 100, mode.substr(0, 6)]
+
 	_debug_label.text = state_text
 
 
@@ -4697,6 +4930,29 @@ func _draw() -> void:
 			draw_line(flank_pos + Vector2(8, 0), flank_pos + Vector2(0, 8), color_flank, 2.0)
 			draw_line(flank_pos + Vector2(0, 8), flank_pos + Vector2(-8, 0), color_flank, 2.0)
 			draw_line(flank_pos + Vector2(-8, 0), flank_pos + Vector2(0, -8), color_flank, 2.0)
+
+	# Draw suspected position from memory system (Issue #297)
+	# The circle radius is inversely proportional to confidence (larger = less certain)
+	if _memory and _memory.has_target():
+		var to_suspected := _memory.suspected_position - global_position
+		# Color varies from yellow (low confidence) to orange (high confidence)
+		var confidence_color := Color.YELLOW.lerp(Color.ORANGE_RED, _memory.confidence)
+		# Draw dashed line to suspected position
+		draw_line(Vector2.ZERO, to_suspected, confidence_color, 1.0)
+		# Draw uncertainty circle - radius is inversely proportional to confidence
+		# At confidence 1.0: radius = 10px (certain)
+		# At confidence 0.1: radius = 100px (uncertain)
+		var uncertainty_radius := 10.0 + (1.0 - _memory.confidence) * 90.0
+		# Draw circle outline by drawing multiple line segments
+		var segments := 16
+		for i in range(segments):
+			var angle1 := (float(i) / segments) * TAU
+			var angle2 := (float(i + 1) / segments) * TAU
+			var p1 := to_suspected + Vector2(cos(angle1), sin(angle1)) * uncertainty_radius
+			var p2 := to_suspected + Vector2(cos(angle2), sin(angle2)) * uncertainty_radius
+			draw_line(p1, p2, confidence_color, 1.5)
+		# Draw small filled circle at center
+		draw_circle(to_suspected, 5.0, confidence_color)
 
 
 ## Check if the player is "distracted" (not aiming at the enemy).
