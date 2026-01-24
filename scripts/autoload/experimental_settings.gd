@@ -19,6 +19,7 @@ const SETTINGS_PATH := "user://experimental_settings.cfg"
 func _ready() -> void:
 	# Load saved settings on startup
 	_load_settings()
+	_log_to_file("ExperimentalSettings initialized - FOV enabled: %s" % fov_enabled)
 
 
 ## Set FOV enabled/disabled.

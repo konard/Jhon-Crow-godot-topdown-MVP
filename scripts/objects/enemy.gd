@@ -4697,16 +4697,30 @@ func _draw() -> void:
 	var color_flank := Color.MAGENTA  # Line to flank position
 	var color_bullet_spawn := Color.GREEN  # Bullet spawn point indicator
 	var color_blocked := Color.RED  # Blocked path indicator
-	var color_fov := Color(0.2, 0.8, 0.2, 0.3)  # FOV cone color (semi-transparent green)
-	var color_fov_edge := Color(0.2, 0.8, 0.2, 0.8)  # FOV cone edge color
-
-	# Draw FOV cone if FOV is enabled (both globally and for this enemy)
+	# Draw FOV cone in debug mode - always visible to show FOV configuration
+	# Color indicates whether FOV is actually active (green) or just visualization (gray)
 	var experimental_settings: Node = get_node_or_null("/root/ExperimentalSettings")
 	var global_fov_enabled := false
 	if experimental_settings and experimental_settings.has_method("is_fov_enabled"):
 		global_fov_enabled = experimental_settings.is_fov_enabled()
 
-	if global_fov_enabled and fov_enabled and fov_angle > 0.0:
+	# Determine if FOV is actually active for this enemy
+	var fov_active := global_fov_enabled and fov_enabled and fov_angle > 0.0
+
+	# Choose color based on whether FOV is active
+	# Green = FOV is active (100° vision)
+	# Gray = FOV is disabled (360° vision, but showing what the cone would be)
+	var color_fov: Color
+	var color_fov_edge: Color
+	if fov_active:
+		color_fov = Color(0.2, 0.8, 0.2, 0.3)  # Semi-transparent green (active)
+		color_fov_edge = Color(0.2, 0.8, 0.2, 0.8)  # Bright green edge (active)
+	else:
+		color_fov = Color(0.5, 0.5, 0.5, 0.2)  # Semi-transparent gray (inactive)
+		color_fov_edge = Color(0.5, 0.5, 0.5, 0.5)  # Gray edge (inactive)
+
+	# Always draw FOV cone in debug mode (if fov_angle is set)
+	if fov_angle > 0.0:
 		_draw_fov_cone(color_fov, color_fov_edge)
 
 	# Draw line to player if visible
