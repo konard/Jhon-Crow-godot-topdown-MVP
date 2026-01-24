@@ -693,6 +693,7 @@ func _ready() -> void:
 		call_deferred("_register_ally_death_listener")
 		_grenade_thrower.notify_allies_of_grenade.connect(_on_grenade_notification_broadcast)
 		_grenade_thrower.grenade_exploded.connect(_on_grenade_exploded)
+		call_deferred("_log_grenade_init")
 
 ## Configure grenade system after _ready() - called by level scripts.
 func configure_grenades(enabled: bool, offensive: int, flashbangs: int = 0) -> void:
@@ -4610,6 +4611,13 @@ func _log_spawn_info() -> void:
 	_log_to_file("Enemy spawned at %s, health: %d, behavior: %s, player_found: %s" % [
 		global_position, _max_health, BehaviorMode.keys()[behavior_mode],
 		"yes" if _player != null else "no"])
+
+## Log grenade system initialization (called via call_deferred).
+func _log_grenade_init() -> void:
+	if _grenade_thrower:
+		_log_to_file("Grenade system initialized: enabled=%s, offensive=%d, flashbang=%d, range=%.0f" % [
+			_grenade_thrower.enabled, _grenade_thrower.offensive_grenades,
+			_grenade_thrower.flashbang_grenades, _grenade_thrower.throw_range])
 
 ## Get AI state name as a human-readable string.
 func _get_state_name(state: AIState) -> String:

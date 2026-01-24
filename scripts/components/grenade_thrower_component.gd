@@ -455,11 +455,6 @@ func should_throw(current_health: int, can_see_player: bool, is_suppressed: bool
 		_log("Grenade check: SKIP - already throwing")
 		return false
 
-	# Check distance (must be within throw range)
-	if distance_to_player > throw_range:
-		_log("Grenade check: SKIP - out of range (%.0f > %.0f)" % [distance_to_player, throw_range])
-		return false
-
 	# Safety check: don't throw if thrower would be in blast radius
 	# Skip this check if positions aren't provided (backwards compatibility)
 	if throw_origin != Vector2.ZERO and target_pos != Vector2.ZERO:
@@ -467,16 +462,32 @@ func should_throw(current_health: int, can_see_player: bool, is_suppressed: bool
 			_log("Grenade throw blocked: too close to target (would be in blast radius)")
 			return false
 
+	# CRITICAL TRIGGERS (bypass distance check - desperation throws)
+	# These triggers indicate emergency situations where enemy should throw regardless of range
+
+	# 6. Thrower has 1 HP or less (critical health desperation throw)
+	# This is a last-resort action - distance doesn't matter when about to die
+	if current_health <= 1:
+		_log("Grenade trigger: critical health (%d HP) - desperation throw!" % current_health)
+		return true
+
+	# 2. Player is chasing a suppressed thrower (enemy is suppressed and player approaching)
+	# Being hunted while suppressed is desperate - throw to escape
+	if is_suppressed and can_see_player:
+		_log("Grenade trigger: suppressed and player visible (being chased) - desperation throw!")
+		return true
+
+	# NORMAL TRIGGERS (require being within throw range)
+	# Check distance (must be within throw range for non-critical triggers)
+	if distance_to_player > throw_range:
+		_log("Grenade check: SKIP - out of range (%.0f > %.0f)" % [distance_to_player, throw_range])
+		return false
+
 	# Trigger conditions from issue #295:
 
 	# 1. Player suppressed enemies then hid for 6+ seconds
 	if _player_hidden_timer >= PLAYER_HIDDEN_TRIGGER_DURATION:
 		_log("Grenade trigger: player hidden for %.1fs after suppression" % _player_hidden_timer)
-		return true
-
-	# 2. Player is chasing a suppressed thrower (enemy is suppressed and player approaching)
-	if is_suppressed and can_see_player:
-		_log("Grenade trigger: suppressed and player visible (being chased)")
 		return true
 
 	# 3. Thrower witnessed player kill 2+ enemies
@@ -490,11 +501,6 @@ func should_throw(current_health: int, can_see_player: bool, is_suppressed: bool
 	# 5. Continuous gunfire for 10 seconds in zone
 	if _continuous_gunfire_timer >= CONTINUOUS_GUNFIRE_TRIGGER_DURATION:
 		_log("Grenade trigger: continuous gunfire for %.1fs" % _continuous_gunfire_timer)
-		return true
-
-	# 6. Thrower has 1 HP or less (critical health desperation throw)
-	if current_health <= 1:
-		_log("Grenade trigger: critical health (%d HP)" % current_health)
 		return true
 
 	# No trigger conditions met
