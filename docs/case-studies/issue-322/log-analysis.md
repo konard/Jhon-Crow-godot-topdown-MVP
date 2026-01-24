@@ -1,11 +1,24 @@
 # Log Analysis: Issue #322 - Enemy Search State
 
-## Game Session Analyzed
+## Game Sessions Analyzed
+
+### Session 1: Original Bug Report
 
 - **Date:** 2026-01-24 22:10:11
 - **Log File:** `logs/game_log_20260124_221011.txt`
 - **Duration:** ~1 minute of gameplay
-- **Focus:** Enemy behavior after Last Chance effect ends
+- **Focus:** Enemy behavior after Last Chance effect ends (original issue)
+
+### Session 2: After SEARCHING State Implementation
+
+- **Date:** 2026-01-24 23:28:58
+- **Log File:** `logs/game_log_20260124_232858.txt`
+- **Duration:** ~10 seconds
+- **Focus:** Testing SEARCHING state - revealed critical bug
+- **Observation:** Log is very short, shows only game startup with no enemy activity
+- **Root Cause Found:** `movement_speed` variable typo in `_process_searching_state()` caused runtime error
+
+## Session 1 Analysis
 
 ## Timeline of Events
 
@@ -215,3 +228,49 @@ Implement a dedicated `AIState.SEARCHING` state as outlined in the case study RE
 3. **Search pattern:** Observe enemy following systematic pattern
 4. **Zone expansion:** Verify zone expands when initial area is cleared
 5. **Player discovery:** Hide and verify enemy finds player during search
+
+## Session 2 Analysis: Critical Bug Found
+
+### Overview
+
+After implementing the SEARCHING state, testing revealed that enemies were "completely broken" (user feedback: "враги полностью сломались").
+
+### Log Analysis
+
+The game log (`game_log_20260124_232858.txt`) shows:
+- Game started normally at 23:28:58
+- All systems initialized correctly (GameManager, ScoreManager, Player, etc.)
+- **No enemy activity logged in the entire session**
+- Game ended at 23:29:08 (only 10 seconds of gameplay)
+
+### Root Cause
+
+A critical typo was introduced in `_process_searching_state()` function:
+
+**Line 2403 (buggy code):**
+```gdscript
+velocity = dir * movement_speed * 0.7
+```
+
+**Problem:** `movement_speed` is an undefined variable. The correct variable name is `move_speed` (defined as `@export var move_speed: float = 220.0` on line 35).
+
+**Impact:** When any enemy entered the SEARCHING state, GDScript threw a runtime error for undefined variable access. This caused enemies to completely stop functioning.
+
+### Fix Applied
+
+Changed line 2403 from:
+```gdscript
+velocity = dir * movement_speed * 0.7
+```
+
+To:
+```gdscript
+velocity = dir * move_speed * 0.7
+```
+
+### Lesson Learned
+
+This bug demonstrates the importance of:
+1. **Variable naming consistency:** The codebase uses `move_speed` for enemy speed, not `movement_speed`
+2. **Testing new code paths:** The SEARCHING state was newly introduced and the navigation code path wasn't properly tested
+3. **GDScript's dynamic typing:** Unlike statically typed languages, undefined variables only error at runtime when the code path is executed
