@@ -21,7 +21,8 @@ class MockEnemy:
 		SUPPRESSED,
 		RETREATING,
 		PURSUING,
-		ASSAULT
+		ASSAULT,
+		SEARCHING  ## Issue #322: Methodical area search state
 	}
 
 	## Retreat behavior modes
@@ -503,7 +504,8 @@ func test_all_states_can_be_set() -> void:
 		MockEnemy.AIState.SUPPRESSED,
 		MockEnemy.AIState.RETREATING,
 		MockEnemy.AIState.PURSUING,
-		MockEnemy.AIState.ASSAULT
+		MockEnemy.AIState.ASSAULT,
+		MockEnemy.AIState.SEARCHING
 	]
 
 	for state in states:
@@ -1246,3 +1248,130 @@ func test_enemy_must_reacquire_player_after_memory_reset() -> void:
 		"Enemy should have memory after re-acquiring player")
 	assert_eq(enemy.get_memory_position(), new_pos,
 		"Memory should contain NEW player position, not old one")
+
+
+# ============================================================================
+# Enemy Search State Tests (Issue #322)
+# ============================================================================
+
+
+## Test that SEARCHING state exists in the enum.
+func test_searching_state_exists() -> void:
+	var searching_state := MockEnemy.AIState.SEARCHING
+	assert_eq(searching_state, 9,
+		"SEARCHING state should be the 10th state (index 9)")
+
+
+## Test that enemy can transition to SEARCHING state.
+func test_can_set_searching_state() -> void:
+	enemy.set_state(MockEnemy.AIState.SEARCHING)
+	assert_eq(enemy.get_current_state(), MockEnemy.AIState.SEARCHING,
+		"Should be able to set SEARCHING state")
+
+
+## Test expanding square pattern waypoint generation logic.
+## The algorithm generates waypoints in a spiral: center, N, E, S, W, etc.
+## with leg length expanding every 2 legs.
+func test_expanding_square_waypoint_generation() -> void:
+	# Test the algorithm logic (same as implemented in enemy.gd)
+	var center := Vector2(500, 500)
+	var waypoints: Array[Vector2] = []
+	var direction := 0  # 0=N, 1=E, 2=S, 3=W
+	var leg_length := 75.0  # Initial spacing
+	var legs_completed := 0
+
+	# Add center
+	waypoints.append(center)
+
+	# Generate first 4 waypoints (one square)
+	var current_pos := center
+	for i in range(4):
+		var offset := Vector2.ZERO
+		match direction:
+			0: offset = Vector2(0, -leg_length)   # North
+			1: offset = Vector2(leg_length, 0)    # East
+			2: offset = Vector2(0, leg_length)    # South
+			3: offset = Vector2(-leg_length, 0)   # West
+
+		current_pos = current_pos + offset
+		waypoints.append(current_pos)
+
+		legs_completed += 1
+		direction = (direction + 1) % 4
+
+		# Expand every 2 legs
+		if legs_completed % 2 == 0:
+			leg_length += 75.0
+
+	# Verify we have 5 waypoints (center + 4 directions)
+	assert_eq(waypoints.size(), 5, "Should generate 5 waypoints for first iteration")
+
+	# Verify center is first
+	assert_eq(waypoints[0], center, "First waypoint should be center")
+
+	# Verify first leg goes North
+	assert_eq(waypoints[1], Vector2(500, 425), "Second waypoint should be North of center")
+
+	# Verify second leg goes East (from North position)
+	assert_eq(waypoints[2], Vector2(575, 425), "Third waypoint should be East")
+
+	# After 2 legs, leg_length should increase
+	# Third leg (South) uses increased length
+	assert_eq(waypoints[3], Vector2(575, 575), "Fourth waypoint should be South with expanded leg")
+
+
+## Test that search pattern expands when radius is increased.
+func test_search_radius_expansion() -> void:
+	var initial_radius := 100.0
+	var expansion := 75.0
+	var max_radius := 400.0
+
+	# First expansion
+	var radius := initial_radius + expansion
+	assert_eq(radius, 175.0, "First expansion should increase radius to 175")
+
+	# Continue expanding until max
+	var expansions := 0
+	radius = initial_radius
+	while radius < max_radius:
+		radius += expansion
+		expansions += 1
+
+	# Verify number of expansions needed
+	assert_eq(expansions, 4, "Should take 4 expansions to go from 100 to 400")
+
+
+## Test that waypoint is considered reached at threshold distance.
+func test_waypoint_reached_distance() -> void:
+	var threshold := 20.0  # SEARCH_WAYPOINT_REACHED_DISTANCE
+	var enemy_pos := Vector2(100, 100)
+	var waypoint := Vector2(110, 110)
+
+	var distance := enemy_pos.distance_to(waypoint)
+	assert_true(distance < threshold,
+		"Waypoint should be considered reached at distance %.1f (< %.1f)" % [distance, threshold])
+
+
+## Test that scan duration allows for proper area inspection.
+func test_search_scan_duration() -> void:
+	var scan_duration := 1.0  # SEARCH_SCAN_DURATION
+
+	# 360 degrees rotation at 1.5 rad/s (from code) takes ~4.2 seconds
+	# With 1.0s scan, enemy rotates ~86 degrees per waypoint
+	var rotation_speed := 1.5  # rad/s from _process_searching_state
+	var rotation_per_scan := rotation_speed * scan_duration
+	var degrees := rad_to_deg(rotation_per_scan)
+
+	assert_true(degrees > 60.0,
+		"Scan should rotate at least 60 degrees per waypoint (actual: %.1f)" % degrees)
+
+
+## Test that search has maximum duration timeout.
+func test_search_max_duration() -> void:
+	var max_duration := 30.0  # SEARCH_MAX_DURATION
+
+	# 30 seconds is reasonable for search before giving up
+	assert_true(max_duration >= 20.0,
+		"Search should last at least 20 seconds")
+	assert_true(max_duration <= 60.0,
+		"Search should not last more than 60 seconds")

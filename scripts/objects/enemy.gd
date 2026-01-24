@@ -21,7 +21,8 @@ enum AIState {
 	SUPPRESSED, ## Under fire, staying in cover
 	RETREATING, ## Retreating to cover while possibly shooting
 	PURSUING,   ## Moving cover-to-cover toward player (when far and can't hit)
-	ASSAULT     ## Coordinated multi-enemy assault (rush player after 5s wait)
+	ASSAULT,    ## Coordinated multi-enemy assault (rush player after 5s wait)
+	SEARCHING   ## Methodically searching area where player was last seen (Issue #322)
 }
 
 ## Retreat behavior modes based on damage taken.
@@ -556,6 +557,58 @@ var _assault_ready: bool = false
 
 ## Whether this enemy is currently participating in an assault.
 var _in_assault: bool = false
+
+## --- Search State (methodical area search) - Issue #322 ---
+## Center position for search pattern (where player was last seen).
+var _search_center: Vector2 = Vector2.ZERO
+
+## Current search radius (expands over time).
+var _search_radius: float = 100.0
+
+## Initial search radius when search begins.
+const SEARCH_INITIAL_RADIUS: float = 100.0
+
+## Amount to expand search radius when all waypoints are visited.
+const SEARCH_RADIUS_EXPANSION: float = 75.0
+
+## Maximum search radius before giving up and returning to idle.
+const SEARCH_MAX_RADIUS: float = 400.0
+
+## Array of waypoints to visit during search.
+var _search_waypoints: Array[Vector2] = []
+
+## Index of current waypoint being visited.
+var _search_current_waypoint_index: int = 0
+
+## Timer for scanning at current waypoint.
+var _search_scan_timer: float = 0.0
+
+## Duration to scan at each waypoint (seconds).
+const SEARCH_SCAN_DURATION: float = 1.0
+
+## Timer for total time spent in SEARCHING state.
+var _search_state_timer: float = 0.0
+
+## Maximum total time to spend searching before returning to patrol (seconds).
+const SEARCH_MAX_DURATION: float = 30.0
+
+## Current search direction for expanding square pattern (0=N, 1=E, 2=S, 3=W).
+var _search_direction: int = 0
+
+## Current leg length for expanding square pattern.
+var _search_leg_length: float = 50.0
+
+## Number of legs completed in current search pattern.
+var _search_legs_completed: int = 0
+
+## Distance threshold to consider waypoint reached.
+const SEARCH_WAYPOINT_REACHED_DISTANCE: float = 20.0
+
+## Whether enemy is currently moving to a waypoint (vs scanning).
+var _search_moving_to_waypoint: bool = true
+
+## Distance threshold for initial distance when generating waypoints (spacing between waypoints).
+const SEARCH_WAYPOINT_SPACING: float = 75.0
 
 ## Distance threshold for "close" vs "far" from player.
 ## Used to determine if enemy can engage from current position or needs to pursue.
@@ -1555,6 +1608,8 @@ func _process_ai_state(delta: float) -> void:
 			_process_pursuing_state(delta)
 		AIState.ASSAULT:
 			_process_assault_state(delta)
+		AIState.SEARCHING:
+			_process_searching_state(delta)
 
 	if previous_state != _current_state:
 		state_changed.emit(_current_state)
@@ -2433,6 +2488,146 @@ func _process_assault_state(_delta: float) -> void:
 	_assault_ready = false
 	_transition_to_combat()
 
+
+## Generate search waypoints using expanding square pattern (Issue #322).
+## Creates waypoints in a spiral pattern from the search center.
+## Validates each waypoint against navigation mesh.
+func _generate_search_waypoints() -> void:
+	_search_waypoints.clear()
+	_search_current_waypoint_index = 0
+	_search_direction = 0  # 0=North, 1=East, 2=South, 3=West
+	_search_leg_length = SEARCH_WAYPOINT_SPACING
+	_search_legs_completed = 0
+
+	# Start with the center point
+	_search_waypoints.append(_search_center)
+
+	# Generate waypoints in expanding square spiral
+	var current_pos := _search_center
+	var waypoints_generated := 1
+	var max_waypoints := 16  # Reasonable limit for initial search
+
+	while waypoints_generated < max_waypoints and _search_leg_length <= _search_radius * 2:
+		# Calculate next waypoint based on current direction
+		var offset := Vector2.ZERO
+		match _search_direction:
+			0:  # North
+				offset = Vector2(0, -_search_leg_length)
+			1:  # East
+				offset = Vector2(_search_leg_length, 0)
+			2:  # South
+				offset = Vector2(0, _search_leg_length)
+			3:  # West
+				offset = Vector2(-_search_leg_length, 0)
+
+		var next_pos := current_pos + offset
+
+		# Validate waypoint is reachable via navigation
+		if _is_waypoint_navigable(next_pos):
+			_search_waypoints.append(next_pos)
+			waypoints_generated += 1
+			current_pos = next_pos
+		else:
+			# Skip invalid waypoint but continue pattern
+			current_pos = next_pos
+
+		# Update direction and leg length (expand every 2 legs)
+		_search_legs_completed += 1
+		_search_direction = (_search_direction + 1) % 4
+
+		if _search_legs_completed % 2 == 0:
+			_search_leg_length += SEARCH_WAYPOINT_SPACING
+
+	_log_debug("Generated %d search waypoints within radius %.0f" % [_search_waypoints.size(), _search_radius])
+
+
+## Check if a waypoint position is navigable.
+## Uses NavigationServer2D to verify the point is on the navmesh.
+func _is_waypoint_navigable(pos: Vector2) -> bool:
+	var nav_map := get_world_2d().navigation_map
+	var closest := NavigationServer2D.map_get_closest_point(nav_map, pos)
+	var distance := pos.distance_to(closest)
+	# Consider navigable if within reasonable distance of navmesh
+	return distance < 50.0
+
+
+## Process SEARCHING state - methodical area search (Issue #322).
+## Enemy moves through waypoints in expanding square pattern,
+## scanning for the player at each waypoint.
+func _process_searching_state(delta: float) -> void:
+	_search_state_timer += delta
+
+	# Check for timeout - return to IDLE if search takes too long
+	if _search_state_timer >= SEARCH_MAX_DURATION:
+		_log_to_file("SEARCHING timeout after %.1fs, returning to IDLE" % _search_state_timer)
+		_transition_to_idle()
+		return
+
+	# If player becomes visible during search, transition to COMBAT
+	if _can_see_player():
+		_log_to_file("SEARCHING: Player spotted! Transitioning to COMBAT")
+		_transition_to_combat()
+		return
+
+	# Check if we've completed all waypoints in current radius
+	if _search_current_waypoint_index >= _search_waypoints.size():
+		# Expand search radius and regenerate waypoints
+		if _search_radius < SEARCH_MAX_RADIUS:
+			_search_radius += SEARCH_RADIUS_EXPANSION
+			_generate_search_waypoints()
+			_log_to_file("SEARCHING: Expanding radius to %.0f, new waypoints=%d" % [_search_radius, _search_waypoints.size()])
+		else:
+			# Max radius reached, give up search
+			_log_to_file("SEARCHING: Max radius reached (%.0f), returning to IDLE" % _search_radius)
+			_transition_to_idle()
+			return
+
+	# Get current target waypoint
+	if _search_waypoints.is_empty():
+		_transition_to_idle()
+		return
+
+	var target_waypoint := _search_waypoints[_search_current_waypoint_index]
+	var distance_to_waypoint := global_position.distance_to(target_waypoint)
+
+	if _search_moving_to_waypoint:
+		# Moving to next waypoint
+		if distance_to_waypoint <= SEARCH_WAYPOINT_REACHED_DISTANCE:
+			# Reached waypoint, start scanning
+			_search_moving_to_waypoint = false
+			_search_scan_timer = 0.0
+			_log_debug("SEARCHING: Reached waypoint %d, scanning..." % _search_current_waypoint_index)
+		else:
+			# Navigate to waypoint
+			_nav_agent.target_position = target_waypoint
+			if _nav_agent.is_navigation_finished():
+				# Can't reach waypoint, skip to next
+				_search_current_waypoint_index += 1
+				_search_moving_to_waypoint = true
+			else:
+				var next_pos := _nav_agent.get_next_path_position()
+				var direction := (next_pos - global_position).normalized()
+				velocity = direction * movement_speed * 0.7  # Search at 70% speed
+				move_and_slide()
+
+				# Rotate to face movement direction
+				if direction.length() > 0.1:
+					var target_rotation := direction.angle()
+					rotation = lerp_angle(rotation, target_rotation, 5.0 * delta)
+	else:
+		# Scanning at waypoint - look around
+		_search_scan_timer += delta
+
+		# Rotate slowly while scanning
+		rotation += delta * 1.5  # Slow rotation for scanning
+
+		if _search_scan_timer >= SEARCH_SCAN_DURATION:
+			# Done scanning, move to next waypoint
+			_search_current_waypoint_index += 1
+			_search_moving_to_waypoint = true
+			_log_debug("SEARCHING: Scan complete, moving to waypoint %d" % _search_current_waypoint_index)
+
+
 ## Shoot with reduced accuracy for retreat mode.
 ## Bullets fly in barrel direction with added inaccuracy spread.
 ## Enemy must be properly aimed before shooting (within AIM_TOLERANCE_DOT).
@@ -2733,6 +2928,26 @@ func _transition_to_assault() -> void:
 	_detection_delay_elapsed = false
 	# Find closest cover to player for assault position
 	_find_cover_closest_to_player()
+
+## Transition to SEARCHING state (Issue #322).
+## Begins methodical search pattern around a center position.
+## @param center_position: The position to search around (typically last known player position).
+func _transition_to_searching(center_position: Vector2) -> void:
+	_current_state = AIState.SEARCHING
+	_search_center = center_position
+	_search_radius = SEARCH_INITIAL_RADIUS
+	_search_state_timer = 0.0
+	_search_scan_timer = 0.0
+	_search_current_waypoint_index = 0
+	_search_direction = 0
+	_search_leg_length = SEARCH_WAYPOINT_SPACING
+	_search_legs_completed = 0
+	_search_moving_to_waypoint = true
+	# Generate initial search waypoints using expanding square pattern
+	_generate_search_waypoints()
+	var msg := "SEARCHING started: center=%s, radius=%.0f, waypoints=%d" % [_search_center, _search_radius, _search_waypoints.size()]
+	_log_debug(msg)
+	_log_to_file(msg)
 
 ## Transition to RETREATING state with appropriate retreat mode.
 func _transition_to_retreating() -> void:
@@ -3816,8 +4031,8 @@ func reset_memory() -> void:
 			_memory.confidence = 0.35
 			_memory.last_updated = Time.get_ticks_msec()
 		_last_known_player_position = old_position
-		_log_to_file("Search mode: %s -> PURSUING at %s" % [AIState.keys()[_current_state], old_position])
-		_transition_to_pursuing()
+		_log_to_file("Search mode: %s -> SEARCHING at %s" % [AIState.keys()[_current_state], old_position])
+		_transition_to_searching(old_position)
 	else:
 		if _memory != null:
 			_memory.reset()
@@ -4618,6 +4833,8 @@ func _get_state_name(state: AIState) -> String:
 			return "PURSUING"
 		AIState.ASSAULT:
 			return "ASSAULT"
+		AIState.SEARCHING:
+			return "SEARCHING"
 		_:
 			return "UNKNOWN"
 
