@@ -1515,34 +1515,51 @@ func _reset_grenade_state() -> void:
 
 ## Throw the grenade using realistic velocity-based physics.
 ## The throw velocity is determined by mouse velocity at release moment, not drag distance.
+## FIX for issue #313: Direction is determined ONLY by mouse velocity direction (how the mouse is MOVING),
+## NOT by the mouse cursor position relative to player.
 ## Includes player rotation animation to prevent grenade hitting player.
-## @param drag_end: The position where the mouse drag ended (used for direction fallback).
+## @param drag_end: The position where the mouse drag ended (unused, kept for API compatibility).
 func _throw_grenade(drag_end: Vector2) -> void:
 	if _active_grenade == null or not is_instance_valid(_active_grenade):
 		FileLogger.info("[Player.Grenade] Cannot throw: no active grenade")
 		_reset_grenade_state()
 		return
 
-	# Get the mouse velocity at moment of release (this is the key to realistic physics)
+	# Get the mouse velocity at moment of release (used for BOTH direction AND strength)
 	var release_velocity := _current_mouse_velocity
-
-	# Determine throw direction from velocity, or fallback to drag direction if stationary
-	var throw_direction: Vector2
 	var velocity_magnitude := release_velocity.length()
 
-	if velocity_magnitude > 10.0:  # Mouse was moving at release
-		throw_direction = release_velocity.normalized()
-	else:
-		# Mouse was stationary at release - grenade drops at feet
-		# Use a slight forward direction so it doesn't appear exactly at player
-		var drag_vector := drag_end - _aim_drag_start
-		if drag_vector.length() > 5.0:
-			throw_direction = drag_vector.normalized()
-		else:
-			throw_direction = Vector2(1, 0)  # Default direction
+	# FIX for issue #313: Use MOUSE VELOCITY DIRECTION (how the mouse is MOVING)
+	# User requirement: grenade flies in the direction the mouse is moving at release
+	# NOT toward where the mouse cursor is positioned
+	# Example: If user moves mouse DOWN, grenade flies DOWN (regardless of where cursor is)
+	var throw_direction: Vector2
 
-	FileLogger.info("[Player.Grenade] Velocity-based throw! Mouse velocity: %s (%.1f px/s), Swing distance: %.1f" % [
-		str(release_velocity), velocity_magnitude, _total_swing_distance
+	if velocity_magnitude > 10.0:
+		# Primary direction: the direction the mouse is MOVING (velocity direction)
+		# FIX for issue #313 v4: Snap to 8 directions (4 cardinal + 4 diagonal)
+		# This compensates for imprecise human mouse movement while allowing diagonal throws
+		var raw_direction := release_velocity.normalized()
+		throw_direction = _snap_to_octant_direction(raw_direction)
+		FileLogger.info("[Player.Grenade] Raw direction: %s, Snapped direction: %s" % [
+			str(raw_direction), str(throw_direction)
+		])
+	else:
+		# Fallback when mouse is not moving - use player-to-mouse as fallback direction
+		# FIX for issue #313 v4: Also snap fallback to 8 directions
+		var player_to_mouse := drag_end - global_position
+		if player_to_mouse.length() > 10.0:
+			throw_direction = _snap_to_octant_direction(player_to_mouse.normalized())
+		else:
+			throw_direction = Vector2(1, 0)  # Default direction (right)
+		# FIX for issue #313 v4: When velocity is 0, use a minimum throw speed
+		# This prevents grenade from getting "stuck" when user stops mouse before release
+		var min_fallback_velocity := 2000.0  # Minimum velocity to ensure grenade travels
+		velocity_magnitude = min_fallback_velocity
+		FileLogger.info("[Player.Grenade] Fallback mode: Using minimum velocity %.1f px/s" % min_fallback_velocity)
+
+	FileLogger.info("[Player.Grenade] Throwing in mouse velocity direction! Direction: %s, Mouse velocity: %.1f px/s, Swing: %.1f" % [
+		str(throw_direction), velocity_magnitude, _total_swing_distance
 	])
 
 	# Rotate player to face throw direction (prevents grenade hitting player when throwing upward)
@@ -1558,13 +1575,53 @@ func _throw_grenade(drag_end: Vector2) -> void:
 	# Raycast from player to intended spawn position to check for walls
 	var spawn_position := _get_safe_grenade_spawn_position(global_position, intended_spawn_position, throw_direction)
 
-	# Use velocity-based throwing if available, otherwise fall back to legacy
-	if _active_grenade.has_method("throw_grenade_velocity_based"):
-		_active_grenade.throw_grenade_velocity_based(release_velocity, _total_swing_distance)
+	# Use direction-based throwing (FIX for issue #313)
+	# Priority: throw_grenade_with_direction > throw_grenade_velocity_based > throw_grenade > direct physics
+	var method_called := false
+	if _active_grenade.has_method("throw_grenade_with_direction"):
+		# Best method: explicit direction + velocity magnitude + swing distance
+		_active_grenade.throw_grenade_with_direction(throw_direction, velocity_magnitude, _total_swing_distance)
+		method_called = true
+		FileLogger.info("[Player.Grenade] Called throw_grenade_with_direction() - direction is mouse velocity direction")
+	elif _active_grenade.has_method("throw_grenade_velocity_based"):
+		# Legacy velocity-based: construct a velocity vector in the correct direction
+		# This is a workaround - we pass (direction * speed) instead of actual mouse velocity
+		var directional_velocity := throw_direction * velocity_magnitude
+		_active_grenade.throw_grenade_velocity_based(directional_velocity, _total_swing_distance)
+		method_called = true
+		FileLogger.info("[Player.Grenade] Called throw_grenade_velocity_based() - direction is mouse velocity direction")
 	elif _active_grenade.has_method("throw_grenade"):
-		# Legacy fallback: convert velocity to drag distance approximation
+		# Legacy drag-based: convert velocity to drag distance approximation
 		var legacy_distance := velocity_magnitude * 0.5  # Rough conversion
 		_active_grenade.throw_grenade(throw_direction, legacy_distance)
+		method_called = true
+		FileLogger.info("[Player.Grenade] Called throw_grenade() on grenade (legacy)")
+
+	# Direct physics fallback when no throw method is available
+	# This handles cases like C# grenade scripts or missing methods
+	if not method_called:
+		FileLogger.info("[Player.Grenade] WARNING: No throw method found via has_method(), using direct physics fallback")
+		# Unfreeze the grenade first
+		if _active_grenade is RigidBody2D:
+			_active_grenade.freeze = false
+			# Calculate throw velocity using the same formula as grenade_base.gd
+			# Default values from GrenadeBase: mouse_velocity_to_throw_multiplier=0.5, min_transfer=0.35
+			var multiplier := 0.5
+			var min_transfer := 0.35
+			var min_swing := 80.0
+			var max_speed := 850.0
+			# Use throw_direction (mouse velocity direction) - FIX for issue #313
+			# The direction is now the direction the mouse is MOVING at release
+			var swing_transfer := clampf(_total_swing_distance / min_swing, 0.0, 1.0 - min_transfer)
+			var transfer_efficiency := min_transfer + swing_transfer
+			transfer_efficiency = clampf(transfer_efficiency, 0.0, 1.0)
+			var throw_speed := clampf(velocity_magnitude * multiplier * transfer_efficiency, 0.0, max_speed)
+			# Apply velocity in the throw_direction (mouse velocity direction)
+			_active_grenade.linear_velocity = throw_direction * throw_speed
+			_active_grenade.rotation = throw_direction.angle()
+			FileLogger.info("[Player.Grenade] Direct physics fallback: direction=%s, speed=%.1f, transfer=%.2f" % [
+				str(throw_direction), throw_speed, transfer_efficiency
+			])
 
 	# Emit signal
 	grenade_thrown.emit()
@@ -1627,6 +1684,30 @@ func _get_safe_grenade_spawn_position(from_pos: Vector2, intended_pos: Vector2, 
 
 	_active_grenade.global_position = safe_position
 	return safe_position
+
+
+## Snap a direction vector to the nearest of 8 directions (4 cardinal + 4 diagonal).
+## FIX for issue #313 v4: Compensates for imprecise human mouse movement while allowing diagonal throws.
+## Uses 8 directions with 45° sectors each:
+## - RIGHT (0°), DOWN-RIGHT (45°), DOWN (90°), DOWN-LEFT (135°)
+## - LEFT (180°), UP-LEFT (-135°), UP (-90°), UP-RIGHT (-45°)
+## @param raw_direction: The raw normalized direction from mouse velocity.
+## @return: A snapped direction vector pointing to the nearest of 8 directions.
+func _snap_to_octant_direction(raw_direction: Vector2) -> Vector2:
+	# Calculate angle in radians (-PI to PI)
+	var angle := raw_direction.angle()
+
+	# Use 8 directions with 45° sectors each
+	var sector_size := PI / 4.0  # 45 degrees per sector
+
+	# Snap to nearest sector (round to nearest multiple of 45°)
+	var sector_index := roundi(angle / sector_size)
+	var snapped_angle := sector_index * sector_size
+
+	# Convert back to direction vector
+	var snapped_direction := Vector2(cos(snapped_angle), sin(snapped_angle))
+
+	return snapped_direction
 
 
 ## Rotate player to face throw direction (with swing animation).
