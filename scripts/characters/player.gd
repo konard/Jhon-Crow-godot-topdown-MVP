@@ -1022,7 +1022,7 @@ func _on_difficulty_changed(_new_difficulty: int) -> void:
 		var new_max_ammo: int = difficulty_manager.get_max_ammo()
 		# Only update if the max ammo changed
 		if new_max_ammo != max_ammo:
-			var old_max_ammo := max_ammo
+			var old_max_ammo: int = max_ammo
 			max_ammo = new_max_ammo
 			# Scale current ammo proportionally, but cap at new max
 			if old_max_ammo > 0:
