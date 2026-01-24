@@ -362,5 +362,282 @@ After implementing the fix:
 ### Internal References
 - Issue: #310
 - Pull Request: #311
-- Commits: `2a86857`, `a6ba37d`
-- Log files: `game_log_20260124_092318.txt`, `game_log_20260124_094610.txt`
+- Commits: `2a86857`, `a6ba37d`, `8737492`, `1b5c37b`, `161ae4a`
+- Log files: `game_log_20260124_092318.txt`, `game_log_20260124_094610.txt`, `game_log_20260124_102344.txt`
+
+---
+
+# Root Cause Analysis: Missing Grenade Throw Sounds
+
+## Executive Summary
+
+After fixing the grenade freezing bug, grenades now fly correctly but no sounds play during throwing. The root cause is **incorrect grenade instantiation in C#** that loses GDScript type information, preventing GDScript methods (including sound playback) from being called.
+
+---
+
+## Problem Statement
+
+**Symptom:** Grenades fly correctly but no sounds play when throwing (pin pull, wall hits, landing sounds all missing).
+
+**User Report (translated from Russian):**
+> "There are now no sounds when throwing the grenade"
+
+**Log Evidence:**
+```
+[Player.Grenade.Throw] Method availability: velocity_based=False, legacy=False
+[Player.Grenade.Throw] WARNING: No throw method found! Using C# fallback to unfreeze and apply velocity
+```
+
+No `[GrenadeBase]` log entries appear, confirming GDScript methods never execute.
+
+---
+
+## Root Cause
+
+### Primary Cause: Type Information Loss During Instantiation
+
+**File:** `Scripts/Characters/Player.cs:1859`
+
+**Original Code:**
+```csharp
+_activeGrenade = GrenadeScene.Instantiate<RigidBody2D>();
+```
+
+**Problem:**
+When using `Instantiate<RigidBody2D>()`, Godot creates a **C# RigidBody2D wrapper** instead of preserving the GDScript type:
+
+1. The grenade scene has `FlashbangGrenade.tscn` with script `flashbang_grenade.gd`
+2. `flashbang_grenade.gd` extends `GrenadeBase` (GDScript class)
+3. `Instantiate<RigidBody2D>()` casts the node to C# `RigidBody2D` type
+4. This loses all GDScript type information and method visibility
+5. `HasMethod("throw_grenade_velocity_based")` returns `false`
+6. GDScript method is never called
+
+**Evidence from logs:**
+```
+[Player.Grenade.Throw] Method availability: velocity_based=False, legacy=False
+```
+
+The methods **do exist** in `grenade_base.gd:190` and `grenade_base.gd:268`, but are invisible to C#.
+
+---
+
+## Secondary Issue: Non-Existent Sound Method
+
+**File:** `Scripts/Characters/Player.cs:2078-2082`
+
+```csharp
+var audioManager = GetNodeOrNull("/root/AudioManager");
+if (audioManager != null && audioManager.HasMethod("play_grenade_throw"))
+{
+    audioManager.Call("play_grenade_throw", GlobalPosition);
+}
+```
+
+**Problem:**
+The method `play_grenade_throw()` doesn't exist in `audio_manager.gd`. Available methods are:
+- `play_grenade_activation()` - Pin pull sound
+- `play_grenade_wall_hit()` - Wall collision
+- `play_grenade_landing()` - Landing sound
+
+There is **no dedicated throw sound effect** in the game. The activation sound (pin pull) is played when the timer starts, not when thrown.
+
+---
+
+## Call Flow Analysis
+
+### Expected Flow (When Working)
+
+```
+Player.ThrowGrenade()
+  └─> _activeGrenade.Call("throw_grenade_velocity_based", velocity, swing)
+      └─> grenade_base.gd::throw_grenade_velocity_based()  [line 190]
+          ├─> freeze = false
+          ├─> linear_velocity = calculated_velocity
+          └─> FileLogger.info("[GrenadeBase] Velocity-based throw! ...")
+
+Player.StartGrenadeTimer()
+  └─> _activeGrenade.Call("activate_timer")
+      └─> grenade_base.gd::activate_timer()  [line 170]
+          ├─> _timer_active = true
+          ├─> _activation_sound_played = true
+          └─> _play_activation_sound()
+              └─> AudioManager.play_grenade_activation(position)
+                  └─> SOUND PLAYS ✓
+```
+
+### Actual Flow (Broken)
+
+```
+Player.ThrowGrenade()
+  ├─> HasMethod("throw_grenade_velocity_based") → Returns FALSE
+  ├─> HasMethod("throw_grenade") → Returns FALSE
+  └─> FALLBACK: Manual velocity application
+      ├─> _activeGrenade.Freeze = false
+      ├─> _activeGrenade.LinearVelocity = velocity
+      └─> NO SOUND PLAYBACK ✗
+
+Player.StartGrenadeTimer()
+  └─> _activeGrenade.Call("activate_timer")
+      └─> grenade_base.gd::activate_timer()  [Should work but logs show it doesn't]
+          └─> NO LOGS APPEAR ✗
+```
+
+**Why activation sound doesn't play:**
+Even though `activate_timer()` is called via `Call()` (which should work with GDScript), the logs show no `[GrenadeBase]` entries, suggesting the GDScript code isn't executing at all.
+
+---
+
+## Technical Deep Dive
+
+### Godot C# to GDScript Interop
+
+When instantiating GDScript scenes from C#:
+
+**Method 1 (WRONG):**
+```csharp
+var node = scene.Instantiate<RigidBody2D>();
+```
+- Creates C# `RigidBody2D` wrapper
+- Loses GDScript type information
+- `HasMethod()` only sees C# `RigidBody2D` methods
+- GDScript methods invisible
+
+**Method 2 (CORRECT):**
+```csharp
+var node = scene.Instantiate();  // Returns Node
+var rigidBody = node as RigidBody2D;
+```
+- Creates GDScript instance
+- Preserves type information
+- `HasMethod()` can see GDScript methods
+- Full interop works correctly
+
+---
+
+## Solution
+
+### Fix 1: Correct Instantiation
+
+**File:** `Scripts/Characters/Player.cs:1858-1865`
+
+**Change:**
+```csharp
+// OLD:
+_activeGrenade = GrenadeScene.Instantiate<RigidBody2D>();
+
+// NEW:
+var grenadeNode = GrenadeScene.Instantiate();
+_activeGrenade = grenadeNode as RigidBody2D;
+if (_activeGrenade == null)
+{
+    LogToFile("[Player.Grenade] Failed to cast to RigidBody2D");
+    if (grenadeNode != null)
+    {
+        grenadeNode.QueueFree();
+    }
+    return;
+}
+```
+
+**Impact:**
+- `HasMethod("throw_grenade_velocity_based")` will return `true`
+- GDScript method will be called
+- All sounds will play automatically from GDScript code
+
+### Fix 2: Remove Non-Existent Sound Call
+
+**File:** `Scripts/Characters/Player.cs:2077-2082`
+
+**Change:**
+```csharp
+// REMOVE:
+var audioManager = GetNodeOrNull("/root/AudioManager");
+if (audioManager != null && audioManager.HasMethod("play_grenade_throw"))
+{
+    audioManager.Call("play_grenade_throw", GlobalPosition);
+}
+
+// REPLACE WITH:
+// NOTE: Grenade throw sound (pin pull / activation) is played by grenade_base.gd
+// in activate_timer() when the timer starts (not when thrown).
+// The sounds during grenade lifecycle are:
+// 1. Activation (pin pull) - when timer starts
+// 2. Wall collision - when hitting obstacles
+// 3. Landing - when coming to rest
+// 4. Explosion - when detonating
+```
+
+---
+
+## Grenade Sound Lifecycle
+
+The complete grenade sound system:
+
+1. **G pressed (grab grenade):**
+   - Visual: Grenade appears in hand
+   - Sound: None
+
+2. **RMB pressed (pull pin / start timer):**
+   - `activate_timer()` called
+   - Sound: `GRENADE_ACTIVATION` ("выдернут чека (активирована).wav")
+   - 4-second countdown begins
+
+3. **RMB released (throw):**
+   - `throw_grenade_velocity_based()` called
+   - Grenade unfrozen, velocity applied
+   - Sound: **None** (no throw sound exists)
+
+4. **Grenade hits wall:**
+   - `_on_body_entered()` detects collision
+   - Sound: `GRENADE_WALL_HIT` ("граната столкнулась со стеной.wav")
+
+5. **Grenade comes to rest:**
+   - Velocity drops below threshold
+   - `_on_grenade_landed()` called once
+   - Sound: `GRENADE_LANDING` ("приземление гранаты.wav")
+
+6. **Timer expires:**
+   - `_explode()` called
+   - Sound: `FLASHBANG_EXPLOSION_IN_ZONE` or `FLASHBANG_EXPLOSION_OUT_ZONE`
+
+**Key Insight:** There is NO "throw whoosh" or "release" sound. The user expects a sound at throw moment, but the design only has an activation sound at pin pull.
+
+---
+
+## Verification Steps
+
+After implementing fixes:
+
+1. ✅ Check logs for `[GrenadeBase]` entries
+2. ✅ Verify `Method availability: velocity_based=True`
+3. ✅ Hear activation sound when pulling pin (RMB press with G held)
+4. ✅ Hear wall collision sounds
+5. ✅ Hear landing sound when grenade stops
+6. ✅ Hear explosion sound
+7. ✅ Grenade flies correctly
+8. ✅ F8 debug logging shows grenade physics calculations
+
+---
+
+## Lessons Learned
+
+1. **C# Instantiation Type Parameters:** Using `Instantiate<T>()` can lose GDScript type information. Prefer `Instantiate()` with casting.
+
+2. **Interop Debugging:** When `HasMethod()` returns false for methods you know exist, check instantiation type preservation.
+
+3. **Sound Design Documentation:** Document sound lifecycle clearly to avoid confusion about "missing" sounds that were never designed.
+
+4. **Cross-Language Call Verification:** Always verify GDScript methods are actually executing (via logs) when called from C#.
+
+---
+
+## References
+
+### Godot Documentation
+- [C# to GDScript Interoperability](https://docs.godotengine.org/en/stable/tutorials/scripting/c_sharp/c_sharp_basics.html#interoperability-with-gdscript)
+- [Instantiating Scenes](https://docs.godotengine.org/en/stable/tutorials/scripting/instancing_with_signals.html)
+
+### Internal References
+- Commit: `161ae4a` - Fix grenade instantiation to preserve GDScript type
+- Log File: `game_log_20260124_102344.txt` - Shows `velocity_based=False` issue
