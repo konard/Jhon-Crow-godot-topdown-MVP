@@ -126,7 +126,7 @@ node.TakeDamage(damage_amount)  # May crash if C# failed to compile
 ### 7. Enemy AI Breaking (Issues #104, #296, #157, PR #308)
 **Problem**: Changes that completely break enemy behavior - enemies not moving, not taking damage, not detecting player
 **Solution**:
-- Never remove or rename critical methods: `_ready`, `_physics_process`, `on_bullet_hit`, `_die`, `_check_player_visibility`
+- Never remove or rename critical methods: `_ready`, `_physics_process`, `on_hit`, `_on_death`, `_check_player_visibility`
 - Preserve required state variables: `_is_alive`, `_current_health`, `_current_state`, `_player`, `_can_see_player`
 - Maintain all AIState enum values (IDLE, COMBAT, SEEKING_COVER, etc.)
 - Test enemy behavior after ANY changes to `scripts/objects/enemy.gd` or `scripts/ai/`
@@ -139,8 +139,8 @@ func _physics_process(delta: float) -> void:
         return
     # ... rest of behavior
 
-# Critical: _die() must emit signal for proper counting
-func _die() -> void:
+# Critical: _on_death() must emit signal for proper counting
+func _on_death() -> void:
     _is_alive = false
     died.emit()  # Required for enemy counting!
 ```
@@ -155,7 +155,7 @@ func _die() -> void:
 
 ```gdscript
 # Critical: Always emit signals for counter updates
-func _die() -> void:
+func _on_death() -> void:
     _is_alive = false
     died.emit()  # GameManager listens for this!
     died_with_info.emit(is_ricochet, is_penetration)

@@ -115,8 +115,8 @@ jobs:
           REQUIRED_METHODS=(
             "_ready"
             "_physics_process"
-            "on_bullet_hit"
-            "_die"
+            "on_hit"
+            "_on_death"
             "_check_player_visibility"
           )
 
