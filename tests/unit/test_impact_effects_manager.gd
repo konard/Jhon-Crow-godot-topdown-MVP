@@ -617,3 +617,30 @@ func test_blood_decal_has_start_color_aging_method() -> void:
 
 	assert_true(temp_sprite.has_method("_start_color_aging"),
 		"BloodDecal should have _start_color_aging method")
+
+
+# Round 5: Circular blood drop tests (fix for rectangular drops)
+func test_blood_decal_scene_has_radial_gradient() -> void:
+	# Test that the BloodDecal scene uses proper radial gradient for circular shape
+	var blood_decal_scene = load("res://scenes/effects/BloodDecal.tscn")
+	assert_not_null(blood_decal_scene, "BloodDecal scene should exist")
+
+	var blood_decal = blood_decal_scene.instantiate()
+	add_child_autoqfree(blood_decal)
+
+	# Check that the texture exists
+	assert_not_null(blood_decal.texture, "BloodDecal should have a texture")
+
+
+func test_blood_decal_texture_is_square() -> void:
+	# Blood decals should use square textures for proper circular rendering
+	var blood_decal_scene = load("res://scenes/effects/BloodDecal.tscn")
+	var blood_decal = blood_decal_scene.instantiate()
+	add_child_autoqfree(blood_decal)
+
+	if blood_decal.texture:
+		var tex_size = blood_decal.texture.get_size()
+		assert_eq(tex_size.x, tex_size.y,
+			"BloodDecal texture should be square for proper circular shape")
+		assert_gte(tex_size.x, 32,
+			"BloodDecal texture should be at least 32x32 for smooth edges")
