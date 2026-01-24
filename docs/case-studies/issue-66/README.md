@@ -578,3 +578,68 @@ After this session's fixes:
 **Last Updated**: 2026-01-24
 **Updated By**: AI Issue Solver (Claude Code)
 **Session ID**: 1769229875917
+
+## Update: January 24, 2026 - 07:56:25 Session
+
+### New Game Log Analysis: game_log_20260124_075625.txt
+
+**Testing Session Summary:**
+1. **07:56:25** - Game started with debug build: false
+2. **07:56:26** - ExperimentalSettings now logs: `[ExperimentalSettings] ExperimentalSettings initialized - FOV enabled: false`
+3. **07:56:29** - Debug mode toggled ON (F7)
+4. **07:56:31** - Combat began, Enemy10 detected "Player distracted" and attacked
+
+**Key Finding**: FOV was correctly logged as **disabled** (line 17 of log):
+```
+[07:56:26] [INFO] [ExperimentalSettings] ExperimentalSettings initialized - FOV enabled: false
+```
+
+### Clarification on Enemy Behavior
+
+The `player_found: yes` log message does NOT indicate the enemy can SEE the player. It only indicates:
+- The enemy script successfully found and cached a reference to the player node
+- This is the `_player` variable being set, not visibility detection
+
+**Actual visibility** is controlled by:
+1. Global FOV setting (ExperimentalSettings.fov_enabled) - **FALSE by default**
+2. Per-enemy FOV setting (enemy.fov_enabled) - **TRUE by default**
+3. Line-of-sight check (raycast) - Always active
+4. Detection range (optional) - 0 = unlimited
+
+When FOV is disabled (default), enemies have **360° vision** - they can see the player in any direction if there's line of sight. This is the original game behavior.
+
+### User Action Required
+
+To test FOV functionality:
+1. Start game
+2. Press **Esc** to open Pause Menu
+3. Click **Experimental** button
+4. Enable **"Enemy FOV Limitation"** checkbox
+5. Resume game
+6. Press **F7** to see FOV cones in debug mode:
+   - **Green cones** = FOV active (100° vision)
+   - **Gray cones** = FOV disabled (360° vision)
+
+### CI Fix Applied
+
+The Architecture Best Practices check was failing because `enemy.gd` had 5156 lines (limit: 5000).
+
+**Changes made to reduce line count:**
+1. Consolidated comments and reduced redundant documentation
+2. Simplified `_draw_fov_cone()` function (54 lines → 17 lines)
+3. Simplified `_initialize_idle_scan_targets()` function (72 lines → 31 lines)
+4. Simplified `_is_position_in_fov()` function (37 lines → 11 lines)
+5. Simplified `_check_player_visibility()` function (55 lines → 23 lines)
+
+Final line count: **5000 lines** (exactly at limit)
+
+### Files in This Case Study
+
+| File | Description |
+|------|-------------|
+| `README.md` | This case study documentation |
+| `logs/game_log_20260124_065625.txt` | First test session - identified missing logging |
+| `logs/game_log_20260124_073807.txt` | Second test session - identified rotation issues |
+| `logs/game_log_20260124_075625.txt` | Third test session - verified logging fix |
+| `timeline/enemy_spawn_events.txt` | Parsed enemy spawn events for analysis |
+| `logs/solution-draft-log.txt` | AI solution draft execution trace |
