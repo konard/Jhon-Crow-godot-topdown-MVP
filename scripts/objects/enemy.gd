@@ -42,10 +42,7 @@ enum BehaviorMode {
 ## Detection range (0=unlimited, line-of-sight only).
 @export var detection_range: float = 0.0
 
-## Field of view angle in degrees.
-## Enemy can only see targets within this cone centered on their facing direction.
-## Set to 0 or negative to disable FOV check (360 degree vision).
-## Default is 100 degrees as requested in issue #66.
+## Field of view angle in degrees (cone centered on facing dir). 0 or negative = 360° vision. Default 100° per issue #66.
 @export var fov_angle: float = 100.0
 
 ## Whether FOV checking is enabled for this specific enemy.
@@ -924,7 +921,6 @@ func _on_debug_mode_toggled(enabled: bool) -> void:
 	debug_label_enabled = enabled
 	_update_debug_label()
 	queue_redraw()  # Redraw to show/hide FOV cone
-
 
 ## Find the player node in the scene tree.
 func _find_player() -> void:
@@ -1873,6 +1869,10 @@ func _process_flanking_state(delta: float) -> void:
 	# This handles obstacles properly unlike direct movement with wall avoidance
 	_move_to_target_nav(_flank_target, combat_move_speed)
 
+	# Corner checking during FLANKING (Issue #332)
+	if velocity.length_squared() > 1.0:
+		_process_corner_check(delta, velocity.normalized(), "FLANKING")
+
 ## Process SUPPRESSED state - staying in cover under fire.
 func _process_suppressed_state(delta: float) -> void:
 	velocity = Vector2.ZERO
@@ -2208,6 +2208,9 @@ func _process_pursuing_state(delta: float) -> void:
 
 		# Use navigation-based pathfinding to move toward pursuit cover
 		_move_to_target_nav(_pursuit_next_cover, combat_move_speed)
+		# Corner checking during PURSUING (Issue #332)
+		if velocity.length_squared() > 1.0:
+			_process_corner_check(delta, velocity.normalized(), "PURSUING")
 		return
 
 	# No cover and no pursuit target - find initial pursuit cover
@@ -2237,6 +2240,9 @@ func _process_pursuing_state(delta: float) -> void:
 
 			# Otherwise, continue moving toward suspected position
 			_move_to_target_nav(target_pos, combat_move_speed)
+			# Corner checking during pursuit to suspected position (Issue #332)
+			if velocity.length_squared() > 1.0:
+				_process_corner_check(delta, velocity.normalized(), "PURSUING_MEMORY")
 			return
 
 		# Can't find cover to pursue, try flanking or combat
@@ -2367,6 +2373,8 @@ func _process_searching_state(delta: float) -> void:
 				move_and_slide()
 				if dir.length() > 0.1:
 					rotation = lerp_angle(rotation, dir.angle(), 5.0 * delta)
+					# Corner checking during SEARCHING movement (Issue #332)
+					_process_corner_check(delta, dir, "SEARCHING")
 	else:
 		_search_scan_timer += delta
 		rotation += delta * 1.5
@@ -2531,7 +2539,6 @@ func _transition_to_idle() -> void:
 	# Reset idle scanning state for GUARD enemies
 	_idle_scan_timer = 0.0
 	_idle_scan_targets.clear()  # Will be re-initialized in _process_guard
-
 
 ## Transition to COMBAT state.
 func _transition_to_combat() -> void:
@@ -3629,7 +3636,6 @@ func _get_wall_avoidance_weight(direction: Vector2) -> float:
 	var normalized_distance: float = clampf(closest_distance / WALL_CHECK_DISTANCE, 0.0, 1.0)
 	return lerpf(WALL_AVOIDANCE_MIN_WEIGHT, WALL_AVOIDANCE_MAX_WEIGHT, normalized_distance)
 
-
 ## Check if target is within FOV cone. FOV uses _enemy_model.global_rotation for facing.
 func _is_position_in_fov(target_pos: Vector2) -> bool:
 	var experimental_settings: Node = get_node_or_null("/root/ExperimentalSettings")
@@ -3642,7 +3648,6 @@ func _is_position_in_fov(target_pos: Vector2) -> bool:
 	var angle_to_target := rad_to_deg(acos(clampf(dot, -1.0, 1.0)))
 	var in_fov := angle_to_target <= fov_angle / 2.0
 	return in_fov
-
 
 ## Check if the player is visible using multi-point raycast. Updates visibility timer.
 func _check_player_visibility() -> void:
@@ -3795,7 +3800,6 @@ func reset_memory() -> void:
 			else:
 				_log_to_file("State reset: %s -> IDLE (no target)" % AIState.keys()[_current_state])
 				_transition_to_idle()
-
 
 ## Check if there is a clear line of sight to a position (enemy-to-enemy comms).
 func _has_line_of_sight_to_position(target_pos: Vector2) -> bool:
@@ -4079,26 +4083,30 @@ func _process_patrol(delta: float) -> void:
 		velocity = direction * move_speed
 		rotation = direction.angle()
 		# Check for corners/openings perpendicular to movement direction
-		if _corner_check_timer > 0:
-			_corner_check_timer -= delta
-		elif _detect_perpendicular_opening(direction):
-			_corner_check_timer = CORNER_CHECK_DURATION
+		_process_corner_check(get_physics_process_delta_time(), direction, "PATROL")
 
 ## Detect openings perpendicular to movement direction (for corner checking).
 func _detect_perpendicular_opening(move_dir: Vector2) -> bool:
 	var space_state := get_world_2d().direct_space_state
-	# Check both perpendicular directions (left and right of movement)
 	for side in [-1.0, 1.0]:
 		var perp_dir := move_dir.rotated(side * PI / 2)
 		var query := PhysicsRayQueryParameters2D.create(global_position, global_position + perp_dir * CORNER_CHECK_DISTANCE)
-		query.collision_mask = 0b100  # Wall layer
+		query.collision_mask = 0b100
 		query.exclude = [self]
-		var result := space_state.intersect_ray(query)
-		if result.is_empty():  # No wall = opening found
+		if space_state.intersect_ray(query).is_empty():
 			_corner_check_angle = perp_dir.angle()
 			_force_model_to_face_direction(perp_dir)
 			return true
 	return false
+
+## Handle corner checking during movement (Issue #332).
+func _process_corner_check(delta: float, move_dir: Vector2, state_name: String) -> void:
+	if _corner_check_timer > 0:
+		_corner_check_timer -= delta
+		_force_model_to_face_direction(Vector2.from_angle(_corner_check_angle))
+	elif _detect_perpendicular_opening(move_dir):
+		_corner_check_timer = CORNER_CHECK_DURATION
+		_log_to_file("%s corner check: angle %.1f°" % [state_name, rad_to_deg(_corner_check_angle)])
 
 ## Process guard behavior - scan for threats every IDLE_SCAN_INTERVAL seconds.
 func _process_guard(delta: float) -> void:
@@ -4110,7 +4118,6 @@ func _process_guard(delta: float) -> void:
 		_idle_scan_timer = 0.0
 		if _idle_scan_targets.size() > 0:
 			_idle_scan_target_index = (_idle_scan_target_index + 1) % _idle_scan_targets.size()
-
 
 ## Initialize scan targets - detects passages using raycasts.
 func _initialize_idle_scan_targets() -> void:
@@ -4147,7 +4154,6 @@ func _initialize_idle_scan_targets() -> void:
 		_idle_scan_targets = [0.0, PI]
 	_idle_scan_target_index = randi() % _idle_scan_targets.size()
 
-
 ## Called when a bullet enters the threat sphere.
 func _on_threat_area_entered(area: Area2D) -> void:
 	if "shooter_id" in area and area.shooter_id == get_instance_id():
@@ -4156,21 +4162,17 @@ func _on_threat_area_entered(area: Area2D) -> void:
 	_threat_memory_timer = THREAT_MEMORY_DURATION
 	_log_debug("Bullet entered threat sphere, starting reaction delay...")
 
-
 ## Called when a bullet exits the threat sphere.
 func _on_threat_area_exited(area: Area2D) -> void:
 	_bullets_in_threat_sphere.erase(area)
-
 
 ## Called when the enemy is hit (by bullet.gd).
 func on_hit() -> void:
 	on_hit_with_info(Vector2.RIGHT, null)
 
-
 ## Called when the enemy is hit with extended hit information.
 func on_hit_with_info(hit_direction: Vector2, caliber_data: Resource) -> void:
 	on_hit_with_bullet_info(hit_direction, caliber_data, false, false)
-
 
 ## Called when the enemy is hit with full bullet information.
 func on_hit_with_bullet_info(hit_direction: Vector2, caliber_data: Resource, has_ricocheted: bool, has_penetrated: bool) -> void:
@@ -4853,30 +4855,32 @@ func _draw() -> void:
 		# Draw small filled circle at center
 		draw_circle(to_suspected, 5.0, confidence_color)
 
-
-## Draw FOV cone for debug visualization.
-## The cone follows _enemy_model.global_rotation to show the actual facing direction.
+## Draw FOV cone with obstacle occlusion. Follows model rotation, rays stop at walls.
 func _draw_fov_cone(fill_color: Color, edge_color: Color) -> void:
 	var half_fov := deg_to_rad(fov_angle / 2.0)
-	var cone_length := 400.0
-	# Get the model's facing angle - this is where the enemy is actually looking
-	var facing_angle := _enemy_model.global_rotation if _enemy_model else 0.0
-	# Calculate cone edges relative to facing direction
-	var left_end := Vector2.from_angle(facing_angle - half_fov) * cone_length
-	var right_end := Vector2.from_angle(facing_angle + half_fov) * cone_length
+	var global_facing := _enemy_model.global_rotation if _enemy_model else global_rotation
+	var local_facing := global_facing - global_rotation  # Convert to local space for drawing
+	var space_state := get_world_2d().direct_space_state
 	var cone_points: PackedVector2Array = [Vector2.ZERO]
-	var arc_segments := 16
-	for i in range(arc_segments + 1):
-		var angle := facing_angle - half_fov + (float(i) / arc_segments) * 2 * half_fov
-		cone_points.append(Vector2.from_angle(angle) * cone_length)
+	var ray_endpoints: Array[Vector2] = []
+	for i in range(33):  # 32 segments + 1
+		var t := float(i) / 32.0
+		var angle := local_facing - half_fov + t * 2 * half_fov
+		var ray_dir := Vector2.from_angle(angle)
+		var global_ray_end := global_position + Vector2.from_angle(global_facing - half_fov + t * 2 * half_fov) * 400.0
+		var query := PhysicsRayQueryParameters2D.create(global_position, global_ray_end)
+		query.collision_mask = 0b100
+		query.exclude = [self]
+		var result := space_state.intersect_ray(query)
+		var end_local := ray_dir * (global_position.distance_to(result.position) if not result.is_empty() else 400.0)
+		cone_points.append(end_local)
+		ray_endpoints.append(end_local)
 	draw_colored_polygon(cone_points, fill_color)
-	draw_line(Vector2.ZERO, left_end, edge_color, 2.0)
-	draw_line(Vector2.ZERO, right_end, edge_color, 2.0)
-	for i in range(arc_segments):
-		var a1 := facing_angle - half_fov + (float(i) / arc_segments) * 2 * half_fov
-		var a2 := facing_angle - half_fov + (float(i + 1) / arc_segments) * 2 * half_fov
-		draw_line(Vector2.from_angle(a1) * cone_length, Vector2.from_angle(a2) * cone_length, edge_color, 1.5)
-
+	if ray_endpoints.size() > 0:
+		draw_line(Vector2.ZERO, ray_endpoints[0], edge_color, 2.0)
+		draw_line(Vector2.ZERO, ray_endpoints[ray_endpoints.size() - 1], edge_color, 2.0)
+	for i in range(ray_endpoints.size() - 1):
+		draw_line(ray_endpoints[i], ray_endpoints[i + 1], edge_color, 1.5)
 
 ## Check if player is distracted (aim >23° away from this enemy). Used for priority attacks.
 func _is_player_distracted() -> bool:
