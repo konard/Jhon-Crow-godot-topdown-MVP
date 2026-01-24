@@ -227,6 +227,40 @@ func throw_grenade_velocity_based(mouse_velocity: Vector2, swing_distance: float
 	])
 
 
+## Throw the grenade with explicit direction and speed derived from mouse velocity.
+## FIX for issue #313: direction is now mouse velocity direction (how mouse is MOVING).
+## @param throw_direction: The normalized direction to throw (mouse velocity direction).
+## @param velocity_magnitude: The mouse velocity magnitude at release (pixels/second).
+## @param swing_distance: Total distance the mouse traveled during the swing (pixels).
+func throw_grenade_with_direction(throw_direction: Vector2, velocity_magnitude: float, swing_distance: float) -> void:
+	# Unfreeze the grenade so physics can take over
+	freeze = false
+
+	# Calculate mass-adjusted minimum swing distance
+	var mass_ratio := grenade_mass / 0.4  # Normalized to "standard" 0.4kg grenade
+	var required_swing := min_swing_distance * mass_ratio
+
+	# Calculate velocity transfer efficiency (same formula as throw_grenade_velocity_based)
+	var swing_transfer := clampf(swing_distance / required_swing, 0.0, 1.0 - min_transfer_efficiency)
+	var transfer_efficiency := min_transfer_efficiency + swing_transfer
+	transfer_efficiency = clampf(transfer_efficiency, 0.0, 1.0)
+
+	# Calculate throw speed from velocity magnitude
+	var base_speed := velocity_magnitude * mouse_velocity_to_throw_multiplier * transfer_efficiency
+	var throw_speed := clampf(base_speed / sqrt(mass_ratio), 0.0, max_throw_speed)
+
+	# Set velocity using the provided direction (mouse velocity direction)
+	if throw_speed > 1.0:
+		linear_velocity = throw_direction.normalized() * throw_speed
+		rotation = throw_direction.angle()
+	else:
+		linear_velocity = Vector2.ZERO
+
+	FileLogger.info("[GrenadeBase] Mouse velocity direction throw! Dir: %s, Vel mag: %.1f, Swing: %.1f, Transfer: %.2f, Speed: %.1f" % [
+		str(throw_direction), velocity_magnitude, swing_distance, transfer_efficiency, throw_speed
+	])
+
+
 ## Throw the grenade in a direction with speed based on drag distance (LEGACY method).
 ## @param direction: Normalized direction to throw.
 ## @param drag_distance: Distance of the drag in pixels.
