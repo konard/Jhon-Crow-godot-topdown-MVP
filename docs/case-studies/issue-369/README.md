@@ -642,3 +642,89 @@ The coordinated search system ensures that when multiple enemies are searching f
 2. Routes are planned upfront for minimal movement
 3. No enemy visits areas already checked by others
 4. The search is completed faster with better coverage
+
+---
+
+## Session 3: User Bug Report Investigation (2026-01-25)
+
+### User Report
+
+In PR #372, user Jhon-Crow reported:
+> "враги полностью сломались! проверь C#"
+> (Translation: "enemies completely broke! check C#")
+
+An attached game log `game_log_20260125_094956.txt` was provided.
+
+### Log Analysis
+
+#### Key Finding: Wrong Build Tested
+
+The log revealed the user tested with a build from **main branch**, NOT from PR #372:
+
+1. **BloodyFeetComponent Present:**
+   ```
+   [09:49:56] [INFO] [BloodyFeet:Enemy1] BloodyFeetComponent ready on Enemy1
+   [09:49:56] [INFO] [BloodyFeet:Enemy2] BloodyFeetComponent ready on Enemy2
+   ...
+   ```
+   BloodyFeetComponent does NOT exist in the PR branch. It was added to `main` after our last merge.
+
+2. **Zero Enemies Registered:**
+   ```
+   [09:49:56] [INFO] [BuildingLevel] Child 'Enemy1': script=true, has_died_signal=false
+   [09:49:56] [INFO] [BuildingLevel] Enemy tracking complete: 0 enemies registered
+   ```
+   The `script=true` but `has_died_signal=false` indicates the GDScript wasn't loaded properly.
+
+3. **Enemies Removed from Scene Tree:**
+   ```
+   [09:49:58] [INFO] [BloodyFeet:Enemy1] ... in_tree=false
+   [09:49:58] [INFO] [BloodyFeet:Enemy2] ... in_tree=false
+   ```
+   All enemies were removed from the scene tree 2 seconds after initialization.
+
+#### Hypothesis
+
+The `main` branch has:
+- The old expanding square search pattern (`enemy.gd`)
+- BloodyFeetComponent (new feature)
+
+Our PR branch has:
+- The new coordinated search system using `SearchCoordinator`
+- Different search-related variables and functions
+
+The user likely tested with `main` which may have an unrelated bug, or a mixed state caused script loading issues.
+
+### Verification Steps
+
+Our PR branch was verified:
+
+1. **Signal declarations exist** (`scripts/objects/enemy.gd:188-197`):
+   ```gdscript
+   signal hit  ## Enemy hit
+   signal died  ## Enemy died
+   signal died_with_info(is_ricochet_kill: bool, is_penetration_kill: bool)
+   ```
+
+2. **No GDScript parsing errors** - file parses cleanly
+
+3. **SearchCoordinator properly registered** in `project.godot` autoloads
+
+4. **Line count compliant**: 4993 lines (under 5000 CI limit)
+
+### Resolution
+
+Commented on PR requesting user test with the correct branch:
+
+```bash
+git fetch origin
+git checkout issue-369-523c173e52fb
+# Export the project from this branch
+```
+
+### Log File Added
+
+The problematic game log was saved for reference:
+- `logs/game_log_20260125_094956.txt`
+
+---
