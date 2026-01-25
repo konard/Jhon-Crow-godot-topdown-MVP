@@ -293,6 +293,44 @@ func _update_enemy_model_rotation() -> void:
 
 ---
 
+## Update: Third Fix Attempt (2026-01-25)
+
+### Why the Second Fix Was Still Insufficient
+
+After the second fix, the user reported the problem persists (log: `game_log_20260125_100732.txt`). Analysis revealed a subtle bug:
+
+1. In combat states, `_get_target_position()` is called
+2. If ALL of these are true: `_can_see_player` is false, memory has decayed, AND `_last_known_player_position` is `Vector2.ZERO` - it returns `global_position`
+3. When `target_pos == global_position`, `has_target` was NOT set to true
+4. The code then falls through to velocity-based rotation (for moving enemies)
+5. This causes the enemy model to rotate toward movement direction instead of player!
+
+### Third Fix Applied
+
+Added a fallback in `_update_enemy_model_rotation()` that uses the player's actual position when memory is unavailable:
+
+```gdscript
+if in_combat:  # Issue #373: always face player/target in combat, no velocity fallback
+    var target_pos := _get_target_position()
+    if target_pos != global_position:
+        target_angle = (target_pos - global_position).normalized().angle()
+        has_target = true
+    elif _player != null:  # Fallback: face player directly even without memory
+        target_angle = (_player.global_position - global_position).normalized().angle()
+        has_target = true
+```
+
+### Why This Works
+
+When in combat state, the enemy will face:
+1. Memory/last known position (via `_get_target_position()`) - primary
+2. Player's actual position (fallback when memory unavailable)
+3. NEVER falls back to velocity-based rotation during combat
+
+This ensures enemies maintain facing toward the player throughout combat, regardless of memory state.
+
+---
+
 ## References
 
 - Issue #347: Smooth rotation for visual polish
