@@ -388,10 +388,63 @@ elif tracking_mode:  # Use memory/last known for PURSUING/SEARCHING
 
 ---
 
+## Update: Fifth Investigation (2026-01-25)
+
+### Why the Fourth Fix Was Still Insufficient
+
+After the fourth fix, the user reported the problem persists (log: `game_log_20260125_103903.txt`). At this point, we've tried:
+
+1. ✅ Skip FOV check in combat states - prevents visibility flickering
+2. ✅ Use target position in combat states - better than velocity-based rotation
+3. ✅ Add player fallback when memory empty - ensures always has a target
+4. ✅ Face player DIRECTLY in active combat - avoid stale memory positions
+
+All these fixes address potential causes, yet the bug persists. This suggests the root cause might be something we haven't analyzed yet.
+
+### Deep Dive: What Could We Be Missing?
+
+After extensive code analysis, the rotation logic appears correct:
+- `_update_enemy_model_rotation()` runs BEFORE `_process_ai_state()`
+- In active combat states, it directly uses `_player.global_position`
+- The angle calculation and smooth rotation are standard Godot patterns
+
+Potential unexplored areas:
+1. **Other rotation modifiers** - `_force_model_to_face_direction()` is called in priority attack code, but it faces TOWARD the player
+2. **Timing issues** - One-frame delay during state transitions (rotation calculated before state change)
+3. **Visual flip issues** - The Y-scale flip at ±90° boundary could cause visual glitches
+
+### Solution: Add Rotation Tracing
+
+To pinpoint the exact cause, added detailed rotation logging to `_update_enemy_model_rotation()`:
+
+```gdscript
+if angle_change_degrees > 30.0:  # Log significant rotation changes
+    _log_to_file("ROT %s: %.1f° -> %.1f° (diff=%.1f°, src=%s, state=%s)" % [
+        name, rad_to_deg(current_rot), rad_to_deg(target_angle),
+        angle_change_degrees, rotation_source, AIState.keys()[_current_state]
+    ])
+```
+
+This logs:
+- Current and target angles (in degrees)
+- Angle change magnitude
+- Rotation source: `ACTIVE_COMBAT_PLAYER`, `TRACKING_MEMORY`, `TRACKING_PLAYER_FALLBACK`, `VISIBLE_PLAYER`, `CORNER_CHECK`, `VELOCITY`, `IDLE_SCAN`
+- Current AI state
+
+### Expected Log Output
+
+When the turn-away occurs, the logs should show exactly which code path triggered it and what the angle change was. This will definitively identify whether:
+- The wrong rotation source is being used
+- The angle calculation is incorrect
+- Some other factor is at play
+
+---
+
 ## References
 
 - Issue #347: Smooth rotation for visual polish
 - Issue #332: Corner checking during movement
 - Issue #367: FLANKING/PURSUING wall-stuck detection
 - Related concepts: [Game AI awareness systems](https://www.gamedeveloper.com/design/the-ai-of-halo-2)
+- Common Godot issue: [180/-180 degree wrap-around in FOV calculations](https://godotforums.org/d/18193-enemy-not-rotating-properly-towards-the-player)
 
