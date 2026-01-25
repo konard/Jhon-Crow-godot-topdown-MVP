@@ -647,7 +647,7 @@ const GRENADE_SUSTAINED_FIRE_THRESHOLD: float = 10.0  ## Seconds of sustained fi
 const GRENADE_FIRE_GAP_TOLERANCE: float = 2.0  ## Max gap between shots (Trigger 5)
 const GRENADE_VIEWPORT_ZONE_FRACTION: float = 6.0  ## Zone is 1/6 of viewport (Trigger 5)
 const GRENADE_DESPERATION_HEALTH_THRESHOLD: int = 1  ## HP threshold (Trigger 6)
-const GRENADE_SUSPICION_HIDDEN_TIME: float = 3.0  ## Seconds player must be hidden with high suspicion (Trigger 7, Issue #379)
+const GRENADE_SUSPICION_HIDDEN_TIME: float = 3.0  ## Seconds player must be hidden with medium+ suspicion (Trigger 7, Issue #379)
 
 ## Last hit direction (used for death animation).
 var _last_hit_direction: Vector2 = Vector2.RIGHT
@@ -5452,33 +5452,46 @@ func _should_trigger_sustained_fire_grenade() -> bool:
 func _should_trigger_desperation_grenade() -> bool:
 	return _current_health <= GRENADE_DESPERATION_HEALTH_THRESHOLD
 
-## Check Trigger 7: High suspicion + player hidden for threshold time (Issue #379).
+## Check Trigger 7: Suspicion + player hidden for threshold time (Issue #379).
 ## This implements "enemy strongly suspects player is somewhere" behavior.
-## Fires when enemy has high confidence (0.8+) about player location but cannot see them.
+## Fires when enemy has medium+ confidence (0.5+) about player location but cannot see them.
+##
+## NOTE: Uses medium confidence (0.5+) instead of high confidence (0.8+) because:
+## - Confidence decays at 0.1/second, so high confidence only lasts ~2 seconds from 1.0
+## - Timer needs 3 seconds, which is mathematically impossible with high confidence only
+## - Medium confidence (0.5+) lasts ~5 seconds, giving sufficient time for timer to build
 func _should_trigger_suspicion_grenade() -> bool:
 	if _memory == null or not _memory.has_target():
 		return false
 
-	# Must have high confidence (0.8+)
-	if not _memory.is_high_confidence():
+	# Must have at least medium confidence (0.5+)
+	# Using medium instead of high because confidence decays faster than timer can build
+	if not _memory.is_medium_confidence() and not _memory.is_high_confidence():
 		return false
 
 	# Must not currently see player
 	if _can_see_player:
 		return false
 
-	# Player must have been hidden for threshold time with high suspicion
+	# Player must have been hidden for threshold time with suspicion
 	return _high_suspicion_hidden_timer >= GRENADE_SUSPICION_HIDDEN_TIME
 
-## Update Trigger 7: High suspicion but player is hidden (Issue #379).
-## Tracks time enemy has high confidence but cannot see player.
+## Update Trigger 7: Suspicion but player is hidden (Issue #379).
+## Tracks time enemy has medium+ confidence but cannot see player.
+##
+## Uses medium confidence (0.5+) to track suspicion because:
+## - High confidence (0.8+) decays to below threshold in ~2 seconds
+## - But timer requires 3 seconds, making it mathematically impossible
+## - Medium confidence (0.5+) lasts ~5 seconds from 1.0, giving time for timer to build
 func _update_trigger_suspicion(delta: float) -> void:
 	if _memory == null:
 		_high_suspicion_hidden_timer = 0.0
 		return
 
-	# Check if we have high confidence but can't see player
-	if _memory.is_high_confidence() and not _can_see_player and _memory.has_target():
+	# Check if we have at least medium confidence but can't see player
+	# Use medium confidence (0.5+) because high confidence decays too fast
+	var has_suspicion := (_memory.is_medium_confidence() or _memory.is_high_confidence()) and _memory.has_target()
+	if has_suspicion and not _can_see_player:
 		_high_suspicion_hidden_timer += delta
 	else:
 		# Player visible OR confidence too low - reset timer

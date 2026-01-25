@@ -348,4 +348,63 @@ _goap_world_state["grenade_thrown_at_suspicion"] = true
 
 ---
 
+---
+
+## Bug Fix: Low Activation Rate (2026-01-25)
+
+### Problem Discovered
+
+After initial implementation, user reported that Trigger 7 fires "very rarely". Analysis of game logs revealed a **mathematical impossibility** in the original design.
+
+### Root Cause
+
+The original implementation required:
+- High confidence (≥ 0.8) to track the suspicion timer
+- Timer to reach 3.0 seconds while confidence stays high
+
+But confidence decays at 0.1/second:
+```
+Starting at 1.0 (visual contact):
+- After 2 seconds: confidence = 0.8 (at threshold)
+- After 3 seconds: confidence = 0.7 (BELOW threshold - timer resets!)
+```
+
+**Result**: Timer can NEVER reach 3 seconds while confidence stays ≥ 0.8
+
+### Solution
+
+Changed Trigger 7 to use **medium confidence (0.5+)** instead of high confidence (0.8+):
+
+```gdscript
+## Before (broken):
+if _memory.is_high_confidence() and not _can_see_player:
+    _high_suspicion_hidden_timer += delta
+
+## After (fixed):
+var has_suspicion := (_memory.is_medium_confidence() or _memory.is_high_confidence())
+if has_suspicion and not _can_see_player:
+    _high_suspicion_hidden_timer += delta
+```
+
+### Why Medium Confidence Works
+
+| Confidence | Threshold | Time Available from 1.0 |
+|------------|-----------|-------------------------|
+| High       | ≥ 0.8     | ~2 seconds |
+| Medium     | ≥ 0.5     | ~5 seconds |
+
+Using medium confidence gives 5 seconds of tracking time, which is sufficient for the 3-second timer.
+
+### Game Design Justification
+
+- "Strong suspicion" semantically maps to medium confidence (50-80%)
+- High confidence (80%+) implies near-certainty, triggering direct pursuit
+- Grenade is meant for uncertain-but-suspicious situations
+- 5 seconds allows more tactical gameplay opportunities
+
+See [root-cause-analysis-2026-01-25.md](./root-cause-analysis-2026-01-25.md) for detailed analysis.
+
+---
+
 *Technical analysis completed: 2026-01-25*
+*Bug fix documentation added: 2026-01-25*
