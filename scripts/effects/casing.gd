@@ -180,17 +180,19 @@ func _play_kick_sound() -> void:
 
 
 ## Determines the caliber type from caliber_data for sound selection.
+## Uses property-based checks instead of 'is' type checks to avoid
+## exported build crashes when class_name resolution fails.
 func _determine_caliber_type() -> String:
 	if caliber_data == null:
 		return "rifle"
 
-	# Only use CaliberData type - avoid calling methods on unknown Resource types
-	# which can crash exported builds (e.g., .has() only works on Dictionary)
-	if not (caliber_data is CaliberData):
+	# Use property-based check instead of "is CaliberData" to avoid
+	# parse errors in exported builds where class_name may not resolve.
+	# The "in" operator safely checks if a property exists on the Resource.
+	if not ("caliber_name" in caliber_data):
 		return "rifle"
 
-	var caliber: CaliberData = caliber_data as CaliberData
-	var caliber_name: String = caliber.caliber_name
+	var caliber_name: String = caliber_data.caliber_name
 
 	# Determine type from name
 	var name_lower = caliber_name.to_lower()
@@ -203,16 +205,19 @@ func _determine_caliber_type() -> String:
 
 
 ## Sets the visual appearance of the casing based on its caliber.
+## Uses property-based checks instead of 'is' type checks to avoid
+## exported build crashes when class_name resolution fails.
 func _set_casing_appearance() -> void:
 	var sprite = $Sprite2D
 	if sprite == null:
 		return
 
-	# Try to get the casing sprite from caliber data
-	if caliber_data != null and caliber_data is CaliberData:
-		var caliber: CaliberData = caliber_data as CaliberData
-		if caliber.casing_sprite != null:
-			sprite.texture = caliber.casing_sprite
+	# Try to get the casing sprite from caliber data using property check
+	# instead of "is CaliberData" to avoid exported build parse errors.
+	if caliber_data != null and "casing_sprite" in caliber_data:
+		var casing_sprite = caliber_data.casing_sprite
+		if casing_sprite != null:
+			sprite.texture = casing_sprite
 			# Reset modulate to show actual sprite colors
 			sprite.modulate = Color.WHITE
 			return
@@ -221,11 +226,9 @@ func _set_casing_appearance() -> void:
 	# Default color (rifle casing - brass)
 	var casing_color = Color(0.9, 0.8, 0.4)  # Brass color
 
-	# Only use CaliberData type for color determination
-	# Avoid calling methods on unknown Resource types which can crash exported builds
-	if caliber_data != null and caliber_data is CaliberData:
-		var caliber: CaliberData = caliber_data as CaliberData
-		var caliber_name: String = caliber.caliber_name
+	# Use property-based check for caliber_name to determine color
+	if caliber_data != null and "caliber_name" in caliber_data:
+		var caliber_name: String = caliber_data.caliber_name
 
 		if "buckshot" in caliber_name.to_lower() or "Buckshot" in caliber_name:
 			casing_color = Color(0.8, 0.2, 0.2)  # Red for shotgun

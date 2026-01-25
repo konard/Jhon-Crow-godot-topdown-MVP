@@ -33,7 +33,9 @@
 
 ### Root Cause Analysis
 
-The crash occurred due to **calling `.has()` method on Resource objects** in `casing.gd`:
+#### Issue 1: Calling `.has()` on Resource (Fixed v1)
+
+The first crash occurred due to **calling `.has()` method on Resource objects** in `casing.gd`:
 
 ```gdscript
 # PROBLEMATIC CODE (lines 183-184 in original):
@@ -48,6 +50,29 @@ elif caliber_data.has_method("get"):
 4. This crash happens **silently** in exported builds - no error message shown
 5. The crash occurs during casing initialization in `_ready()` or `_set_casing_appearance()`
 
+#### Issue 2: Using `is CaliberData` Type Check (Fixed v2)
+
+After fixing the `.has()` issue, the crash persisted. The second root cause was **using `is CaliberData` type checks**:
+
+```gdscript
+# PROBLEMATIC CODE (still caused crash in exported builds):
+if not (caliber_data is CaliberData):
+    return "rifle"
+var caliber: CaliberData = caliber_data as CaliberData
+```
+
+**Why this crashes in exported builds:**
+1. GDScript `class_name` references may not resolve correctly in exported builds
+2. The `is CaliberData` type check requires the `CaliberData` class_name to be loaded
+3. In exported builds, script loading order can cause `class_name` resolution to fail
+4. This results in a **parse error at script load time** - before the game even starts
+5. The crash happens immediately after the Godot splash screen
+
+**This is a known Godot 4 issue:**
+- [GitHub Issue #41215](https://github.com/godotengine/godot/issues/41215) - References to class not resolved when exported
+- [GitHub Issue #87397](https://github.com/godotengine/godot/issues/87397) - Resource loaded without script class_name association
+- [Godot Forum](https://forum.godotengine.org/t/parser-error-could-not-resolve-class-class-name/2482) - Parser Error: Could not resolve class
+
 ### GDScript Type System Differences
 
 | Method | Dictionary | Resource | Object |
@@ -59,9 +84,9 @@ elif caliber_data.has_method("get"):
 
 ### Solution Applied
 
-The fix removes all `.has()` calls on Resource objects and replaces them with explicit type checks:
+The fix removes all `.has()` calls AND `is CaliberData` type checks, replacing them with **property-based checks** using the `"property" in object` pattern:
 
-**Before (crashes):**
+**Before (crashes - v1):**
 ```gdscript
 if caliber_data is CaliberData:
     caliber_name = (caliber_data as CaliberData).caliber_name
@@ -69,7 +94,7 @@ elif caliber_data.has_method("get"):
     caliber_name = caliber_data.get("caliber_name") if caliber_data.has("caliber_name") else ""
 ```
 
-**After (safe):**
+**Before (still crashes - v2):**
 ```gdscript
 # Only use CaliberData type - avoid calling methods on unknown Resource types
 # which can crash exported builds (e.g., .has() only works on Dictionary)
@@ -80,6 +105,23 @@ var caliber: CaliberData = caliber_data as CaliberData
 var caliber_name: String = caliber.caliber_name
 ```
 
+**After (safe - v3):**
+```gdscript
+# Use property-based check instead of "is CaliberData" to avoid
+# parse errors in exported builds where class_name may not resolve.
+# The "in" operator safely checks if a property exists on the Resource.
+if not ("caliber_name" in caliber_data):
+    return "rifle"
+
+var caliber_name: String = caliber_data.caliber_name
+```
+
+**Why property-based checks are safe:**
+1. The `"property" in object` pattern doesn't require the class_name to be loaded
+2. It works reliably in both editor and exported builds
+3. It's the same pattern used by `bullet.gd` for accessing caliber_data properties
+4. No parse errors occur because we're checking at runtime, not compile time
+
 ### Online Research References
 
 - [Godot Forum - Checking if property exists on Object](https://forum.godotengine.org/t/in-gdscript-how-to-quickly-check-whether-an-object-instance-has-a-property/28780) - Explains `in` operator vs `.has()`
@@ -89,11 +131,23 @@ var caliber_name: String = caliber.caliber_name
 
 ### Lessons Learned
 
-1. **Dictionary-specific methods on Resource objects cause silent crashes in exported builds**
-2. **The Godot editor may not catch these errors** during development
-3. **Exported builds fail silently** - splash screen appears then disappears with no error
-4. **Always use type guards** (`if obj is Type:`) before accessing type-specific methods
-5. **Added startup logging** to help diagnose future crashes in exported builds
+1. **Dictionary-specific methods (`.has()`) on Resource objects cause silent crashes in exported builds**
+2. **`is ClassName` type checks can cause parse errors in exported builds** due to class_name resolution issues
+3. **The Godot editor may not catch these errors** during development - they only appear in exports
+4. **Exported builds fail silently** - splash screen appears then disappears with no error
+5. **Use property-based checks** (`"property" in object`) instead of type checks for custom Resource classes
+6. **Follow the pattern used elsewhere in the codebase** - `bullet.gd` correctly uses `"property" in caliber_data`
+7. **Added startup logging** to help diagnose future crashes in exported builds
+
+### Safe Patterns for Resource Property Access
+
+| Pattern | Editor | Export | Recommendation |
+|---------|--------|--------|----------------|
+| `obj is ClassName` | ✅ Works | ❌ May crash | Avoid for custom classes |
+| `obj.has("key")` | ❌ Crashes | ❌ Crashes | Never use on Resource |
+| `"property" in obj` | ✅ Works | ✅ Works | **Recommended** |
+| `obj.get("property")` | ✅ Works | ✅ Works | OK but less readable |
+| Direct access `obj.property` | ✅ Works | ✅ Works | Only if property guaranteed |
 
 ---
 
@@ -330,7 +384,8 @@ The current casing system in the codebase has these characteristics:
 - [x] Implement kick physics with impulse
 - [x] Implement kick sound with threshold and cooldown
 - [x] Add caliber-based sound selection
-- [x] Fix crash: remove .has() calls on Resource objects
+- [x] Fix crash: remove .has() calls on Resource objects (v1)
+- [x] Fix crash: remove `is CaliberData` type checks, use property-based checks (v2)
 - [x] Add startup logging for debugging exported builds
 - [ ] Test with player walking through casings (manual)
 - [ ] Test with enemies walking through casings (manual)
