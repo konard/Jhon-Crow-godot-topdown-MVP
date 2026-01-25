@@ -426,6 +426,57 @@ The code was working perfectly - the footprints were spawning, but they were sim
 3. **Texture memory**: Footprint texture should be small (16x32 or similar)
    - Consider using same gradient-based approach as BloodDecal
 
+## Feature Enhancement: Realistic Boot Print Textures (2026-01-25)
+
+### User Request
+
+After confirming footprints are now visible, user requested boot print shapes based on reference image:
+
+> "запомни этот коммит, сейчас логика следов работает. следы добавились сделай следы форма следов от ботинок на основе референса"
+
+Translation: "Remember this commit, now the footprint logic works. The footprints are added. Make the footprint shapes based on boot reference."
+
+### Reference Image
+
+![Boot Print Reference](images/boot_print_reference.png)
+
+The reference shows realistic bloody boot prints with:
+- Military/work boot sole shape
+- Horizontal tread pattern across the sole
+- Wider toe and heel, narrower arch area
+- Red blood color with some splatter
+
+### Implementation
+
+Created procedural boot print textures using Python/PIL:
+
+**File:** `experiments/generate_boot_print.py`
+
+The script generates:
+1. `assets/sprites/effects/boot_print_left.png` - Left foot boot print
+2. `assets/sprites/effects/boot_print_right.png` - Right foot boot print (mirrored)
+
+**Texture Features:**
+- Size: 32x48 pixels
+- Boot sole shape with proper anatomy (wider toe/heel, narrow arch)
+- Horizontal tread gaps (transparent sections mimicking boot treads)
+- Darker edge coloring for definition
+- Small blood splatter droplets around edges
+- RGBA format with transparency
+
+### Code Changes
+
+1. **BloodFootprint.tscn** - Removed embedded gradient texture, now loads PNG at runtime
+2. **blood_footprint.gd** - Added `set_foot(is_left: bool)` method to load correct boot texture
+3. **bloody_feet_component.gd** - Calls `set_foot()` when spawning footprints
+
+### Technical Notes
+
+- Textures are loaded statically (once per game session) for performance
+- Left/right foot alternation already existed; now uses different textures
+- Footprint rotation still matches movement direction
+- Alpha fading per step still works as before
+
 ## References
 
 ### Internal Code References
@@ -439,3 +490,4 @@ The code was working perfectly - the footprints were spawning, but they were sim
 - [Footprints are GO! - Polygon Treehouse](https://www.polygon-treehouse.com/blog/2018/3/29/footprints-are-go)
 - [Persistent decals 2D - Godot Forum](https://forum.godotengine.org/t/persistent-decals-2d/32011)
 - [Blood Trail FX - Realtime VFX Store](https://realtimevfxstore.com/products/blood-trail-fx)
+- [Shutterstock Boot Print Reference](https://www.shutterstock.com/ru/image-vector/red-bloody-footprint-element-food-path-2533488137)

@@ -256,6 +256,10 @@ func _spawn_footprint() -> void:
 	# Ensure footprint renders above floor (z_index 0) but below characters
 	footprint.z_index = 1
 
+	# Set which foot this is (left or right boot texture)
+	if footprint.has_method("set_foot"):
+		footprint.set_foot(_is_left_foot)
+
 	# Alternate left/right foot by slightly offsetting perpendicular to movement
 	var perpendicular := _last_move_direction.rotated(PI / 2.0)
 	var foot_offset := 4.0 if _is_left_foot else -4.0
