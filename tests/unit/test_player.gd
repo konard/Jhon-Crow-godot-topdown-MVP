@@ -546,6 +546,10 @@ func test_max_ammo_can_be_changed() -> void:
 
 # ============================================================================
 # Blood Effect Tests (Issue #350)
+# These tests verify blood effect spawning behavior that matches the
+# C# Player implementation in Scripts/Characters/Player.cs.
+# The C# Player now has on_hit_with_info() method that spawns blood effects
+# via ImpactEffectsManager.spawn_blood_effect().
 # ============================================================================
 
 
