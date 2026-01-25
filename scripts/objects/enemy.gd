@@ -1083,69 +1083,6 @@ func _force_model_to_face_direction(direction: Vector2) -> void:
 		_enemy_model.global_rotation = target_angle
 		_enemy_model.scale = Vector2(enemy_model_scale, enemy_model_scale)
 
-## DEPRECATED: This function is no longer used.
-##
-## Previously used to calculate an aim direction that would compensate for the weapon's
-## offset from the enemy center. This caused issues because:
-## 1. The model rotation was different from the bullet direction
-## 2. The weapon would visually point in a different direction than bullets fly
-##
-## The new approach is simpler:
-## 1. Model faces the player (center-to-center direction)
-## 2. Bullets spawn from muzzle and fly FROM MUZZLE TO TARGET
-## 3. This ensures the weapon visually points where bullets go
-##
-## Kept for reference in case the iterative offset approach is needed elsewhere.
-##
-## @param target_pos: The position to aim at (typically the player's position).
-## @return: The direction vector the model should face for the weapon to point at target.
-func _calculate_aim_direction_from_weapon(target_pos: Vector2) -> Vector2:
-	# WeaponMount is at local position (0, 6) in EnemyModel
-	# This offset needs to be accounted for when calculating aim direction
-	var weapon_mount_local := Vector2(0, 6)
-
-	# Start with a rough estimate: direction from enemy center to target
-	var rough_direction := (target_pos - global_position)
-	var rough_distance := rough_direction.length()
-
-	# For distant targets, the offset error is negligible - use simple calculation
-	# threshold is ~3x the weapon offset to avoid unnecessary iteration
-	if rough_distance > 25.0 * enemy_model_scale:
-		return rough_direction.normalized()
-
-	# For close targets, iterate to find the correct rotation
-	# Start with the rough direction
-	var current_direction := rough_direction.normalized()
-
-	# Iterate to refine the aim direction (2 iterations is usually enough)
-	for _i in range(2):
-		var estimated_angle := current_direction.angle()
-
-		# Determine if we would flip (affects how weapon offset transforms)
-		var would_flip := absf(estimated_angle) > PI / 2
-
-		# Calculate weapon position with this estimated rotation
-		var weapon_offset_world: Vector2
-		if would_flip:
-			# When flipped, scale.y is negative, which affects the Y component of the offset
-			# Transform: scale then rotate
-			var scaled := Vector2(weapon_mount_local.x * enemy_model_scale, weapon_mount_local.y * -enemy_model_scale)
-			weapon_offset_world = scaled.rotated(estimated_angle)
-		else:
-			var scaled := weapon_mount_local * enemy_model_scale
-			weapon_offset_world = scaled.rotated(estimated_angle)
-
-		var weapon_global_pos := global_position + weapon_offset_world
-
-		# Calculate new direction from weapon to target
-		var new_direction := (target_pos - weapon_global_pos)
-		if new_direction.length_squared() < 0.01:
-			# Target is at weapon position, keep current direction
-			break
-		current_direction = new_direction.normalized()
-
-	return current_direction
-
 ## Updates the walking animation based on enemy movement state.
 ## Creates a natural bobbing motion for body parts during movement.
 ## @param delta: Time since last frame.
@@ -2453,9 +2390,7 @@ func _shoot_with_inaccuracy() -> void:
 	var weapon_forward := _get_weapon_forward_direction()
 	var bullet_spawn_pos := _get_bullet_spawn_position(weapon_forward)
 
-	# Calculate direction to target for aim check
-	# IMPORTANT: Use global_position (enemy center) as origin, NOT bullet_spawn_pos (muzzle).
-	# This fixes Issue #344 where the muzzle offset caused aim checks to fail at close range.
+	# Use enemy center (not muzzle) for aim check to fix close-range issues (Issue #344)
 	var to_target := (target_position - global_position).normalized()
 
 	# Check if weapon is aimed at target (within tolerance)
@@ -2525,9 +2460,7 @@ func _shoot_burst_shot() -> void:
 	var weapon_forward := _get_weapon_forward_direction()
 	var bullet_spawn_pos := _get_bullet_spawn_position(weapon_forward)
 
-	# Calculate direction to target for aim check
-	# IMPORTANT: Use global_position (enemy center) as origin, NOT bullet_spawn_pos (muzzle).
-	# This fixes Issue #344 where the muzzle offset caused aim checks to fail at close range.
+	# Use enemy center (not muzzle) for aim check to fix close-range issues (Issue #344)
 	var to_target := (target_position - global_position).normalized()
 
 	# Check if weapon is aimed at target (within tolerance)
@@ -3938,13 +3871,7 @@ func _shoot() -> void:
 	var weapon_forward := _get_weapon_forward_direction()
 	var bullet_spawn_pos := _get_bullet_spawn_position(weapon_forward)
 
-	# Calculate direction to target for aim check
-	# IMPORTANT: Use global_position (enemy center) as origin, NOT bullet_spawn_pos (muzzle).
-	# Reason: weapon_forward is calculated as direction from enemy center to player.
-	# Using bullet_spawn_pos creates a geometric mismatch at close range because
-	# the muzzle is offset from the center, causing the angle between weapon_forward
-	# and to_target to exceed the tolerance even when the enemy is facing the player.
-	# This was causing Issue #344 where enemies wouldn't shoot at close range.
+	# Use enemy center (not muzzle) for aim check to fix close-range issues (Issue #344)
 	var to_target := (target_position - global_position).normalized()
 
 	# Check if weapon is aimed at target (within tolerance)
