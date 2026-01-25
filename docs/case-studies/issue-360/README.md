@@ -491,3 +491,85 @@ The script generates:
 - [Persistent decals 2D - Godot Forum](https://forum.godotengine.org/t/persistent-decals-2d/32011)
 - [Blood Trail FX - Realtime VFX Store](https://realtimevfxstore.com/products/blood-trail-fx)
 - [Shutterstock Boot Print Reference](https://www.shutterstock.com/ru/image-vector/red-bloody-footprint-element-food-path-2533488137)
+
+---
+
+## Session 4 (2026-01-25): Rounded Edges and Color Matching
+
+### User Feedback
+
+User requested two improvements based on reference image:
+
+1. **Round the top and bottom of footprints** - Current textures had square edges
+2. **Color matching** - Footprint color should be same or darker than the blood puddle
+
+> "скругли верхнюю и нижнюю части следа (сейчас квадратные).
+> цвет следа может быть строго таки же либо темнее чем цвет лужи, в которую вступил игрок/враг."
+
+### Implementation
+
+#### 1. Rounded Boot Print Textures
+
+**File:** `experiments/create_rounded_boot_prints.py`
+
+Created new procedural boot print generator using ellipses instead of rectangles:
+- Rounded heel section (ellipse at bottom)
+- Narrow arch/instep section (ellipse connecting heel to ball)
+- Wide ball of foot section (ellipse)
+- Rounded toe section (ellipse at top)
+- Organic blob-like shape matching realistic bloody footprint references
+
+**Output files:**
+- `assets/sprites/effects/boot_print_left.png` (22x40 pixels)
+- `assets/sprites/effects/boot_print_right.png` (22x40 pixels)
+
+#### 2. Blood Color Matching
+
+**Modified files:**
+- `scripts/effects/blood_footprint.gd` - Added `set_blood_color()` method
+- `scripts/components/bloody_feet_component.gd` - Added color tracking and passing
+
+**Technical approach:**
+1. When character steps in blood puddle, capture the puddle's `modulate` color
+2. Store `_blood_color` in the component
+3. Pass color to each spawned footprint
+4. Footprint applies the color via `modulate.r/g/b` (alpha handled separately)
+
+**Code changes:**
+
+```gdscript
+# In BloodyFeetComponent - capture puddle color
+func _get_puddle_color(puddle_node: Node) -> Color:
+    if puddle_node is CanvasItem:
+        return (puddle_node as CanvasItem).modulate
+    return Color(0.545, 0.0, 0.0, 1.0)  # Default dark red
+
+func _on_blood_puddle_contact(puddle_color: Color) -> void:
+    _blood_color = puddle_color  # Store for footprints
+
+# In BloodFootprint - apply puddle color
+func set_blood_color(puddle_color: Color) -> void:
+    modulate.r = puddle_color.r
+    modulate.g = puddle_color.g
+    modulate.b = puddle_color.b
+```
+
+### Log Files Added
+
+Downloaded additional solution draft logs:
+- `logs/solution-draft-log-session0.txt` - Initial implementation session
+- `logs/solution-draft-log-session0b.txt` - Bug fix session (C# scene, Area2D positioning)
+- `logs/solution-draft-log-session1.txt` - z_index bug fix session
+
+### Summary of All Bug Fixes
+
+| Session | Bug | Root Cause | Fix |
+|---------|-----|------------|-----|
+| 1 | Player footprints missing | C# Player scene missing component | Added to both scene versions |
+| 1 | Blood detection not working | Area2D parented to Node (no transform) | Parent to CharacterBody2D |
+| 2 | Footprints invisible | z_index = -1 (behind floor) | Changed to z_index = 1 |
+| 3 | Texture cropping on rotation | Boot texture too small for padding | Increased canvas to 22x40 |
+| 3 | Wrong rotation direction | Used movement vs facing direction | Use model rotation |
+| 3 | Footprints on blood | No overlap check before spawn | Added _is_on_blood_puddle() |
+| 4 | Square edges on texture | Rectangular pixel art | Used ellipses for organic shape |
+| 4 | Color mismatch | Fixed red color | Match puddle modulate color |
