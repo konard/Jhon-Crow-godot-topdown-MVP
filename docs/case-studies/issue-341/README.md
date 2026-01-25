@@ -666,7 +666,95 @@ The implementation uses an Area2D "KickDetector" child node instead of relying o
 
 ---
 
+### Post-Implementation Fix (2026-01-25)
+
+After initial implementation, user testing revealed that **neither player nor enemies were affecting casings**. Deep investigation identified the root cause and a robust fix was implemented.
+
+#### Root Cause Investigation
+
+**Symptom:** Casings not reacting to player/enemy walking through them.
+
+**Investigation Steps:**
+1. Analyzed game log from user testing session (1846 lines)
+2. Verified collision layer configuration was correct
+3. Researched Godot 4 Area2D detection issues online
+4. Found known regression in Godot 4 (GitHub issue godotengine/godot#84511)
+
+**Root Cause:** Godot 4 has a known regression where Area2D `body_entered` signals can miss fast-moving CharacterBody2D objects:
+
+1. **Signal Detection Reliability:** In Godot 4, the interaction between CharacterBody2D and Area2D detection differs from Godot 3. The `body_entered` signal may not fire consistently for fast-moving characters.
+
+2. **Small Collision Shape:** The original KickDetector used a 4x14 pixel rectangle, which is too small for reliable overlap detection with fast-moving characters (player speed up to 330 px/s).
+
+3. **Physics Frame Timing:** Characters moving faster than the collision shape size per physics frame can "tunnel through" without triggering the signal.
+
+**Reference:** [Godot Issue #84511 - CharacterBody2D does not actively detect Area2D](https://github.com/godotengine/godot/issues/84511)
+
+#### Solution Implemented
+
+**1. Increased Detection Area:**
+- Changed KickDetector from RectangleShape2D (4x14) to CircleShape2D (radius 24)
+- Larger detection radius ensures overlap is detected even with fast-moving characters
+
+**2. Added Explicit Monitoring Properties:**
+```
+monitoring = true
+monitorable = true
+```
+
+**3. Implemented Manual Overlap Detection Fallback:**
+Added a fallback system that runs every physics frame to manually check for overlapping bodies using `get_overlapping_bodies()`. This ensures detection works even when the signal-based approach fails:
+
+```gdscript
+func _check_manual_overlaps() -> void:
+    if not _kick_detector:
+        return
+    var overlapping_bodies: Array[Node2D] = _kick_detector.get_overlapping_bodies()
+    for body in overlapping_bodies:
+        if body is CharacterBody2D:
+            _process_kick(body)
+```
+
+**4. Added Kick Memory System:**
+- `_recently_kicked_by` array tracks bodies that already kicked the casing
+- 0.3 second memory duration prevents repeated kicks from same character
+- Ensures natural kick behavior without spam
+
+**5. Added Optional Debug Logging:**
+- `debug_logging` export variable for troubleshooting
+- Logs signal events, manual overlap detection, and kick processing
+- Disabled by default for performance
+
+#### Technical Details
+
+| Change | Before | After |
+|--------|--------|-------|
+| Detection shape | Rectangle 4x14 | Circle radius 24 |
+| Detection method | Signal only | Signal + manual fallback |
+| Script lines | 283 | 375 |
+| Kick memory | None | 0.3s per character |
+
+#### Files Modified
+
+| File | Changes |
+|------|---------|
+| scenes/effects/Casing.tscn | CircleShape2D, monitoring=true |
+| scripts/effects/casing.gd | Manual overlap check, kick memory, debug logging |
+
+#### Key Learnings
+
+1. **Godot 4 Area2D Signals Are Not 100% Reliable:** For critical detection with fast-moving physics bodies, always implement a fallback mechanism using `get_overlapping_bodies()`.
+
+2. **Collision Shape Size Matters:** Small collision shapes may miss fast-moving objects. Use shapes large enough to ensure overlap detection at maximum movement speeds.
+
+3. **C# vs GDScript Detection:** The issue affects both GDScript and C# implementations equally since it's a physics engine behavior, not a language issue.
+
+4. **Testing With Production Speed Settings:** Always test interaction features with actual game movement speeds, not just slow debugging movement.
+
+---
+
 *Case study compiled: 2026-01-25*
-*Implementation completed: 2026-01-25*
+*Initial implementation: 2026-01-25*
+*Post-fix revision: 2026-01-25*
 *Branch: issue-341-9704ef182b3c*
 *PR: [#342](https://github.com/Jhon-Crow/godot-topdown-MVP/pull/342)*
