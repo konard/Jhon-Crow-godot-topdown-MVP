@@ -2402,8 +2402,8 @@ func _shoot_with_inaccuracy() -> void:
 	var weapon_forward := _get_weapon_forward_direction()
 	var bullet_spawn_pos := _get_bullet_spawn_position(weapon_forward)
 
-	# Calculate direction to target for aim check
-	var to_target := (target_position - bullet_spawn_pos).normalized()
+	# Use enemy center (not muzzle) for aim check to fix close-range issues (Issue #344)
+	var to_target := (target_position - global_position).normalized()
 
 	# Check if weapon is aimed at target (within tolerance)
 	# Bullets fly in barrel direction, so we only shoot when properly aimed (issue #254)
@@ -2472,8 +2472,8 @@ func _shoot_burst_shot() -> void:
 	var weapon_forward := _get_weapon_forward_direction()
 	var bullet_spawn_pos := _get_bullet_spawn_position(weapon_forward)
 
-	# Calculate direction to target for aim check
-	var to_target := (target_position - bullet_spawn_pos).normalized()
+	# Use enemy center (not muzzle) for aim check to fix close-range issues (Issue #344)
+	var to_target := (target_position - global_position).normalized()
 
 	# Check if weapon is aimed at target (within tolerance)
 	# Bullets fly in barrel direction, so we only shoot when properly aimed (issue #254)
@@ -3879,8 +3879,8 @@ func _shoot() -> void:
 	var weapon_forward := _get_weapon_forward_direction()
 	var bullet_spawn_pos := _get_bullet_spawn_position(weapon_forward)
 
-	# Calculate direction to target for aim check
-	var to_target := (target_position - bullet_spawn_pos).normalized()
+	# Use enemy center (not muzzle) for aim check to fix close-range issues (Issue #344)
+	var to_target := (target_position - global_position).normalized()
 
 	# Check if weapon is aimed at target (within tolerance)
 	# Bullets fly in barrel direction, so we only shoot when properly aimed (issue #254)
