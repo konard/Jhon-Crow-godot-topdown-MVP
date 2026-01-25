@@ -192,6 +192,25 @@ enum BehaviorMode {
 ## Enable grenade debug logging (separate from general debug_logging).
 @export var grenade_debug_logging: bool = false
 
+# ============================================================================
+# Advanced Targeting Configuration (Issue #349)
+# ============================================================================
+
+## Enable/disable ricochet shots (bounce bullets off walls to hit player).
+@export var enable_ricochet_shots: bool = true
+
+## Enable/disable wallbang shots (shoot through thin walls to hit player).
+@export var enable_wallbang_shots: bool = true
+
+## Enable/disable double ricochet shots (2 bounces - computationally expensive).
+@export var enable_double_ricochet: bool = true
+
+## Minimum ricochet probability to attempt shot (0.0-1.0).
+@export var ricochet_min_probability: float = 0.5
+
+## Enable advanced targeting debug logging.
+@export var advanced_targeting_debug: bool = false
+
 signal hit  ## Enemy hit
 signal died  ## Enemy died
 signal died_with_info(is_ricochet_kill: bool, is_penetration_kill: bool)  ## Death with kill info
@@ -272,6 +291,15 @@ var _cover_position: Vector2 = Vector2.ZERO  ## Cover position
 var _has_valid_cover: bool = false  ## Has valid cover
 var _suppression_timer: float = 0.0  ## Suppression cooldown
 var _under_fire: bool = false  ## Under fire (bullets in threat sphere)
+
+## Advanced targeting component for ricochet/wallbang shots (Issue #349).
+var _advanced_targeting: AdvancedTargetingComponent = null
+
+## Current targeting type being used (direct, ricochet, wallbang).
+var _current_targeting_type: String = "direct"
+
+## Current aim target position for advanced targeting.
+var _advanced_aim_target: Vector2 = Vector2.ZERO
 
 ## Flank target position.
 var _flank_target: Vector2 = Vector2.ZERO
@@ -672,6 +700,7 @@ func _ready() -> void:
 	_update_debug_label()
 	_register_sound_listener()
 	_initialize_grenade_system()
+	_initialize_advanced_targeting()
 
 	# Store original collision layers for HitArea (to restore on respawn)
 	if _hit_area:
@@ -1554,15 +1583,24 @@ func _process_combat_state(delta: float) -> void:
 	# NOTE: ASSAULT state transition removed per issue #169
 	# Enemies now stay in COMBAT instead of transitioning to coordinated assault
 
-	# If can't see player, pursue them (move cover-to-cover toward player)
+	# Update advanced targeting when player is not directly visible (Issue #349)
+	if not _can_see_player:
+		_update_advanced_targeting()
+
+	# If can't see player, check for ricochet/wallbang opportunities before pursuing
 	# But only after minimum time has elapsed to prevent rapid state thrashing
 	# when visibility flickers at wall/obstacle edges
 	if not _can_see_player:
-		if _combat_state_timer >= COMBAT_MIN_DURATION_BEFORE_PURSUE:
+		# Check if we have an indirect targeting opportunity (ricochet or wallbang)
+		if _has_valid_targeting():
+			# We have a ricochet or wallbang opportunity - stay and try to shoot
+			if advanced_targeting_debug:
+				_log_debug("Player hidden but have indirect targeting - staying in COMBAT")
+		elif _combat_state_timer >= COMBAT_MIN_DURATION_BEFORE_PURSUE:
 			_combat_exposed = false
 			_combat_approaching = false
 			_seeking_clear_shot = false
-			_log_debug("Lost sight of player in COMBAT (%.2fs), transitioning to PURSUING" % _combat_state_timer)
+			_log_debug("Lost sight of player in COMBAT (%.2fs), no indirect targeting, transitioning to PURSUING" % _combat_state_timer)
 			_transition_to_pursuing()
 			return
 		# If minimum time hasn't elapsed, stay in COMBAT and wait
@@ -1622,11 +1660,21 @@ func _process_combat_state(delta: float) -> void:
 		velocity = Vector2.ZERO
 
 		# Aim and shoot at player (only shoot after detection delay)
+		# Use advanced targeting to determine aim point (direct, ricochet, or wallbang)
 		if _player:
-			_aim_at_player()
-			if _detection_delay_elapsed and _shoot_timer >= shoot_cooldown:
-				_shoot()
-				_shoot_timer = 0.0
+			var targeting := _get_best_targeting()
+			if targeting.type != "none":
+				if targeting.type == "direct":
+					_aim_at_player()
+				else:
+					# Ricochet or wallbang - aim at the calculated point
+					_aim_at_position(targeting.aim_point)
+					if advanced_targeting_debug:
+						_log_debug("COMBAT exposed: aiming for %s shot at %v" % [targeting.type, targeting.aim_point])
+
+				if _detection_delay_elapsed and _shoot_timer >= shoot_cooldown:
+					_shoot()
+					_shoot_timer = 0.0
 		return
 
 	# --- CLEAR SHOT SEEKING PHASE ---
@@ -1887,12 +1935,25 @@ func _process_in_cover_state(delta: float) -> void:
 					_transition_to_pursuing()
 					return
 
-	# If not under fire and can see player, engage (only shoot after detection delay)
-	if _can_see_player and _player:
-		_aim_at_player()
-		if _detection_delay_elapsed and _shoot_timer >= shoot_cooldown:
-			_shoot()
-			_shoot_timer = 0.0
+	# Update advanced targeting when player is not directly visible (Issue #349)
+	if not _can_see_player:
+		_update_advanced_targeting()
+
+	# If not under fire, try to engage using direct or advanced targeting
+	if _player:
+		var targeting := _get_best_targeting()
+		if targeting.type != "none":
+			if targeting.type == "direct":
+				_aim_at_player()
+			else:
+				# Ricochet or wallbang - aim at the calculated point
+				_aim_at_position(targeting.aim_point)
+				if advanced_targeting_debug:
+					_log_debug("IN_COVER: aiming for %s shot at %v" % [targeting.type, targeting.aim_point])
+
+			if _detection_delay_elapsed and _shoot_timer >= shoot_cooldown:
+				_shoot()
+				_shoot_timer = 0.0
 
 	# If player is no longer visible and not under fire, try pursuing
 	if not _can_see_player and not _under_fire:
@@ -1998,12 +2059,25 @@ func _process_suppressed_state(delta: float) -> void:
 		_transition_to_seeking_cover()
 		return
 
-	# Can still shoot while suppressed (only after detection delay)
-	if _can_see_player and _player:
-		_aim_at_player()
-		if _detection_delay_elapsed and _shoot_timer >= shoot_cooldown:
-			_shoot()
-			_shoot_timer = 0.0
+	# Update advanced targeting when player is not directly visible (Issue #349)
+	if not _can_see_player:
+		_update_advanced_targeting()
+
+	# Can still shoot while suppressed using direct or advanced targeting
+	if _player:
+		var targeting := _get_best_targeting()
+		if targeting.type != "none":
+			if targeting.type == "direct":
+				_aim_at_player()
+			else:
+				# Ricochet or wallbang - aim at the calculated point
+				_aim_at_position(targeting.aim_point)
+				if advanced_targeting_debug:
+					_log_debug("SUPPRESSED: aiming for %s shot at %v" % [targeting.type, targeting.aim_point])
+
+			if _detection_delay_elapsed and _shoot_timer >= shoot_cooldown:
+				_shoot()
+				_shoot_timer = 0.0
 
 	# If no longer under fire, exit suppression
 	if not _under_fire:
@@ -3971,6 +4045,7 @@ func _aim_at_player() -> void:
 		rotation -= rotation_speed * delta
 
 ## Shoot a bullet in barrel direction. Enemy must be aimed within AIM_TOLERANCE_DOT.
+## Supports direct shots, ricochet shots, and wallbang shots (Issue #349).
 func _shoot() -> void:
 	if bullet_scene == null or _player == null:
 		return
@@ -3979,14 +4054,31 @@ func _shoot() -> void:
 	if not _can_shoot():
 		return
 
-	var target_position := _player.global_position
+	# Get best targeting opportunity (direct, ricochet, or wallbang)
+	var targeting := _get_best_targeting()
+	_current_targeting_type = targeting.type
 
-	# Apply lead prediction if enabled
-	if enable_lead_prediction:
+	if targeting.type == "none":
+		# No valid targeting - can't shoot
+		return
+
+	var target_position: Vector2 = targeting.aim_point
+	_advanced_aim_target = target_position
+
+	# Log advanced targeting shots
+	if targeting.type != "direct" and advanced_targeting_debug:
+		_log_debug("ADVANCED SHOT: type=%s, target=%v, probability=%.1f%%, bounces=%d" % [
+			targeting.type, target_position, targeting.probability * 100, targeting.bounce_count
+		])
+
+	# For direct shots, apply lead prediction if enabled
+	if targeting.type == "direct" and enable_lead_prediction:
 		target_position = _calculate_lead_prediction()
+		_advanced_aim_target = target_position
 
 	# Check if the shot should be taken (friendly fire and cover checks)
-	if not _should_shoot_at_target(target_position):
+	# For ricochet shots, we only check the path to the bounce point (not through walls)
+	if targeting.type == "direct" and not _should_shoot_at_target(target_position):
 		return
 
 	# Calculate bullet spawn position at weapon muzzle first
@@ -5179,6 +5271,114 @@ func _log_grenade(message: String) -> void:
 	if grenade_debug_logging:
 		print("[Enemy.Grenade] %s" % message)
 	_log_to_file("[Grenade] %s" % message)
+
+
+# ============================================================================
+# Advanced Targeting System (Issue #349)
+# ============================================================================
+
+
+## Initialize the advanced targeting component for ricochet/wallbang shots.
+func _initialize_advanced_targeting() -> void:
+	if not enable_ricochet_shots and not enable_wallbang_shots:
+		return  # No advanced targeting needed
+
+	# Create and configure the advanced targeting component
+	_advanced_targeting = AdvancedTargetingComponent.new()
+	_advanced_targeting.enable_ricochet_shots = enable_ricochet_shots
+	_advanced_targeting.enable_wallbang_shots = enable_wallbang_shots
+	_advanced_targeting.enable_double_ricochet = enable_double_ricochet
+	_advanced_targeting.ricochet_min_probability_threshold = ricochet_min_probability
+	_advanced_targeting.debug_logging = advanced_targeting_debug
+	add_child(_advanced_targeting)
+
+	# Initialize with player reference and callbacks
+	# Use call_deferred to ensure player is found first
+	call_deferred("_setup_advanced_targeting_callbacks")
+
+
+## Setup advanced targeting callbacks after player is found.
+func _setup_advanced_targeting_callbacks() -> void:
+	if _advanced_targeting and _player:
+		_advanced_targeting.initialize(
+			_player,
+			Callable(self, "_calculate_lead_prediction"),
+			Callable(self, "_get_can_see_player")
+		)
+		_log_debug("Advanced targeting initialized with player reference")
+
+
+## Wrapper for _can_see_player to use as callback.
+func _get_can_see_player() -> bool:
+	return _can_see_player
+
+
+## Update advanced targeting calculations.
+## Called from physics process when player is not directly visible.
+func _update_advanced_targeting() -> void:
+	if not _advanced_targeting:
+		return
+
+	# Only update when player is not directly visible
+	if not _can_see_player:
+		_advanced_targeting.update_targeting()
+
+
+## Get the best targeting opportunity (direct, ricochet, or wallbang).
+## Returns a dictionary with type, aim_point, probability, and bounce_count.
+func _get_best_targeting() -> Dictionary:
+	# Direct shot is always preferred when player is visible
+	if _can_see_player and _player:
+		var target_pos := _player.global_position
+		if enable_lead_prediction:
+			target_pos = _calculate_lead_prediction()
+		return {
+			"type": "direct",
+			"aim_point": target_pos,
+			"probability": 1.0,
+			"bounce_count": 0
+		}
+
+	# Check advanced targeting opportunities
+	if _advanced_targeting:
+		return _advanced_targeting.get_best_targeting()
+
+	return {
+		"type": "none",
+		"aim_point": Vector2.ZERO,
+		"probability": 0.0,
+		"bounce_count": 0
+	}
+
+
+## Check if we have any valid targeting opportunity (direct, ricochet, or wallbang).
+func _has_valid_targeting() -> bool:
+	if _can_see_player:
+		return true
+	if _advanced_targeting:
+		return _advanced_targeting.has_indirect_targeting()
+	return false
+
+
+## Aim at a specific position (used for advanced targeting).
+func _aim_at_position(target_pos: Vector2) -> void:
+	var direction := (target_pos - global_position).normalized()
+	var target_angle := direction.angle()
+
+	# Calculate the shortest rotation direction
+	var angle_diff := wrapf(target_angle - rotation, -PI, PI)
+
+	# Get the delta time from the current physics process
+	var delta := get_physics_process_delta_time()
+
+	# Apply gradual rotation based on rotation_speed
+	if abs(angle_diff) <= rotation_speed * delta:
+		rotation = target_angle
+	elif angle_diff > 0:
+		rotation += rotation_speed * delta
+	else:
+		rotation -= rotation_speed * delta
+
 
 ## Update grenade trigger conditions. Called every physics frame.
 ## This updates the world state flags for grenade-related decisions.
