@@ -665,6 +665,62 @@ All rotation math now happens in visual space, then converts back to raw space f
 
 ---
 
+## Update: Ninth Fix Attempt (2026-01-25)
+
+### Why the Eighth Fix Was Still Insufficient
+
+After the eighth fix, the user reported: "враг всё ещё отворачивается, но поворачивается обратно теперь против часовой стрелки" (Enemy still turns away, but now rotates back counter-clockwise).
+
+**Progress confirmed:** The direction of smooth rotation changed from clockwise to counter-clockwise, confirming the "visual space" math was now correct.
+
+**Remaining issue:** The initial "turn-away" snap still occurs at the moment of Y-scale flip.
+
+### Root Cause Analysis (Ninth Attempt)
+
+The eighth fix tried to "preserve" the visual direction during the Y-scale flip by negating the rotation. However, there's a visual discontinuity caused by how Godot renders the flipped sprite with the compensated rotation.
+
+**The problem in practice:**
+1. Enemy facing right (rotation ~0°, Y-scale positive)
+2. Player enters from left (target ~160°)
+3. Y-scale flip happens + rotation negation (0° → -0° = 0°)
+4. **Visual discontinuity occurs** - the sprite appears to snap to a different direction
+5. Smooth rotation then brings it back toward the player
+
+The mathematical preservation of visual direction (by negating rotation) doesn't translate to the actual rendered result due to the way 2D transforms compound.
+
+### The Ninth Fix
+
+**Key insight:** When the flip is needed, don't try to preserve the current visual direction. Instead:
+1. Snap the visual direction to the ±90° boundary (which is already "toward" the player's hemisphere)
+2. Let smooth rotation complete the journey from the boundary to the exact target angle
+
+**New logic:**
+```gdscript
+if needs_flip:
+    # Flip Y-scale
+    _model_facing_left = target_facing_left
+    _enemy_model.scale = Vector2(...)
+
+    # Snap visual rotation to the 90° boundary (toward target's hemisphere)
+    var boundary_visual: float = PI / 2 if target_angle > 0 else -PI / 2
+    _enemy_model.global_rotation = -boundary_visual if _model_facing_left else boundary_visual
+
+    # Recalculate after the flip
+    raw_rot = _enemy_model.global_rotation
+    visual_rot = -raw_rot if _model_facing_left else raw_rot
+    angle_diff = wrapf(target_angle - visual_rot, -PI, PI)
+```
+
+**Why this works:**
+- Enemy facing right (0°), player on left (160°)
+- Flip happens → snap to 90° (facing up, which is toward the left side)
+- Smooth rotation: 90° → 160° (only 70° of smooth rotation, counter-clockwise)
+- The snap to 90° is "toward" the player, not "away"!
+
+**Additional change:** Only flip when truly necessary (when angle difference >= 90°). If the target is on the "opposite side" but the current rotation is already close to it, skip the flip and just smooth rotate.
+
+---
+
 ## Summary of All Fix Attempts
 
 | Fix # | What It Addressed | Why It Wasn't Enough |
@@ -676,9 +732,10 @@ All rotation math now happens in visual space, then converts back to raw space f
 | 5 | Add rotation tracing | Diagnostic only |
 | 6 | Flip based on TARGET angle | Fixed flip timing but no rotation compensation |
 | 7 | Compensate rotation when flipping | Fixed flip compensation but smooth rotation still in wrong space |
-| 8 | **Work in visual space for all rotation math** | **✅ ACTUAL ROOT CAUSE FIXED** |
+| 8 | Work in visual space for all rotation math | Fixed smooth rotation direction but flip still causes visual snap |
+| 9 | **Snap to boundary on flip instead of preserving direction** | **Eliminates visual discontinuity by ensuring snap is toward player** |
 
-The real issue was a coordinate space mismatch: rotation math was happening in "raw" space while Y-scale flip operates in "visual" space.
+The real issue was that the visual direction "preservation" during Y-scale flip doesn't work in practice due to how Godot renders the flipped sprite. The solution is to accept that a visual change will happen during flip, but ensure that change is *toward* the target, not away.
 
 ---
 

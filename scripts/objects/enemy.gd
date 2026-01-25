@@ -1172,20 +1172,60 @@ func _update_enemy_model_rotation() -> void:
 	elif not has_target and _current_state == AIState.IDLE and _idle_scan_targets.size() > 0:
 		target_angle = _idle_scan_targets[_idle_scan_target_index]; has_target = true
 	if not has_target: return
-	# Issue #373 FIX (eighth attempt): Handle Y-scale flip with proper rotation compensation.
-	# When Y-scale is negative, the visual angle is the negation of the stored rotation.
-	# We must work in "visual space" for smooth rotation, then convert back to raw rotation.
+	# Issue #373 FIX (ninth attempt): Eliminate "turn-away" glitch during Y-scale flip.
+	#
+	# PROBLEM: When enemy detects player on the left, the Y-scale flip plus rotation
+	# compensation causes a visual "turn-away" before smooth rotation corrects it.
+	#
+	# ROOT CAUSE: The eighth fix tried to preserve visual direction during flip by negating
+	# the rotation. But this doesn't work correctly in practice - there's a visual discontinuity
+	# caused by how Godot renders the flipped sprite with the compensated rotation.
+	#
+	# SOLUTION: When flip is needed, SKIP the flip if the current rotation can smoothly reach
+	# the target WITHOUT flipping (by going "the long way" around). This eliminates the
+	# flip-induced visual glitch entirely. We only flip when it's ABSOLUTELY necessary
+	# (when the target is on the opposite side AND the current rotation is also on that side).
 	var target_facing_left := absf(target_angle) > PI / 2
-	if target_facing_left != _model_facing_left:
-		_model_facing_left = target_facing_left
-		_enemy_model.global_rotation = -_enemy_model.global_rotation  # Compensate for flip
-		_enemy_model.scale = Vector2(enemy_model_scale, -enemy_model_scale if _model_facing_left else enemy_model_scale)
-	# Get current VISUAL rotation (accounting for Y-scale flip)
+	var current_facing_left := _model_facing_left
+	var delta := get_physics_process_delta_time()
+
+	# Get current visual rotation
 	var raw_rot := _enemy_model.global_rotation
 	var visual_rot := -raw_rot if _model_facing_left else raw_rot
-	# Smooth rotation in VISUAL space
+
+	# Calculate angle difference to target (shortest path)
 	var angle_diff := wrapf(target_angle - visual_rot, -PI, PI)
-	var delta := get_physics_process_delta_time()
+
+	# Determine if flip is TRULY needed:
+	# Only flip if:
+	# 1. Target is on opposite side (target_facing_left != current_facing_left)
+	# 2. AND the smooth rotation would cross the ±90° boundary
+	# 3. AND we're NOT already very close to the target (within ~30° of target angle)
+	var needs_flip := false
+	if target_facing_left != current_facing_left:
+		# Target is on opposite side. Check if we should flip or smooth rotate "the long way".
+		# If the angle_diff is small (< 90°), we can reach target without flipping.
+		# If angle_diff is large (>= 90°), we need to flip to avoid long rotation.
+		if absf(angle_diff) >= PI / 2:
+			needs_flip = true
+
+	if needs_flip:
+		# Flip Y-scale and set rotation to face toward target at the boundary (±90°).
+		# This minimizes the visual jump while setting up for smooth rotation to target.
+		_model_facing_left = target_facing_left
+		_enemy_model.scale = Vector2(enemy_model_scale, -enemy_model_scale if _model_facing_left else enemy_model_scale)
+
+		# Snap visual rotation to the 90° boundary (in the direction of the target).
+		# This ensures we're facing "toward" the target immediately after flip.
+		var boundary_visual: float = PI / 2 if target_angle > 0 else -PI / 2
+		_enemy_model.global_rotation = -boundary_visual if _model_facing_left else boundary_visual
+
+		# Recalculate after the flip
+		raw_rot = _enemy_model.global_rotation
+		visual_rot = -raw_rot if _model_facing_left else raw_rot
+		angle_diff = wrapf(target_angle - visual_rot, -PI, PI)
+
+	# Smooth rotation in VISUAL space toward target
 	var new_visual_rot: float
 	if abs(angle_diff) <= MODEL_ROTATION_SPEED * delta:
 		new_visual_rot = target_angle
