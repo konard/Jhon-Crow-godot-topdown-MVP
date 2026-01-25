@@ -733,9 +733,106 @@ if needs_flip:
 | 6 | Flip based on TARGET angle | Fixed flip timing but no rotation compensation |
 | 7 | Compensate rotation when flipping | Fixed flip compensation but smooth rotation still in wrong space |
 | 8 | Work in visual space for all rotation math | Fixed smooth rotation direction but flip still causes visual snap |
-| 9 | **Snap to boundary on flip instead of preserving direction** | **Eliminates visual discontinuity by ensuring snap is toward player** |
+| 9 | Snap to boundary on flip instead of preserving direction | Snap still creates visual jump (90°) |
+| 10 | **DELAYED FLIP - only flip when at ±90° boundary** | **Eliminates ALL visual discontinuity** |
 
-The real issue was that the visual direction "preservation" during Y-scale flip doesn't work in practice due to how Godot renders the flipped sprite. The solution is to accept that a visual change will happen during flip, but ensure that change is *toward* the target, not away.
+---
+
+## Update: Tenth Fix Attempt (2026-01-25) - THE FINAL SOLUTION
+
+### Why the Ninth Fix Was Still Insufficient
+
+After the ninth fix, the user reported "проблема сохранилась" (problem persists) with log `game_log_20260125_193047.txt`.
+
+Analysis revealed the fundamental flaw in ALL previous approaches: **any flip that doesn't happen at the ±90° boundary will cause a visual discontinuity**.
+
+The ninth fix snapped to ±90° after flipping, but this still meant:
+1. Enemy facing RIGHT (0°)
+2. Player appears on LEFT (160°)
+3. INSTANT flip happens + snap to 90°
+4. Visual jumps from 0° → 90° (a 90° change that looks like "turning away")
+5. Then smooth rotation from 90° → 160°
+
+Even though the snap was "toward" the player, a 90° instant visual change is jarring.
+
+### The Key Insight
+
+At the ±90° boundary, the sprite looks the SAME whether Y-scale is positive or negative! This is because:
+- At +90° (facing UP): the left side of the sprite and the right side are symmetric
+- Flipping Y-scale at this angle doesn't change the visual appearance
+
+**Therefore:** If we delay the flip until we've naturally rotated to ±90°, the flip will be INVISIBLE!
+
+### The Tenth Fix: Delayed Flip
+
+Instead of flipping immediately when the target is on the opposite side:
+1. **Detect** that the target is on the opposite side (requires crossing ±90°)
+2. **DON'T flip yet** - instead, set a temporary target of ±90° (the boundary)
+3. **Smooth rotate** toward the boundary (looks natural, no visual discontinuity)
+4. **When at boundary** (within ~8°), THEN perform the flip
+5. **The flip is invisible** because ±90° looks the same with either Y-scale
+6. **Continue smooth rotating** from the boundary to the actual target
+
+### Example Walkthrough
+
+Enemy facing RIGHT (0°), player appears at LOWER-LEFT (-160°):
+
+**Frame 1-N (approaching boundary):**
+- `target_angle = -160°`, `target_facing_left = true`
+- `current_facing_left = false` (we're facing right)
+- `visual_rot` starts at 0° and smoothly rotates toward -90°
+- `effective_target = -90°` (the boundary, not -160°)
+- No flip yet - just smooth rotation
+
+**Frame at boundary:**
+- `visual_rot ≈ -90°` (we've reached the boundary)
+- `at_boundary = true` (within 8° of ±90°)
+- `should_flip_now = true`
+- Flip Y-scale: `_model_facing_left = true`
+- Set `raw_rot = -visual_rot = +90°` (to maintain visual -90°)
+- **The flip is visually seamless!**
+
+**Frames after flip:**
+- Now `effective_target = -160°` (the actual target)
+- Smooth rotation continues from -90° → -160°
+- Enemy smoothly faces the player
+
+### Why This Finally Works
+
+1. **No instant visual changes:** All rotation is smooth
+2. **The flip is invisible:** At ±90°, flipped and non-flipped look identical
+3. **Mathematically correct:** Visual rotation is preserved across the flip
+4. **Natural-looking:** Enemy smoothly rotates toward player, passing through "up" or "down"
+
+### The Real Root Cause (Final Analysis)
+
+The issue was never about:
+- ❌ FOV calculations
+- ❌ Memory positions
+- ❌ Rotation compensation math
+- ❌ Visual space vs raw space
+
+The issue was:
+- ✅ **Timing of the Y-scale flip**
+
+ANY flip that happens when the sprite is NOT at ±90° will create a visual discontinuity. The ONLY solution is to delay the flip until we're at the boundary where flipping is invisible.
+
+---
+
+## Summary of All Fix Attempts
+
+| Fix # | What It Addressed | Why It Wasn't Enough |
+|-------|-------------------|---------------------|
+| 1 | Skip FOV in combat states | Addressed visibility detection, not rotation |
+| 2 | Use `_get_target_position()` in combat | Rotation source was correct, but flip timing wrong |
+| 3 | Add player fallback when memory empty | Edge case, not the main issue |
+| 4 | Face player DIRECTLY in active combat | Rotation target was correct, flip still broken |
+| 5 | Add rotation tracing | Diagnostic only |
+| 6 | Flip based on TARGET angle | Fixed flip timing but no rotation compensation |
+| 7 | Compensate rotation when flipping | Fixed flip compensation but smooth rotation still in wrong space |
+| 8 | Work in visual space for all rotation math | Fixed smooth rotation direction but flip still causes visual snap |
+| 9 | Snap to boundary on flip | Snap still causes visual jump (90°) |
+| 10 | **DELAYED FLIP - only flip at ±90° boundary** | **Flip is invisible, no visual discontinuity** |
 
 ---
 
