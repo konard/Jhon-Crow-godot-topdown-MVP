@@ -165,7 +165,6 @@ enum BehaviorMode {
 @export var grenade_throw_delay: float = 0.4  ## Delay before throw (sec)
 @export var grenade_debug_logging: bool = false  ## Grenade debug logging
 
-
 signal hit  ## Enemy hit
 signal died  ## Enemy died
 signal died_with_info(is_ricochet_kill: bool, is_penetration_kill: bool)  ## Death with kill info
@@ -192,9 +191,7 @@ const AIM_TOLERANCE_DOT: float = 0.866  ## cos(30°) - aim tolerance (issue #254
 @onready var _debug_label: Label = $DebugLabel  ## Debug state label
 @onready var _nav_agent: NavigationAgent2D = $NavigationAgent2D  ## Pathfinding
 
-## HitArea for bullet collision detection (disabled on death).
-@onready var _hit_area: Area2D = $HitArea
-## HitCollisionShape for disabling collision on death (more reliable than toggling monitorable).
+@onready var _hit_area: Area2D = $HitArea  ## Bullet collision (disabled on death)
 @onready var _hit_collision_shape: CollisionShape2D = $HitArea/HitCollisionShape
 
 var _original_hit_area_layer: int = 0  ## Original collision layer (restore on respawn)
@@ -247,31 +244,16 @@ var _has_valid_cover: bool = false  ## Has valid cover
 var _suppression_timer: float = 0.0  ## Suppression cooldown
 var _under_fire: bool = false  ## Under fire (bullets in threat sphere)
 
-## Flank target position.
-var _flank_target: Vector2 = Vector2.ZERO
-
-## Threat sphere Area2D for detecting nearby bullets.
-var _threat_sphere: Area2D = null
-
-## Bullets currently in threat sphere.
-var _bullets_in_threat_sphere: Array = []
-
-## Timer for threat reaction delay - time since first bullet entered threat sphere.
-var _threat_reaction_timer: float = 0.0
-
-## Whether the threat reaction delay has elapsed (enemy can react to bullets).
+var _flank_target: Vector2 = Vector2.ZERO  ## Flank target position
+var _threat_sphere: Area2D = null  ## Threat sphere for detecting nearby bullets
+var _bullets_in_threat_sphere: Array = []  ## Bullets in threat sphere
+var _threat_reaction_timer: float = 0.0  ## Time since first bullet in threat sphere
 var _threat_reaction_delay_elapsed: bool = false
 
-## Memory timer for bullets that passed through threat sphere (allows reaction after fast bullets exit).
-var _threat_memory_timer: float = 0.0
-## Duration to remember bullet passage (longer than reaction delay for complete reaction).
-const THREAT_MEMORY_DURATION: float = 0.5
-
-## Current retreat mode determined by damage taken.
-var _retreat_mode: RetreatMode = RetreatMode.FULL_HP
-
-## Hits taken this retreat/combat encounter. Resets on IDLE or retreat completion.
-var _hits_taken_in_encounter: int = 0
+var _threat_memory_timer: float = 0.0  ## Bullet passage memory timer
+const THREAT_MEMORY_DURATION: float = 0.5  ## Bullet passage memory duration
+var _retreat_mode: RetreatMode = RetreatMode.FULL_HP  ## Retreat mode by damage
+var _hits_taken_in_encounter: int = 0  ## Hits this encounter (resets on IDLE)
 
 var _retreat_turn_timer: float = 0.0  ## Periodic cover turn timer
 const RETREAT_TURN_DURATION: float = 0.8  ## Duration to face cover (sec)
@@ -434,21 +416,13 @@ var _is_stunned: bool = false
 ## Last hit direction (used for death animation).
 var _last_hit_direction: Vector2 = Vector2.RIGHT
 
-## --- Hit Reaction System (Issue #390) ---
-## When hit, enemy briefly faces attacker before resuming normal rotation priority.
-## This prevents enemies from turning away while being shot at.
+## Issue #390: Hit reaction keeps enemy facing attacker briefly after being hit.
 var _hit_reaction_timer: float = 0.0
 var _hit_reaction_direction: Vector2 = Vector2.ZERO
-## Duration to face attacker after being hit (seconds). Gives player visual feedback.
-const HIT_REACTION_DURATION: float = 0.8
+const HIT_REACTION_DURATION: float = 0.8  ## Seconds to face attacker after hit
 
-## Death animation component reference.
-var _death_animation: Node = null
-
-## Grenade component for handling grenade throwing (extracted for Issue #377 CI fix).
-var _grenade_component: EnemyGrenadeComponent = null
-
-## Note: DeathAnimationComponent and EnemyGrenadeComponent are available via class_name declarations.
+var _death_animation: Node = null  ## Death animation component reference
+var _grenade_component: EnemyGrenadeComponent = null  ## Grenade component (Issue #377)
 
 func _ready() -> void:
 	# Add to enemies group for grenade targeting
@@ -945,8 +919,7 @@ func _update_enemy_model_rotation() -> void:
 		return
 	var target_angle: float
 	var has_target := false
-	# Issue #390: HIGHEST PRIORITY - Hit reaction: face attacker for a duration after being hit.
-	# This prevents enemies from turning away while being shot at (e.g., during retreat).
+	# Issue #390: Hit reaction takes highest priority - face attacker after being hit.
 	if _hit_reaction_timer > 0 and _hit_reaction_direction.length_squared() > 0.01:
 		target_angle = _hit_reaction_direction.angle()
 		has_target = true
@@ -1102,15 +1075,13 @@ func _update_suppression(delta: float) -> void:
 			_under_fire = true
 			_suppression_timer = 0.0
 
-## Update hit reaction timer (Issue #390).
-## Decrements the timer that keeps enemy facing attacker after being hit.
+## Issue #390: Decrement hit reaction timer.
 func _update_hit_reaction(delta: float) -> void:
 	if _hit_reaction_timer > 0:
 		_hit_reaction_timer -= delta
 		if _hit_reaction_timer <= 0:
 			_hit_reaction_timer = 0.0
 			_hit_reaction_direction = Vector2.ZERO
-			_log_debug("Hit reaction ended, resuming normal rotation")
 
 ## Update reload state.
 func _update_reload(delta: float) -> void:
@@ -4117,16 +4088,12 @@ func on_hit_with_bullet_info(hit_direction: Vector2, caliber_data: Resource, has
 	# Store hit direction for death animation
 	_last_hit_direction = hit_direction
 
-	# Turn toward attacker: the attacker is in the opposite direction of the bullet travel
-	# This makes the enemy face where the shot came from
-	# Issue #390: Set hit reaction timer to maintain facing direction for a duration.
-	# This prevents the enemy from immediately turning away (e.g., during retreat).
+	# Issue #390: Face attacker and maintain direction for HIT_REACTION_DURATION.
 	var attacker_direction := -hit_direction.normalized()
 	if attacker_direction.length_squared() > 0.01:
 		_hit_reaction_direction = attacker_direction
 		_hit_reaction_timer = HIT_REACTION_DURATION
 		_force_model_to_face_direction(attacker_direction)
-		_log_debug("Hit reaction: turning toward attacker for %.1fs (direction: %s)" % [HIT_REACTION_DURATION, attacker_direction])
 
 	# Track hits for retreat behavior
 	_hits_taken_in_encounter += 1
@@ -4374,8 +4341,7 @@ func _reset() -> void:
 	_threat_reaction_delay_elapsed = false
 	_threat_memory_timer = 0.0
 	_bullets_in_threat_sphere.clear()
-	# Reset hit reaction state (Issue #390)
-	_hit_reaction_timer = 0.0
+	_hit_reaction_timer = 0.0  # Issue #390
 	_hit_reaction_direction = Vector2.ZERO
 	# Reset retreat state variables
 	_hits_taken_in_encounter = 0
@@ -5005,7 +4971,6 @@ func _update_grenade_world_state() -> void:
 	_goap_world_state["grenades_remaining"] = g.grenades_remaining
 	_goap_world_state["ready_to_throw_grenade"] = g.is_ready(_can_see_player, _under_fire, _current_health)
 
-
 ## Attempt to throw a grenade. Returns true if throw was initiated.
 func try_throw_grenade() -> bool:
 	if _grenade_component == null:
@@ -5018,7 +4983,6 @@ func try_throw_grenade() -> bool:
 	if result:
 		grenade_thrown.emit(null, target)  # Signal with target; actual grenade emitted by component
 	return result
-
 
 ## Get the number of grenades remaining.
 func get_grenades_remaining() -> int:
