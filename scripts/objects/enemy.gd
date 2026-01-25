@@ -223,8 +223,9 @@ var _is_waiting_at_patrol_point: bool = false
 var _patrol_wait_timer: float = 0.0
 var _corner_check_angle: float = 0.0  ## Angle to look toward when checking a corner
 var _corner_check_timer: float = 0.0  ## Timer for corner check duration
-const CORNER_CHECK_DURATION: float = 0.3  ## How long to look at a corner (seconds)
+const CORNER_CHECK_DURATION: float = 1.0  ## How long to look at a corner (seconds) - Issue #357: increased from 0.3 to 1.0
 const CORNER_CHECK_DISTANCE: float = 150.0  ## Max distance to detect openings
+const CORNER_CHECK_TACTICAL_ANGLE_THRESHOLD: float = deg_to_rad(30.0)  ## Issue #357: Min angle diff to trigger tactical corner check
 var _initial_position: Vector2
 var _can_see_player: bool = false  ## Can see player
 var _current_state: AIState = AIState.IDLE  ## AI state
@@ -4100,11 +4101,30 @@ func _detect_perpendicular_opening(move_dir: Vector2) -> bool:
 			return true
 	return false
 
-## Handle corner checking during movement (Issue #332). Issue #347: smooth rotation.
+## Issue #357: Detect tactical opening toward suspected target position (for clearing corners).
+func _detect_tactical_opening(move_dir: Vector2, target_pos: Vector2) -> bool:
+	var dir_to_target := (target_pos - global_position).normalized()
+	var angle_diff := absf(wrapf(dir_to_target.angle() - move_dir.angle(), -PI, PI))
+	if angle_diff > CORNER_CHECK_TACTICAL_ANGLE_THRESHOLD:
+		var query := PhysicsRayQueryParameters2D.create(global_position, global_position + dir_to_target * CORNER_CHECK_DISTANCE)
+		query.collision_mask = 0b100
+		query.exclude = [self]
+		if get_world_2d().direct_space_state.intersect_ray(query).is_empty():
+			_corner_check_angle = dir_to_target.angle()
+			return true
+	return _detect_perpendicular_opening(move_dir)
+
+## Handle corner checking during movement (#332, #347, #357: tactical states look toward target).
 func _process_corner_check(delta: float, move_dir: Vector2, state_name: String) -> void:
 	if _corner_check_timer > 0:
-		_corner_check_timer -= delta  # #347: rotation via _update_enemy_model_rotation()
-	elif _detect_perpendicular_opening(move_dir):
+		_corner_check_timer -= delta
+		return
+	var detected := false
+	if state_name in ["PURSUING", "PURSUING_MEMORY", "FLANKING", "SEARCHING"] and _memory and _memory.has_target():
+		detected = _detect_tactical_opening(move_dir, _memory.suspected_position)
+	else:
+		detected = _detect_perpendicular_opening(move_dir)
+	if detected:
 		_corner_check_timer = CORNER_CHECK_DURATION
 		_log_to_file("%s corner check: angle %.1f°" % [state_name, rad_to_deg(_corner_check_angle)])
 
@@ -4955,45 +4975,25 @@ func _get_nav_path_distance(target_pos: Vector2) -> float:
 	_nav_agent.target_position = target_pos
 	return _nav_agent.distance_to_target()
 
-# ============================================================================
 # Status Effects (Blindness, Stun)
-# ============================================================================
-
-## Set the blinded state (from flashbang grenade).
-## When blinded, the enemy cannot see the player.
 func set_blinded(blinded: bool) -> void:
-	var was_blinded := _is_blinded
+	var was := _is_blinded
 	_is_blinded = blinded
-
-	if blinded and not was_blinded:
-		_log_debug("Enemy is now BLINDED - cannot see player")
+	if blinded and not was:
 		_log_to_file("Status effect: BLINDED applied")
-		# Force lose sight of player
 		_can_see_player = false
 		_continuous_visibility_timer = 0.0
-	elif not blinded and was_blinded:
-		_log_debug("Enemy is no longer blinded")
+	elif not blinded and was:
 		_log_to_file("Status effect: BLINDED removed")
 
-## Set the stunned state (from flashbang grenade).
-## When stunned, the enemy cannot move or take actions.
 func set_stunned(stunned: bool) -> void:
-	var was_stunned := _is_stunned
+	var was := _is_stunned
 	_is_stunned = stunned
-
-	if stunned and not was_stunned:
-		_log_debug("Enemy is now STUNNED - cannot move")
+	if stunned and not was:
 		_log_to_file("Status effect: STUNNED applied")
-		# Stop all movement
 		velocity = Vector2.ZERO
-	elif not stunned and was_stunned:
-		_log_debug("Enemy is no longer stunned")
+	elif not stunned and was:
 		_log_to_file("Status effect: STUNNED removed")
 
-## Check if the enemy is currently blinded.
-func is_blinded() -> bool:
-	return _is_blinded
-
-## Check if the enemy is currently stunned.
-func is_stunned() -> bool:
-	return _is_stunned
+func is_blinded() -> bool: return _is_blinded
+func is_stunned() -> bool: return _is_stunned

@@ -8,11 +8,12 @@
 
 ## Log Files Analyzed
 
-The issue includes four log files from the user demonstrating the problem:
+The issue includes five log files from the user demonstrating the problem:
 - `game_log_20260125_035127.txt` (908KB)
 - `game_log_20260125_035837.txt` (105KB)
 - `game_log_20260125_035940.txt` (357KB)
 - `game_log_20260125_040455.txt` (141KB)
+- `game_log_20260125_041941.txt` (278KB) - Added 2026-01-25 from PR #358 feedback
 
 ---
 
@@ -304,3 +305,29 @@ Based on the analysis, **Solution 4 (Hybrid Approach)** is recommended because:
 - [The Predictable Problem: Why Stealth Game AI Needs an Overhaul - Wayline](https://www.wayline.io/blog/predictable-problem-stealth-game-ai-overhaul)
 - [Context Steering - Game AI Pro 2](http://www.gameaipro.com/GameAIPro2/GameAIPro2_Chapter18_Context_Steering_Behavior-Driven_Steering_at_the_Macro_Scale.pdf)
 - [Godot NavigationAgent2D Documentation](https://docs.godotengine.org/en/stable/classes/class_navigationagent2d.html)
+
+---
+
+## User Feedback Log
+
+### 2026-01-25: Feedback from PR #358
+
+**User comment (translated from Russian):**
+> "The problem remains. The enemy should check each new corner angle (at least look at each unexplored corner for a second)."
+
+**New log file added:** `game_log_20260125_041941.txt`
+
+**Analysis of new log:**
+- Log shows PURSUING and FLANKING corner checks still using perpendicular angles
+- Example from log:
+  ```
+  [04:20:14] [ENEMY] [Enemy4] PURSUING corner check: angle -174.2°
+  [04:20:14] [ENEMY] [Enemy3] PURSUING corner check: angle -128.3°
+  [04:20:14] [ENEMY] [Enemy2] FLANKING corner check: angle 83.1°
+  ```
+- The corner check angles are perpendicular to movement, NOT toward the suspected target position
+- Corner check duration is only 0.3 seconds (user requests at least 1 second)
+
+**Action Required:**
+1. Implement target-aware corner checking - when in tactical states (PURSUING, FLANKING, SEARCHING), look toward the suspected player position instead of perpendicular to movement
+2. Increase corner check duration from 0.3s to 1.0s per user feedback
