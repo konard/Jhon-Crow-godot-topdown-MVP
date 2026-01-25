@@ -175,6 +175,9 @@ var _grenade_drag_active: bool = false
 ## Whether debug mode is enabled (F7 toggle, shows grenade trajectory).
 var _debug_mode_enabled: bool = false
 
+## Whether invincibility mode is enabled (F6 toggle, player takes no damage).
+var _invincibility_enabled: bool = false
+
 
 func _ready() -> void:
 	FileLogger.info("[Player] Initializing player...")
@@ -279,7 +282,7 @@ func _ready() -> void:
 	# to ensure level scripts have finished adding weapons to the player.
 	# See _weapon_pose_applied and _weapon_detect_frame_count variables.
 
-	# Connect to GameManager's debug mode signal for F7 toggle
+	# Connect to GameManager's debug signals (F6 invincibility, F7 debug mode)
 	_connect_debug_mode_signal()
 
 	# Initialize death animation component
@@ -290,6 +293,7 @@ func _ready() -> void:
 		_current_grenades, max_grenades,
 		_current_health, max_health
 	])
+	FileLogger.info("[Player.Grenade] Throwing system: VELOCITY-BASED (v2.0 - mouse velocity at release)")
 
 
 func _physics_process(delta: float) -> void:
@@ -833,6 +837,17 @@ func on_hit_with_info(hit_direction: Vector2, caliber_data: Resource) -> void:
 	if not _is_alive:
 		return
 
+	# Check invincibility mode (F6 toggle)
+	if _invincibility_enabled:
+		FileLogger.info("[Player] Hit blocked by invincibility mode")
+		# Still show hit flash for visual feedback
+		_show_hit_flash()
+		# Spawn blood effect for visual feedback even in invincibility mode
+		var impact_manager: Node = get_node_or_null("/root/ImpactEffectsManager")
+		if impact_manager and impact_manager.has_method("spawn_blood_effect"):
+			impact_manager.spawn_blood_effect(global_position, hit_direction, caliber_data, false)
+		return
+
 	hit.emit()
 
 	# Store hit direction for death animation
@@ -1018,10 +1033,10 @@ func reset_player() -> void:
 func _on_difficulty_changed(_new_difficulty: int) -> void:
 	var difficulty_manager: Node = get_node_or_null("/root/DifficultyManager")
 	if difficulty_manager:
-		var new_max_ammo := difficulty_manager.get_max_ammo()
+		var new_max_ammo: int = difficulty_manager.get_max_ammo()
 		# Only update if the max ammo changed
 		if new_max_ammo != max_ammo:
-			var old_max_ammo := max_ammo
+			var old_max_ammo: int = max_ammo
 			max_ammo = new_max_ammo
 			# Scale current ammo proportionally, but cap at new max
 			if old_max_ammo > 0:
@@ -1233,6 +1248,22 @@ var _wind_up_intensity: float = 0.0
 ## Previous mouse position for velocity calculation.
 var _prev_mouse_pos: Vector2 = Vector2.ZERO
 
+## Mouse velocity history for smooth velocity calculation (stores last N velocities).
+## Used to get stable velocity at moment of release.
+var _mouse_velocity_history: Array[Vector2] = []
+
+## Maximum number of velocity samples to keep in history.
+const MOUSE_VELOCITY_HISTORY_SIZE: int = 5
+
+## Current calculated mouse velocity (pixels per second).
+var _current_mouse_velocity: Vector2 = Vector2.ZERO
+
+## Total swing distance traveled during aiming (for momentum transfer calculation).
+var _total_swing_distance: float = 0.0
+
+## Previous frame time for delta calculation in velocity tracking.
+var _prev_frame_time: float = 0.0
+
 ## Whether weapon is in sling position (lowered for grenade handling).
 var _weapon_slung: bool = false
 
@@ -1387,9 +1418,14 @@ func _handle_grenade_waiting_for_g_release_state() -> void:
 		_grenade_state = GrenadeState.AIMING
 		_aim_drag_start = get_global_mouse_position()
 		_prev_mouse_pos = _aim_drag_start
+		# Initialize velocity tracking for realistic throwing
+		_mouse_velocity_history.clear()
+		_current_mouse_velocity = Vector2.ZERO
+		_total_swing_distance = 0.0
+		_prev_frame_time = Time.get_ticks_msec() / 1000.0
 		# Start transfer animation, then wind-up
 		_start_grenade_anim_phase(GrenadeAnimPhase.TRANSFER, ANIM_TRANSFER_DURATION)
-		FileLogger.info("[Player.Grenade] Step 2 complete: G released, RMB held - now aiming, drag and release RMB to throw")
+		FileLogger.info("[Player.Grenade] Step 2 complete: G released, RMB held - now aiming (velocity-based throwing enabled)")
 
 
 ## Handle AIMING state: only RMB held (G released), drag to aim and release to throw.
@@ -1483,57 +1519,123 @@ func _reset_grenade_state() -> void:
 	_aim_drag_start = Vector2.ZERO
 	_active_grenade = null
 	_wind_up_intensity = 0.0
+	# Reset velocity tracking for next throw
+	_mouse_velocity_history.clear()
+	_current_mouse_velocity = Vector2.ZERO
+	_total_swing_distance = 0.0
 	# Animation will transition via RETURN_IDLE phase (set by caller if needed)
 	FileLogger.info("[Player.Grenade] State reset to IDLE")
 
 
-## Throw the grenade based on aiming drag direction and distance.
+## Throw the grenade using realistic velocity-based physics.
+## The throw velocity is determined by mouse velocity at release moment, not drag distance.
+## FIX for issue #313: Direction is determined ONLY by mouse velocity direction (how the mouse is MOVING),
+## NOT by the mouse cursor position relative to player.
 ## Includes player rotation animation to prevent grenade hitting player.
-## @param drag_end: The position where the mouse drag ended.
+## @param drag_end: The position where the mouse drag ended (unused, kept for API compatibility).
 func _throw_grenade(drag_end: Vector2) -> void:
 	if _active_grenade == null or not is_instance_valid(_active_grenade):
 		FileLogger.info("[Player.Grenade] Cannot throw: no active grenade")
 		_reset_grenade_state()
 		return
 
-	# Calculate throw direction and distance from aiming drag
-	var drag_vector := drag_end - _aim_drag_start
-	var drag_distance := drag_vector.length()
+	# Get the mouse velocity at moment of release (used for BOTH direction AND strength)
+	var release_velocity := _current_mouse_velocity
+	var velocity_magnitude := release_velocity.length()
 
-	# If drag is too short (dropped at feet), use minimum throw
-	var min_drag_distance := 10.0
-	if drag_distance < min_drag_distance:
-		drag_distance = min_drag_distance
-		drag_vector = Vector2(1, 0)  # Default direction if no drag
+	# FIX for issue #313: Use MOUSE VELOCITY DIRECTION (how the mouse is MOVING)
+	# User requirement: grenade flies in the direction the mouse is moving at release
+	# NOT toward where the mouse cursor is positioned
+	# Example: If user moves mouse DOWN, grenade flies DOWN (regardless of where cursor is)
+	var throw_direction: Vector2
 
-	var throw_direction := drag_vector.normalized()
+	if velocity_magnitude > 10.0:
+		# Primary direction: the direction the mouse is MOVING (velocity direction)
+		# FIX for issue #313 v4: Snap to 8 directions (4 cardinal + 4 diagonal)
+		# This compensates for imprecise human mouse movement while allowing diagonal throws
+		var raw_direction := release_velocity.normalized()
+		throw_direction = _snap_to_octant_direction(raw_direction)
+		FileLogger.info("[Player.Grenade] Raw direction: %s, Snapped direction: %s" % [
+			str(raw_direction), str(throw_direction)
+		])
+	else:
+		# Fallback when mouse is not moving - use player-to-mouse as fallback direction
+		# FIX for issue #313 v4: Also snap fallback to 8 directions
+		var player_to_mouse := drag_end - global_position
+		if player_to_mouse.length() > 10.0:
+			throw_direction = _snap_to_octant_direction(player_to_mouse.normalized())
+		else:
+			throw_direction = Vector2(1, 0)  # Default direction (right)
+		# FIX for issue #313 v4: When velocity is 0, use a minimum throw speed
+		# This prevents grenade from getting "stuck" when user stops mouse before release
+		var min_fallback_velocity := 2000.0  # Minimum velocity to ensure grenade travels
+		velocity_magnitude = min_fallback_velocity
+		FileLogger.info("[Player.Grenade] Fallback mode: Using minimum velocity %.1f px/s" % min_fallback_velocity)
 
-	# Increase throw sensitivity significantly - multiply drag distance by 9x
-	# (3x for sensitivity * 3x for user-requested range increase)
-	var sensitivity_multiplier := 9.0
-	var adjusted_drag_distance := drag_distance * sensitivity_multiplier
-
-	# Clamp max drag distance to viewport length * 3 (user requested 3x farther)
-	var viewport := get_viewport()
-	var max_drag_distance := 3840.0  # Default 1280 * 3
-	if viewport:
-		max_drag_distance = viewport.get_visible_rect().size.x * 3.0
-	adjusted_drag_distance = minf(adjusted_drag_distance, max_drag_distance)
-
-	FileLogger.info("[Player.Grenade] Throwing! Direction: %s, Drag: %.1f (adjusted: %.1f)" % [str(throw_direction), drag_distance, adjusted_drag_distance])
+	FileLogger.info("[Player.Grenade] Throwing in mouse velocity direction! Direction: %s, Mouse velocity: %.1f px/s, Swing: %.1f" % [
+		str(throw_direction), velocity_magnitude, _total_swing_distance
+	])
 
 	# Rotate player to face throw direction (prevents grenade hitting player when throwing upward)
 	_rotate_player_for_throw(throw_direction)
 
 	# IMPORTANT: Set grenade position to player's CURRENT position (not where it was activated)
 	# Offset grenade spawn position in throw direction to avoid collision with player
+	# But first, check if there's a wall between player and the spawn position to prevent
+	# the grenade from spawning behind/inside a wall (which would cause tunneling)
 	var spawn_offset := 60.0  # Increased from 30 to 60 pixels in front of player to avoid hitting
-	var spawn_position := global_position + throw_direction * spawn_offset
-	_active_grenade.global_position = spawn_position
+	var intended_spawn_position := global_position + throw_direction * spawn_offset
 
-	# Set the throw velocity with adjusted distance
-	if _active_grenade.has_method("throw_grenade"):
-		_active_grenade.throw_grenade(throw_direction, adjusted_drag_distance)
+	# Raycast from player to intended spawn position to check for walls
+	var spawn_position := _get_safe_grenade_spawn_position(global_position, intended_spawn_position, throw_direction)
+
+	# Use direction-based throwing (FIX for issue #313)
+	# Priority: throw_grenade_with_direction > throw_grenade_velocity_based > throw_grenade > direct physics
+	var method_called := false
+	if _active_grenade.has_method("throw_grenade_with_direction"):
+		# Best method: explicit direction + velocity magnitude + swing distance
+		_active_grenade.throw_grenade_with_direction(throw_direction, velocity_magnitude, _total_swing_distance)
+		method_called = true
+		FileLogger.info("[Player.Grenade] Called throw_grenade_with_direction() - direction is mouse velocity direction")
+	elif _active_grenade.has_method("throw_grenade_velocity_based"):
+		# Legacy velocity-based: construct a velocity vector in the correct direction
+		# This is a workaround - we pass (direction * speed) instead of actual mouse velocity
+		var directional_velocity := throw_direction * velocity_magnitude
+		_active_grenade.throw_grenade_velocity_based(directional_velocity, _total_swing_distance)
+		method_called = true
+		FileLogger.info("[Player.Grenade] Called throw_grenade_velocity_based() - direction is mouse velocity direction")
+	elif _active_grenade.has_method("throw_grenade"):
+		# Legacy drag-based: convert velocity to drag distance approximation
+		var legacy_distance := velocity_magnitude * 0.5  # Rough conversion
+		_active_grenade.throw_grenade(throw_direction, legacy_distance)
+		method_called = true
+		FileLogger.info("[Player.Grenade] Called throw_grenade() on grenade (legacy)")
+
+	# Direct physics fallback when no throw method is available
+	# This handles cases like C# grenade scripts or missing methods
+	if not method_called:
+		FileLogger.info("[Player.Grenade] WARNING: No throw method found via has_method(), using direct physics fallback")
+		# Unfreeze the grenade first
+		if _active_grenade is RigidBody2D:
+			_active_grenade.freeze = false
+			# Calculate throw velocity using the same formula as grenade_base.gd
+			# Default values from GrenadeBase: mouse_velocity_to_throw_multiplier=0.5, min_transfer=0.35
+			var multiplier := 0.5
+			var min_transfer := 0.35
+			var min_swing := 80.0
+			var max_speed := 850.0
+			# Use throw_direction (mouse velocity direction) - FIX for issue #313
+			# The direction is now the direction the mouse is MOVING at release
+			var swing_transfer := clampf(_total_swing_distance / min_swing, 0.0, 1.0 - min_transfer)
+			var transfer_efficiency := min_transfer + swing_transfer
+			transfer_efficiency = clampf(transfer_efficiency, 0.0, 1.0)
+			var throw_speed := clampf(velocity_magnitude * multiplier * transfer_efficiency, 0.0, max_speed)
+			# Apply velocity in the throw_direction (mouse velocity direction)
+			_active_grenade.linear_velocity = throw_direction * throw_speed
+			_active_grenade.rotation = throw_direction.angle()
+			FileLogger.info("[Player.Grenade] Direct physics fallback: direction=%s, speed=%.1f, transfer=%.2f" % [
+				str(throw_direction), throw_speed, transfer_efficiency
+			])
 
 	# Emit signal
 	grenade_thrown.emit()
@@ -1543,10 +1645,83 @@ func _throw_grenade(drag_end: Vector2) -> void:
 	if audio_manager and audio_manager.has_method("play_grenade_throw"):
 		audio_manager.play_grenade_throw(global_position)
 
-	FileLogger.info("[Player.Grenade] Thrown! Direction: %s, Distance: %.1f" % [str(throw_direction), adjusted_drag_distance])
+	FileLogger.info("[Player.Grenade] Thrown! Velocity: %.1f, Swing: %.1f" % [velocity_magnitude, _total_swing_distance])
 
 	# Reset state (grenade is now independent)
 	_reset_grenade_state()
+
+
+## Get a safe spawn position for the grenade that doesn't spawn behind/inside a wall.
+## Uses raycast to check if there's an obstacle between player and intended spawn position.
+## This prevents the grenade from tunneling through walls when thrown at close range ("в упор").
+## @param from_pos: The player's current position.
+## @param intended_pos: The intended spawn position (offset from player).
+## @param throw_direction: The normalized throw direction.
+## @return: A safe spawn position that is not behind a wall.
+func _get_safe_grenade_spawn_position(from_pos: Vector2, intended_pos: Vector2, throw_direction: Vector2) -> Vector2:
+	# Get the physics space state for raycasting
+	var space_state := get_world_2d().direct_space_state
+	if space_state == null:
+		FileLogger.info("[Player.Grenade] WARNING: Could not get physics space state, using intended position")
+		_active_grenade.global_position = intended_pos
+		return intended_pos
+
+	# Create raycast query from player to intended spawn position
+	# Collision mask 4 = obstacles layer (same as grenade's collision mask for walls)
+	var query := PhysicsRayQueryParameters2D.create(from_pos, intended_pos, 4, [self])
+	query.hit_from_inside = false  # Don't detect if player is somehow inside a wall
+
+	var result := space_state.intersect_ray(query)
+
+	if result.is_empty():
+		# No wall between player and intended position - safe to spawn there
+		_active_grenade.global_position = intended_pos
+		FileLogger.info("[Player.Grenade] Spawn position clear, using intended: %s" % str(intended_pos))
+		return intended_pos
+
+	# Wall detected! Get the collision point and spawn just before it
+	var collision_point: Vector2 = result.position
+	var collider_name: String = result.collider.name if result.collider else "unknown"
+
+	# Calculate safe spawn distance: 5 pixels before the wall
+	# This ensures the grenade doesn't spawn inside the wall
+	var safe_margin := 5.0
+	var distance_to_wall := from_pos.distance_to(collision_point)
+	var safe_distance := maxf(distance_to_wall - safe_margin, 10.0)  # At least 10px from player
+
+	var safe_position := from_pos + throw_direction * safe_distance
+
+	FileLogger.info("[Player.Grenade] Wall detected at %s (collider: %s)! Adjusting spawn from %s to %s (distance: %.1f -> %.1f)" % [
+		str(collision_point), collider_name, str(intended_pos), str(safe_position),
+		from_pos.distance_to(intended_pos), safe_distance
+	])
+
+	_active_grenade.global_position = safe_position
+	return safe_position
+
+
+## Snap a direction vector to the nearest of 8 directions (4 cardinal + 4 diagonal).
+## FIX for issue #313 v4: Compensates for imprecise human mouse movement while allowing diagonal throws.
+## Uses 8 directions with 45° sectors each:
+## - RIGHT (0°), DOWN-RIGHT (45°), DOWN (90°), DOWN-LEFT (135°)
+## - LEFT (180°), UP-LEFT (-135°), UP (-90°), UP-RIGHT (-45°)
+## @param raw_direction: The raw normalized direction from mouse velocity.
+## @return: A snapped direction vector pointing to the nearest of 8 directions.
+func _snap_to_octant_direction(raw_direction: Vector2) -> Vector2:
+	# Calculate angle in radians (-PI to PI)
+	var angle := raw_direction.angle()
+
+	# Use 8 directions with 45° sectors each
+	var sector_size := PI / 4.0  # 45 degrees per sector
+
+	# Snap to nearest sector (round to nearest multiple of 45°)
+	var sector_index := roundi(angle / sector_size)
+	var snapped_angle := sector_index * sector_size
+
+	# Convert back to direction vector
+	var snapped_direction := Vector2(cos(snapped_angle), sin(snapped_angle))
+
+	return snapped_direction
 
 
 ## Rotate player to face throw direction (with swing animation).
@@ -1749,30 +1924,48 @@ func _update_weapon_sling(delta: float) -> void:
 	_weapon_mount.rotation = lerpf(_weapon_mount.rotation, target_rot, lerp_speed)
 
 
-## Update wind-up intensity based on mouse drag distance during aiming.
+## Update wind-up intensity and track mouse velocity during aiming.
+## Uses velocity-based physics for realistic throwing.
 func _update_wind_up_intensity() -> void:
 	var current_mouse := get_global_mouse_position()
+	var current_time := Time.get_ticks_msec() / 1000.0
 
-	# Calculate drag distance from aim start
-	var drag_vector := current_mouse - _aim_drag_start
-	var drag_distance := drag_vector.length()
+	# Calculate time delta since last frame
+	var delta_time := current_time - _prev_frame_time
+	if delta_time <= 0.0:
+		delta_time = 0.016  # Default to ~60fps if first frame
 
-	# Get viewport for max drag calculation
-	var viewport := get_viewport()
-	var max_drag := 600.0  # Default max drag distance
-	if viewport:
-		max_drag = viewport.get_visible_rect().size.x * 0.5
-
-	# Calculate base intensity from distance
-	var intensity := clampf(drag_distance / max_drag, 0.0, 1.0)
-
-	# Add velocity component for more responsive feel
+	# Calculate mouse displacement since last frame
 	var mouse_delta := current_mouse - _prev_mouse_pos
-	var mouse_velocity := mouse_delta.length()
-	var velocity_bonus := clampf(mouse_velocity / 50.0, 0.0, 0.2)
 
-	_wind_up_intensity = clampf(intensity + velocity_bonus, 0.0, 1.0)
+	# Accumulate total swing distance for momentum transfer calculation
+	_total_swing_distance += mouse_delta.length()
+
+	# Calculate instantaneous mouse velocity (pixels per second)
+	var instantaneous_velocity := mouse_delta / delta_time
+
+	# Add to velocity history for smoothing
+	_mouse_velocity_history.append(instantaneous_velocity)
+	if _mouse_velocity_history.size() > MOUSE_VELOCITY_HISTORY_SIZE:
+		_mouse_velocity_history.remove_at(0)
+
+	# Calculate average velocity from history (smoothed velocity)
+	var velocity_sum := Vector2.ZERO
+	for vel in _mouse_velocity_history:
+		velocity_sum += vel
+	_current_mouse_velocity = velocity_sum / max(_mouse_velocity_history.size(), 1)
+
+	# Calculate wind-up intensity based on velocity (for animation)
+	# Higher velocity = more wind-up visual effect
+	var velocity_magnitude := _current_mouse_velocity.length()
+	# Normalize to a reasonable range (0-2000 pixels/second typical for fast mouse movement)
+	var velocity_intensity := clampf(velocity_magnitude / 1500.0, 0.0, 1.0)
+
+	_wind_up_intensity = velocity_intensity
+
+	# Update tracking for next frame
 	_prev_mouse_pos = current_mouse
+	_prev_frame_time = current_time
 
 
 # ============================================================================
@@ -1878,16 +2071,29 @@ func _update_reload_animation(delta: float) -> void:
 # Debug Visualization System
 # ============================================================================
 
-## Connect to GameManager's debug mode signal for F7 toggle.
+## Connect to GameManager's debug signals (F6 invincibility, F7 debug mode).
 func _connect_debug_mode_signal() -> void:
 	var game_manager: Node = get_node_or_null("/root/GameManager")
 	if game_manager:
+		# Connect to invincibility toggle signal
+		if game_manager.has_signal("invincibility_toggled"):
+			game_manager.invincibility_toggled.connect(_on_invincibility_toggled)
+		# Sync with current invincibility state
+		if game_manager.has_method("is_invincibility_enabled"):
+			_invincibility_enabled = game_manager.is_invincibility_enabled()
+
 		# Connect to debug mode toggle signal
 		if game_manager.has_signal("debug_mode_toggled"):
 			game_manager.debug_mode_toggled.connect(_on_debug_mode_toggled)
 		# Sync with current debug mode state
 		if game_manager.has_method("is_debug_mode_enabled"):
 			_debug_mode_enabled = game_manager.is_debug_mode_enabled()
+
+
+## Called when invincibility mode is toggled via F6 key.
+func _on_invincibility_toggled(enabled: bool) -> void:
+	_invincibility_enabled = enabled
+	FileLogger.info("[Player] Invincibility mode: %s" % ("ON" if _invincibility_enabled else "OFF"))
 
 
 ## Called when debug mode is toggled via F7 key.

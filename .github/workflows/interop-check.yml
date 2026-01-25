@@ -1,0 +1,230 @@
+name: C# and GDScript Interoperability Check
+
+# This workflow validates that C# and GDScript code can work together
+# by checking for common issues that cause runtime failures.
+# See issue #302 for context.
+
+on:
+  push:
+    branches: [ main, issue-* ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  interop-check:
+    name: Check C#/GDScript Interoperability
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check for duplicate component implementations
+        run: |
+          echo "Checking for duplicate C#/GDScript implementations..."
+
+          # Build lists of component names
+          cs_components=()
+          gd_components=()
+
+          # Get C# component names (strip .cs, convert to lowercase for comparison)
+          while IFS= read -r file; do
+            basename=$(basename "$file" .cs)
+            cs_components+=("$basename")
+          done < <(find Scripts -name "*.cs" -type f 2>/dev/null | grep -v "/Interfaces/")
+
+          # Get GDScript component names (strip .gd, convert snake_case to PascalCase)
+          while IFS= read -r file; do
+            basename=$(basename "$file" .gd)
+            gd_components+=("$basename")
+          done < <(find scripts -name "*.gd" -type f 2>/dev/null | grep -v "test_")
+
+          echo "C# files found: ${#cs_components[@]}"
+          echo "GDScript files found: ${#gd_components[@]}"
+
+          # Check for duplicates (potential conflicts)
+          warnings=0
+          for cs_comp in "${cs_components[@]}"; do
+            cs_lower=$(echo "$cs_comp" | tr '[:upper:]' '[:lower:]')
+            for gd_comp in "${gd_components[@]}"; do
+              # Convert snake_case to lowercase without underscores for comparison
+              gd_normalized=$(echo "$gd_comp" | tr '_' '' | tr '[:upper:]' '[:lower:]')
+
+              if [ "$cs_lower" = "$gd_normalized" ]; then
+                echo "::warning::Duplicate implementation found: C#=$cs_comp, GDScript=$gd_comp"
+                echo "  This may cause confusion or conflicts. Consider:"
+                echo "  - Consolidating to one language"
+                echo "  - Clearly documenting which is the primary implementation"
+                warnings=$((warnings + 1))
+              fi
+            done
+          done
+
+          if [ "$warnings" -gt 0 ]; then
+            echo ""
+            echo "Found $warnings potential duplicate implementations."
+            echo "Note: Duplicates are not necessarily errors, but should be intentional."
+          else
+            echo "No obvious duplicate implementations found."
+          fi
+
+      - name: Check for C# signal connections in scenes
+        run: |
+          echo "Checking scene files for C# signal references..."
+
+          errors=0
+          warnings=0
+
+          # Find all .tscn files and check for signal connections
+          while IFS= read -r scene; do
+            # Check if scene references C# scripts
+            if grep -q "\.cs\]" "$scene"; then
+              # Check for signal connections that might break if C# fails to compile
+              if grep -q "signal.*callable" "$scene" || grep -q "connect(" "$scene"; then
+                echo "::notice file=$scene::Scene uses C# with signal connections"
+              fi
+            fi
+          done < <(find scenes -name "*.tscn" -type f 2>/dev/null)
+
+          echo "Scene signal check completed."
+
+      - name: Check for Godot autoload references to C#
+        run: |
+          echo "Checking project.godot for C# autoload references..."
+
+          if [ -f "project.godot" ]; then
+            # Check if any autoloads reference C# scripts
+            if grep -q "\.cs\"" project.godot; then
+              echo "::warning::project.godot references C# scripts in autoload section"
+              echo "If C# build fails, these autoloads will not load."
+              grep "\.cs\"" project.godot | while read -r line; do
+                echo "  $line"
+              done
+            else
+              echo "No C# scripts in autoload section."
+            fi
+          fi
+
+      - name: Validate method naming conventions
+        run: |
+          echo "Checking method naming conventions for cross-language compatibility..."
+
+          warnings=0
+
+          # Check C# public methods are accessible from GDScript
+          while IFS= read -r file; do
+            # Look for public methods that might be called from GDScript
+            # GDScript expects snake_case or lowercase method names
+            while IFS= read -r method; do
+              # Extract method name
+              method_name=$(echo "$method" | grep -oP 'public\s+[\w<>]+\s+\K\w+(?=\s*\()' || true)
+              if [ -n "$method_name" ]; then
+                # Check if it starts with uppercase (PascalCase) - this is fine for C#
+                # but document that GDScript should use node.call("MethodName")
+                first_char=$(echo "$method_name" | cut -c1)
+                if [[ "$first_char" =~ [A-Z] ]]; then
+                  : # PascalCase is expected for C#
+                fi
+              fi
+            done < <(grep -n "public.*(" "$file" 2>/dev/null || true)
+          done < <(find Scripts -name "*.cs" -type f 2>/dev/null)
+
+          echo "Method naming convention check completed."
+
+      - name: Validate dual-language critical method consistency
+        run: |
+          echo "Checking that critical methods exist in both C# and GDScript implementations..."
+          echo "See issue #328 and PR #327 for context on dual-language consistency."
+          echo ""
+
+          warnings=0
+          errors=0
+
+          # Define critical entity pairs that should have consistent implementations
+          # Format: "GDScript_path:C#_path:critical_methods_space_separated"
+          ENTITY_PAIRS=(
+            "scripts/characters/player.gd:Scripts/Characters/Player.cs:TakeDamage on_hit"
+            "scripts/objects/enemy.gd:Scripts/Objects/Enemy.cs:on_hit TakeDamage"
+            "scripts/components/health_component.gd:Scripts/Components/HealthComponent.cs:TakeDamage"
+          )
+
+          for pair in "${ENTITY_PAIRS[@]}"; do
+            IFS=':' read -r gd_file cs_file methods <<< "$pair"
+
+            # Skip if files don't exist
+            if [ ! -f "$gd_file" ] && [ ! -f "$cs_file" ]; then
+              continue
+            fi
+
+            # Check if both files exist (dual-language entity)
+            if [ -f "$gd_file" ] && [ -f "$cs_file" ]; then
+              echo "Checking dual-language entity: $(basename "$gd_file" .gd)"
+
+              for method in $methods; do
+                # Convert method to both formats for checking
+                # snake_case for GDScript, PascalCase for C#
+                gd_method=$(echo "$method" | sed 's/\([A-Z]\)/_\L\1/g' | sed 's/^_//')
+                cs_method=$(echo "$method" | sed 's/_\([a-z]\)/\U\1/g' | sed 's/^\([a-z]\)/\U\1/')
+
+                # Check GDScript (also check original method name)
+                gd_has_method=false
+                if grep -qE "^func\s+${method}\s*\(" "$gd_file" 2>/dev/null; then
+                  gd_has_method=true
+                elif grep -qE "^func\s+${gd_method}\s*\(" "$gd_file" 2>/dev/null; then
+                  gd_has_method=true
+                fi
+
+                # Check C# (also check original method name)
+                cs_has_method=false
+                if grep -qE "(public|private|protected|internal|override).*\s+${method}\s*\(" "$cs_file" 2>/dev/null; then
+                  cs_has_method=true
+                elif grep -qE "(public|private|protected|internal|override).*\s+${cs_method}\s*\(" "$cs_file" 2>/dev/null; then
+                  cs_has_method=true
+                fi
+
+                # Report discrepancies
+                if [ "$gd_has_method" = true ] && [ "$cs_has_method" = false ]; then
+                  echo "::warning file=$cs_file::Method '$method' exists in GDScript but not in C#. Dual-language entities should have consistent methods."
+                  warnings=$((warnings + 1))
+                elif [ "$gd_has_method" = false ] && [ "$cs_has_method" = true ]; then
+                  echo "::warning file=$gd_file::Method '$method' exists in C# but not in GDScript. Dual-language entities should have consistent methods."
+                  warnings=$((warnings + 1))
+                elif [ "$gd_has_method" = true ] && [ "$cs_has_method" = true ]; then
+                  echo "  ✓ Method '$method' exists in both languages"
+                fi
+              done
+              echo ""
+            elif [ -f "$gd_file" ] && [ ! -f "$cs_file" ]; then
+              echo "::notice::GDScript-only entity: $(basename "$gd_file" .gd) (no C# counterpart)"
+            elif [ ! -f "$gd_file" ] && [ -f "$cs_file" ]; then
+              echo "::notice::C#-only entity: $(basename "$cs_file" .cs) (no GDScript counterpart)"
+            fi
+          done
+
+          if [ "$warnings" -gt 0 ]; then
+            echo ""
+            echo "Found $warnings dual-language consistency warnings."
+            echo "When modifying dual-language entities, ensure BOTH implementations are updated."
+            echo "See PR #327 for an example of issues caused by inconsistent implementations."
+          else
+            echo "All checked dual-language entities have consistent methods."
+          fi
+
+      - name: Summary
+        run: |
+          echo "=== C#/GDScript Interoperability Check Complete ==="
+          echo ""
+          echo "Checks performed:"
+          echo "  ✓ Duplicate implementations"
+          echo "  ✓ Signal connections in scenes"
+          echo "  ✓ Autoload references"
+          echo "  ✓ Method naming conventions"
+          echo "  ✓ Dual-language critical method consistency (Issue #328)"
+          echo ""
+          echo "Remember:"
+          echo "  - C# uses PascalCase methods"
+          echo "  - GDScript uses snake_case methods"
+          echo "  - Cross-language calls use string method names"
+          echo "  - Always test both languages when making changes"
+          echo "  - When modifying Player/Enemy, update BOTH GDScript AND C# versions"

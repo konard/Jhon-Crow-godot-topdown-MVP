@@ -1,4 +1,6 @@
 using Godot;
+using System;
+using System.Collections.Generic;
 using GodotTopDownTemplate.AbstractClasses;
 using GodotTopDownTemplate.Weapons;
 
@@ -169,6 +171,16 @@ public partial class Player : BaseCharacter
     private bool _debugModeEnabled = false;
 
     /// <summary>
+    /// Whether invincibility mode is enabled (F6 toggle, player takes no damage).
+    /// </summary>
+    private bool _invincibilityEnabled = false;
+
+    /// <summary>
+    /// Label for displaying invincibility mode indicator.
+    /// </summary>
+    private Label? _invincibilityLabel = null;
+
+    /// <summary>
     /// Target rotation for throw animation.
     /// </summary>
     private float _throwTargetRotation = 0.0f;
@@ -192,7 +204,8 @@ public partial class Player : BaseCharacter
     {
         Rifle,      // Default - extended grip (e.g., AssaultRifle)
         SMG,        // Compact grip (e.g., MiniUzi)
-        Shotgun     // Similar to rifle but slightly tighter
+        Shotgun,    // Similar to rifle but slightly tighter
+        Pistol      // Compact one-handed/two-handed pistol grip (e.g., SilencedPistol)
     }
 
     /// <summary>
@@ -399,6 +412,32 @@ public partial class Player : BaseCharacter
     /// Previous mouse position for velocity calculation.
     /// </summary>
     private Vector2 _prevMousePos = Vector2.Zero;
+
+    /// <summary>
+    /// Mouse velocity history for smooth velocity calculation (stores last N velocities).
+    /// Used to get stable velocity at moment of release.
+    /// </summary>
+    private List<Vector2> _mouseVelocityHistory = new List<Vector2>();
+
+    /// <summary>
+    /// Maximum number of velocity samples to keep in history.
+    /// </summary>
+    private const int MouseVelocityHistorySize = 5;
+
+    /// <summary>
+    /// Current calculated mouse velocity (pixels per second).
+    /// </summary>
+    private Vector2 _currentMouseVelocity = Vector2.Zero;
+
+    /// <summary>
+    /// Total swing distance traveled during aiming (for momentum transfer calculation).
+    /// </summary>
+    private float _totalSwingDistance = 0.0f;
+
+    /// <summary>
+    /// Previous frame time for delta calculation in velocity tracking.
+    /// </summary>
+    private double _prevFrameTime = 0.0;
 
     /// <summary>
     /// Whether weapon is in sling position (lowered for grenade handling).
@@ -721,6 +760,7 @@ public partial class Player : BaseCharacter
         int currentHealth = (int)(HealthComponent?.CurrentHealth ?? 0);
         int maxHealth = (int)(HealthComponent?.MaxHealth ?? 0);
         LogToFile($"[Player] Ready! Ammo: {currentAmmo}/{maxAmmo}, Grenades: {_currentGrenades}/{MaxGrenades}, Health: {currentHealth}/{maxHealth}");
+        LogToFile("[Player.Grenade] Throwing system: VELOCITY-BASED (v2.0 - mouse velocity at release)");
     }
 
     /// <summary>
@@ -1033,9 +1073,10 @@ public partial class Player : BaseCharacter
         var detectedType = WeaponType.Rifle;  // Default to rifle pose
 
         // Check for weapon children - weapons are added directly to player by level scripts
-        // Check in order of specificity: MiniUzi (SMG), Shotgun, then default to Rifle
+        // Check in order of specificity: MiniUzi (SMG), Shotgun, SilencedPistol, then default to Rifle
         var miniUzi = GetNodeOrNull<BaseWeapon>("MiniUzi");
         var shotgun = GetNodeOrNull<BaseWeapon>("Shotgun");
+        var silencedPistol = GetNodeOrNull<BaseWeapon>("SilencedPistol");
 
         if (miniUzi != null)
         {
@@ -1046,6 +1087,11 @@ public partial class Player : BaseCharacter
         {
             detectedType = WeaponType.Shotgun;
             LogToFile("[Player] Detected weapon: Shotgun (Shotgun pose)");
+        }
+        else if (silencedPistol != null)
+        {
+            detectedType = WeaponType.Pistol;
+            LogToFile("[Player] Detected weapon: Silenced Pistol (Pistol pose)");
         }
         else
         {
@@ -1084,6 +1130,16 @@ public partial class Player : BaseCharacter
                 _baseLeftArmPos = originalLeftArmPos + new Vector2(-3, 0);
                 _baseRightArmPos = originalRightArmPos + new Vector2(1, 0);
                 LogToFile($"[Player] Applied Shotgun arm pose: Left={_baseLeftArmPos}, Right={_baseRightArmPos}");
+                break;
+
+            case WeaponType.Pistol:
+                // Pistol pose: Compact two-handed pistol grip (Weaver/Isoceles stance)
+                // Similar to SMG but even more compact - suppressed pistol is shorter than SMG
+                // Left arm supports under the right hand (close to body)
+                // Right arm extends forward slightly for aiming
+                _baseLeftArmPos = originalLeftArmPos + new Vector2(-14, 0);  // More compact than SMG (-10)
+                _baseRightArmPos = originalRightArmPos + new Vector2(4, 0);  // Slightly more forward than SMG (3)
+                LogToFile($"[Player] Applied Pistol arm pose: Left={_baseLeftArmPos}, Right={_baseRightArmPos}");
                 break;
 
             case WeaponType.Rifle:
@@ -1487,6 +1543,14 @@ public partial class Player : BaseCharacter
             return;
         }
 
+        // Check invincibility mode (F6 toggle)
+        if (_invincibilityEnabled)
+        {
+            LogToFile("[Player] Hit blocked by invincibility mode (C#)");
+            ShowHitFlash(); // Still show visual feedback for debugging
+            return;
+        }
+
         GD.Print($"[Player] {Name}: Taking {amount} damage. Current health: {HealthComponent.CurrentHealth}");
 
         // Show hit flash effect
@@ -1730,9 +1794,14 @@ public partial class Player : BaseCharacter
             _grenadeState = GrenadeState.Aiming;
             _grenadeDragStart = GetGlobalMousePosition();
             _prevMousePos = _grenadeDragStart;
+            // Initialize velocity tracking for realistic throwing
+            _mouseVelocityHistory.Clear();
+            _currentMouseVelocity = Vector2.Zero;
+            _totalSwingDistance = 0.0f;
+            _prevFrameTime = Time.GetTicksMsec() / 1000.0;
             // Start transfer animation (grenade to throwing hand)
             StartGrenadeAnimPhase(GrenadeAnimPhase.Transfer, AnimTransferDuration);
-            LogToFile("[Player.Grenade] Step 2 complete: G released, RMB held - now aiming, drag and release RMB to throw");
+            LogToFile("[Player.Grenade] Step 2 complete: G released, RMB held - now aiming (velocity-based throwing enabled)");
         }
     }
 
@@ -1862,6 +1931,11 @@ public partial class Player : BaseCharacter
         _activeGrenade = null;
         // Reset wind-up intensity
         _windUpIntensity = 0.0f;
+        // Reset velocity tracking for next throw
+        _mouseVelocityHistory.Clear();
+        _currentMouseVelocity = Vector2.Zero;
+        _totalSwingDistance = 0.0f;
+        LogToFile("[Player.Grenade] State reset to IDLE");
     }
 
     /// <summary>
@@ -1872,10 +1946,12 @@ public partial class Player : BaseCharacter
     private const float ThrowSensitivityMultiplier = 9.0f;
 
     /// <summary>
-    /// Throw the grenade based on aiming drag direction and distance.
-    /// Includes player rotation animation to prevent grenade hitting player.
+    /// Throw the grenade using realistic velocity-based physics.
+    /// The throw velocity is determined by mouse velocity at release moment, not drag distance.
+    /// FIX for issue #313: Direction is now determined by MOUSE VELOCITY (how user moves the mouse)
+    /// with snapping to 4 cardinal directions to compensate for imprecise human mouse movement.
     /// </summary>
-    /// <param name="dragEnd">The end position of the drag.</param>
+    /// <param name="dragEnd">The end position of the drag (used for direction fallback).</param>
     private void ThrowGrenade(Vector2 dragEnd)
     {
         if (_activeGrenade == null || !IsInstanceValid(_activeGrenade))
@@ -1885,48 +1961,102 @@ public partial class Player : BaseCharacter
             return;
         }
 
-        // Calculate throw direction and distance from drag
-        Vector2 dragVector = dragEnd - _grenadeDragStart;
-        float dragDistance = dragVector.Length();
+        // Get the mouse velocity at moment of release (for determining throw speed AND direction)
+        Vector2 releaseVelocity = _currentMouseVelocity;
+        float velocityMagnitude = releaseVelocity.Length();
 
-        // Direction is the drag direction (normalized)
-        Vector2 throwDirection = dragVector.Normalized();
+        // FIX for issue #313: Use MOUSE VELOCITY DIRECTION (how the mouse is MOVING)
+        // User requirement: grenade flies in the direction the mouse is moving at release
+        // NOT toward where the mouse cursor is positioned
+        // Example: If user moves mouse DOWN, grenade flies DOWN (regardless of where cursor is)
+        Vector2 throwDirection;
 
-        // If drag is too short, use a minimum distance for the throw
-        if (dragDistance < 10.0f)
+        if (velocityMagnitude > 10.0f)
         {
-            // Default to throwing forward (towards mouse from player)
-            throwDirection = (GetGlobalMousePosition() - GlobalPosition).Normalized();
-            dragDistance = 50.0f; // Minimum throw distance
+            // Primary direction: the direction the mouse is MOVING (velocity direction)
+            // FIX for issue #313 v4: Snap to 8 directions (4 cardinal + 4 diagonal)
+            // This compensates for imprecise human mouse movement while allowing diagonal throws
+            Vector2 rawDirection = releaseVelocity.Normalized();
+            throwDirection = SnapToOctantDirection(rawDirection);
+            LogToFile($"[Player.Grenade] Raw direction: {rawDirection}, Snapped direction: {throwDirection}");
+        }
+        else
+        {
+            // Fallback when mouse is not moving - use player-to-mouse as fallback direction
+            // FIX for issue #313 v4: Also snap fallback to 8 directions
+            Vector2 playerToMouse = dragEnd - GlobalPosition;
+            if (playerToMouse.Length() > 10.0f)
+            {
+                throwDirection = SnapToOctantDirection(playerToMouse.Normalized());
+            }
+            else
+            {
+                throwDirection = new Vector2(1, 0);  // Default direction (right)
+            }
+            // FIX for issue #313 v4: When velocity is 0, use a minimum throw speed
+            // This prevents grenade from getting "stuck" when user stops mouse before release
+            float minFallbackVelocity = 2000.0f;  // Minimum velocity to ensure grenade travels
+            velocityMagnitude = minFallbackVelocity;
+            LogToFile($"[Player.Grenade] Fallback mode: Using minimum velocity {minFallbackVelocity:F1} px/s");
         }
 
-        // Apply sensitivity multiplier to increase throw range (matches GDScript player.gd)
-        float adjustedDragDistance = dragDistance * ThrowSensitivityMultiplier;
-
-        // Clamp max drag distance to viewport width * 3 (matches GDScript player.gd)
-        var viewport = GetViewport();
-        float maxDragDistance = 3840.0f; // Default 1280 * 3
-        if (viewport != null)
-        {
-            maxDragDistance = viewport.GetVisibleRect().Size.X * 3.0f;
-        }
-        adjustedDragDistance = Mathf.Min(adjustedDragDistance, maxDragDistance);
-
-        LogToFile($"[Player.Grenade] Throwing! Direction: {throwDirection}, Drag: {dragDistance} (adjusted: {adjustedDragDistance})");
+        LogToFile($"[Player.Grenade] Throwing in mouse velocity direction! Direction: {throwDirection}, Mouse velocity: {velocityMagnitude:F1} px/s, Swing: {_totalSwingDistance:F1}");
 
         // Rotate player to face throw direction (prevents grenade hitting player when throwing upward)
         RotatePlayerForThrow(throwDirection);
 
-        // IMPORTANT: Set grenade position to player's CURRENT position (not where it was activated)
-        // Offset grenade spawn position in throw direction to avoid collision with player
-        float spawnOffset = 60.0f; // Increased from 30 to 60 pixels in front of player to avoid hitting
-        Vector2 spawnPosition = GlobalPosition + throwDirection * spawnOffset;
+        // Calculate intended spawn position (60px in front of player in throw direction)
+        float spawnOffset = 60.0f;
+        Vector2 intendedSpawnPosition = GlobalPosition + throwDirection * spawnOffset;
+
+        // FIXED: Raycast check to prevent spawning grenade behind/inside walls
+        // This fixes grenades passing through walls when thrown at close range ("в упор")
+        Vector2 spawnPosition = GetSafeGrenadeSpawnPosition(GlobalPosition, intendedSpawnPosition, throwDirection);
         _activeGrenade.GlobalPosition = spawnPosition;
 
-        // Call the throw method on the grenade with adjusted drag distance
-        if (_activeGrenade.HasMethod("throw_grenade"))
+        // Use direction-based throwing (FIX for issue #313)
+        // Priority: throw_grenade_with_direction > throw_grenade_velocity_based > throw_grenade
+        bool methodCalled = false;
+        if (_activeGrenade.HasMethod("throw_grenade_with_direction"))
         {
-            _activeGrenade.Call("throw_grenade", throwDirection, adjustedDragDistance);
+            // Best method: explicit direction + velocity magnitude + swing distance
+            _activeGrenade.Call("throw_grenade_with_direction", throwDirection, velocityMagnitude, _totalSwingDistance);
+            methodCalled = true;
+            LogToFile("[Player.Grenade] Called throw_grenade_with_direction() - direction is mouse velocity direction");
+        }
+        else if (_activeGrenade.HasMethod("throw_grenade_velocity_based"))
+        {
+            // Legacy velocity-based: construct a velocity vector in the correct direction
+            // This is a workaround - we pass (direction * speed) instead of actual mouse velocity
+            Vector2 directionalVelocity = throwDirection * velocityMagnitude;
+            _activeGrenade.Call("throw_grenade_velocity_based", directionalVelocity, _totalSwingDistance);
+            methodCalled = true;
+            LogToFile("[Player.Grenade] Called throw_grenade_velocity_based() - direction is mouse velocity direction");
+        }
+        else if (_activeGrenade.HasMethod("throw_grenade"))
+        {
+            // Legacy drag-based: convert velocity to drag distance approximation
+            float legacyDistance = velocityMagnitude * 0.5f; // Rough conversion
+            _activeGrenade.Call("throw_grenade", throwDirection, legacyDistance);
+            methodCalled = true;
+            LogToFile("[Player.Grenade] Called throw_grenade() on grenade (legacy)");
+        }
+
+        // Direct physics fallback when no throw method is available
+        if (!methodCalled)
+        {
+            LogToFile("[Player.Grenade] WARNING: No throw method found, using direct physics fallback");
+            if (_activeGrenade is RigidBody2D rigidBody)
+            {
+                rigidBody.Freeze = false;
+                // Calculate throw velocity
+                float multiplier = 0.5f;
+                float minSwing = 80.0f;
+                float maxSpeed = 850.0f;
+                float swingTransfer = Mathf.Clamp(_totalSwingDistance / minSwing, 0.0f, 0.65f);
+                float finalSpeed = Mathf.Min(velocityMagnitude * multiplier * (0.35f + swingTransfer), maxSpeed);
+                rigidBody.LinearVelocity = throwDirection * finalSpeed;
+            }
         }
 
         // Emit signal
@@ -1939,7 +2069,7 @@ public partial class Player : BaseCharacter
             audioManager.Call("play_grenade_throw", GlobalPosition);
         }
 
-        LogToFile($"[Player.Grenade] Thrown! Direction: {throwDirection}, Adjusted drag: {adjustedDragDistance}");
+        LogToFile($"[Player.Grenade] Thrown! Velocity: {velocityMagnitude:F1}, Swing: {_totalSwingDistance:F1}");
 
         // Reset state (grenade is now independent)
         ResetGrenadeState();
@@ -1987,6 +2117,84 @@ public partial class Player : BaseCharacter
             _isThrowRotating = false;
             LogToFile($"[Player.Grenade] Player rotation restored to {_playerRotationBeforeThrow}");
         }
+    }
+
+    /// <summary>
+    /// Get a safe spawn position for the grenade that doesn't spawn behind/inside walls.
+    /// Uses raycast from player position to intended spawn position to detect walls.
+    /// If a wall is detected, spawns the grenade just before the wall (5px safety margin).
+    /// </summary>
+    /// <param name="fromPos">The player's current position.</param>
+    /// <param name="intendedPos">The intended spawn position (player + offset in throw direction).</param>
+    /// <param name="throwDirection">The normalized throw direction.</param>
+    /// <returns>The safe spawn position for the grenade.</returns>
+    private Vector2 GetSafeGrenadeSpawnPosition(Vector2 fromPos, Vector2 intendedPos, Vector2 throwDirection)
+    {
+        // Get physics space state for raycasting
+        var spaceState = GetWorld2D().DirectSpaceState;
+        if (spaceState == null)
+        {
+            LogToFile("[Player.Grenade] Warning: Could not get DirectSpaceState for raycast");
+            return intendedPos;
+        }
+
+        // Create raycast query from player to intended spawn position
+        // Collision mask 4 = obstacles layer (walls)
+        var query = PhysicsRayQueryParameters2D.Create(fromPos, intendedPos, 4);
+        query.Exclude = new Godot.Collections.Array<Rid> { GetRid() }; // Exclude self
+
+        var result = spaceState.IntersectRay(query);
+
+        // If no wall detected, use intended position
+        if (result.Count == 0)
+        {
+            return intendedPos;
+        }
+
+        // Wall detected! Calculate safe position (5px before the wall)
+        Vector2 wallPosition = (Vector2)result["position"];
+        string colliderName = "Unknown";
+        if (result.ContainsKey("collider"))
+        {
+            var collider = result["collider"].AsGodotObject();
+            if (collider is Node node)
+            {
+                colliderName = node.Name;
+            }
+        }
+
+        float distanceToWall = fromPos.DistanceTo(wallPosition);
+        float safeDistance = Mathf.Max(distanceToWall - 5.0f, 10.0f); // At least 10px from player
+        Vector2 safePosition = fromPos + throwDirection * safeDistance;
+
+        LogToFile($"[Player.Grenade] Wall detected at {wallPosition} (collider: {colliderName})! Adjusting spawn from {intendedPos} to {safePosition}");
+
+        return safePosition;
+    }
+
+    /// <summary>
+    /// FIX for issue #313 v4: Snap raw mouse velocity direction to the nearest of 8 directions.
+    /// This compensates for imprecise human mouse movement while allowing diagonal throws.
+    ///
+    /// Uses 8 directions (45° sectors each):
+    /// - RIGHT (0°): 0°
+    /// - DOWN-RIGHT (45°): 45°
+    /// - DOWN (90°): 90°
+    /// - DOWN-LEFT (135°): 135°
+    /// - LEFT (180°): 180°
+    /// - UP-LEFT (-135°): -135°
+    /// - UP (-90°): -90°
+    /// - UP-RIGHT (-45°): -45°
+    /// </summary>
+    /// <param name="rawDirection">The raw normalized direction from mouse velocity.</param>
+    /// <returns>The snapped direction (one of 8 unit vectors).</returns>
+    private Vector2 SnapToOctantDirection(Vector2 rawDirection)
+    {
+        float angle = rawDirection.Angle();  // Returns angle in radians (-PI to PI)
+        float sectorSize = Mathf.Pi / 4.0f;  // 45 degrees per sector (8 directions)
+        int sectorIndex = Mathf.RoundToInt(angle / sectorSize);
+        float snappedAngle = sectorIndex * sectorSize;
+        return new Vector2(Mathf.Cos(snappedAngle), Mathf.Sin(snappedAngle));
     }
 
     /// <summary>
@@ -2243,34 +2451,56 @@ public partial class Player : BaseCharacter
     }
 
     /// <summary>
-    /// Update wind-up intensity based on mouse drag distance during aiming.
+    /// Update wind-up intensity and track mouse velocity during aiming.
+    /// Uses velocity-based physics for realistic throwing.
     /// </summary>
     private void UpdateWindUpIntensity()
     {
         Vector2 currentMouse = GetGlobalMousePosition();
+        double currentTime = Time.GetTicksMsec() / 1000.0;
 
-        // Calculate drag distance from aim start
-        Vector2 dragVector = currentMouse - _grenadeDragStart;
-        float dragDistance = dragVector.Length();
-
-        // Get viewport for max drag calculation
-        var viewport = GetViewport();
-        float maxDrag = 600.0f; // Default max drag distance
-        if (viewport != null)
+        // Calculate time delta since last frame
+        double deltaTime = currentTime - _prevFrameTime;
+        if (deltaTime <= 0.0)
         {
-            maxDrag = viewport.GetVisibleRect().Size.X * 0.5f;
+            deltaTime = 0.016; // Default to ~60fps if first frame
         }
 
-        // Calculate base intensity from distance
-        float intensity = Mathf.Clamp(dragDistance / maxDrag, 0.0f, 1.0f);
-
-        // Add velocity component for more responsive feel
+        // Calculate mouse displacement since last frame
         Vector2 mouseDelta = currentMouse - _prevMousePos;
-        float mouseVelocity = mouseDelta.Length();
-        float velocityBonus = Mathf.Clamp(mouseVelocity / 50.0f, 0.0f, 0.2f);
 
-        _windUpIntensity = Mathf.Clamp(intensity + velocityBonus, 0.0f, 1.0f);
+        // Accumulate total swing distance for momentum transfer calculation
+        _totalSwingDistance += mouseDelta.Length();
+
+        // Calculate instantaneous mouse velocity (pixels per second)
+        Vector2 instantaneousVelocity = mouseDelta / (float)deltaTime;
+
+        // Add to velocity history for smoothing
+        _mouseVelocityHistory.Add(instantaneousVelocity);
+        if (_mouseVelocityHistory.Count > MouseVelocityHistorySize)
+        {
+            _mouseVelocityHistory.RemoveAt(0);
+        }
+
+        // Calculate average velocity from history (smoothed velocity)
+        Vector2 velocitySum = Vector2.Zero;
+        foreach (Vector2 vel in _mouseVelocityHistory)
+        {
+            velocitySum += vel;
+        }
+        _currentMouseVelocity = velocitySum / Math.Max(_mouseVelocityHistory.Count, 1);
+
+        // Calculate wind-up intensity based on velocity (for animation)
+        // Higher velocity = more wind-up visual effect
+        float velocityMagnitude = _currentMouseVelocity.Length();
+        // Normalize to a reasonable range (0-2000 pixels/second typical for fast mouse movement)
+        float velocityIntensity = Mathf.Clamp(velocityMagnitude / 1500.0f, 0.0f, 1.0f);
+
+        _windUpIntensity = velocityIntensity;
+
+        // Update tracking for next frame
         _prevMousePos = currentMouse;
+        _prevFrameTime = currentTime;
     }
 
     #endregion
@@ -2499,7 +2729,7 @@ public partial class Player : BaseCharacter
     #region Debug Trajectory Visualization
 
     /// <summary>
-    /// Connects to GameManager's debug_mode_toggled signal for F7 toggle.
+    /// Connects to GameManager's debug_mode_toggled and invincibility_toggled signals.
     /// </summary>
     private void ConnectDebugModeSignal()
     {
@@ -2510,24 +2740,39 @@ public partial class Player : BaseCharacter
             return;
         }
 
-        if (!gameManager.HasSignal("debug_mode_toggled"))
+        // Connect to debug mode signal (F7)
+        if (gameManager.HasSignal("debug_mode_toggled"))
         {
-            LogToFile("[Player.Debug] WARNING: GameManager doesn't have debug_mode_toggled signal");
-            return;
-        }
+            gameManager.Connect("debug_mode_toggled", Callable.From<bool>(OnDebugModeToggled));
 
-        // Connect to the signal using Callable
-        gameManager.Connect("debug_mode_toggled", Callable.From<bool>(OnDebugModeToggled));
-
-        // Check if debug mode is already enabled
-        if (gameManager.HasMethod("is_debug_mode_enabled"))
-        {
-            _debugModeEnabled = (bool)gameManager.Call("is_debug_mode_enabled");
-            LogToFile($"[Player.Debug] Connected to GameManager, debug mode: {_debugModeEnabled}");
+            // Check if debug mode is already enabled
+            if (gameManager.HasMethod("is_debug_mode_enabled"))
+            {
+                _debugModeEnabled = (bool)gameManager.Call("is_debug_mode_enabled");
+                LogToFile($"[Player.Debug] Connected to GameManager, debug mode: {_debugModeEnabled}");
+            }
         }
         else
         {
-            LogToFile("[Player.Debug] Connected to GameManager (is_debug_mode_enabled not found)");
+            LogToFile("[Player.Debug] WARNING: GameManager doesn't have debug_mode_toggled signal");
+        }
+
+        // Connect to invincibility mode signal (F6)
+        if (gameManager.HasSignal("invincibility_toggled"))
+        {
+            gameManager.Connect("invincibility_toggled", Callable.From<bool>(OnInvincibilityToggled));
+
+            // Check if invincibility mode is already enabled
+            if (gameManager.HasMethod("is_invincibility_enabled"))
+            {
+                _invincibilityEnabled = (bool)gameManager.Call("is_invincibility_enabled");
+                LogToFile($"[Player.Debug] Connected to GameManager, invincibility mode: {_invincibilityEnabled}");
+                UpdateInvincibilityIndicator();
+            }
+        }
+        else
+        {
+            LogToFile("[Player.Debug] WARNING: GameManager doesn't have invincibility_toggled signal");
         }
     }
 
@@ -2543,9 +2788,52 @@ public partial class Player : BaseCharacter
     }
 
     /// <summary>
+    /// Called when invincibility mode is toggled via F6 key.
+    /// </summary>
+    /// <param name="enabled">True if invincibility mode is now enabled.</param>
+    private void OnInvincibilityToggled(bool enabled)
+    {
+        _invincibilityEnabled = enabled;
+        UpdateInvincibilityIndicator();
+        LogToFile($"[Player] Invincibility mode: {(enabled ? "ON" : "OFF")}");
+    }
+
+    /// <summary>
+    /// Updates the visual indicator for invincibility mode.
+    /// Shows "INVINCIBLE" label when enabled, hides it when disabled.
+    /// </summary>
+    private void UpdateInvincibilityIndicator()
+    {
+        // Create label if it doesn't exist
+        if (_invincibilityLabel == null)
+        {
+            _invincibilityLabel = new Label();
+            _invincibilityLabel.Name = "InvincibilityLabel";
+            _invincibilityLabel.Text = "БЕССМЕРТИЕ";
+            _invincibilityLabel.HorizontalAlignment = HorizontalAlignment.Center;
+            _invincibilityLabel.VerticalAlignment = VerticalAlignment.Center;
+
+            // Position above the player
+            _invincibilityLabel.Position = new Vector2(-60, -80);
+            _invincibilityLabel.Size = new Vector2(120, 30);
+
+            // Style: bright yellow/gold color with outline for visibility
+            _invincibilityLabel.AddThemeColorOverride("font_color", new Color(1.0f, 0.9f, 0.2f, 1.0f));
+            _invincibilityLabel.AddThemeColorOverride("font_outline_color", new Color(0.0f, 0.0f, 0.0f, 1.0f));
+            _invincibilityLabel.AddThemeFontSizeOverride("font_size", 14);
+            _invincibilityLabel.AddThemeConstantOverride("outline_size", 3);
+
+            AddChild(_invincibilityLabel);
+        }
+
+        // Show/hide based on invincibility state
+        _invincibilityLabel.Visible = _invincibilityEnabled;
+    }
+
+    /// <summary>
     /// Override _Draw to visualize grenade trajectory when debug mode is enabled.
-    /// Shows predicted landing position based on current drag.
-    /// Uses the same calculation as ThrowGrenade() to ensure accuracy.
+    /// Shows predicted landing position based on current mouse velocity.
+    /// Uses the same velocity-based calculation as ThrowGrenade() to ensure accuracy.
     /// </summary>
     public override void _Draw()
     {
@@ -2560,51 +2848,60 @@ public partial class Player : BaseCharacter
             return;
         }
 
-        // Calculate trajectory based on current drag
+        // Get current mouse velocity (same as ThrowGrenade uses)
+        Vector2 releaseVelocity = _currentMouseVelocity;
+        float velocityMagnitude = releaseVelocity.Length();
+
+        // Determine throw direction from velocity, or fallback to drag direction if stationary
+        // FIX for issue #313: Use snapped cardinal directions (same as ThrowGrenade)
+        Vector2 throwDirection;
         Vector2 currentMousePos = GetGlobalMousePosition();
         Vector2 dragVector = currentMousePos - _grenadeDragStart;
-        float dragDistance = dragVector.Length();
 
-        // Match the ThrowGrenade logic for minimum drag
-        Vector2 throwDirection;
-        if (dragDistance < 10.0f)
+        if (velocityMagnitude > 10.0f) // Mouse is moving
         {
-            throwDirection = (currentMousePos - GlobalPosition).Normalized();
-            dragDistance = 50.0f;
+            // Snap to 8 directions (same as ThrowGrenade)
+            throwDirection = SnapToOctantDirection(releaseVelocity.Normalized());
         }
         else
         {
-            throwDirection = dragVector.Normalized();
+            // Mouse is stationary - use drag direction, also snapped to 8 directions
+            if (dragVector.Length() > 5.0f)
+            {
+                throwDirection = SnapToOctantDirection(dragVector.Normalized());
+            }
+            else
+            {
+                throwDirection = new Vector2(1, 0);
+            }
         }
 
-        // Apply sensitivity multiplier (same as ThrowGrenade)
-        float adjustedDragDistance = dragDistance * ThrowSensitivityMultiplier;
-
-        // Clamp max drag distance to viewport width * 3 (same as ThrowGrenade)
-        var viewport = GetViewport();
-        float maxDragDistance = 3840.0f; // Default 1280 * 3
-        if (viewport != null)
-        {
-            maxDragDistance = viewport.GetVisibleRect().Size.X * 3.0f;
-        }
-        adjustedDragDistance = Mathf.Min(adjustedDragDistance, maxDragDistance);
-
-        // Constants from grenade_base.gd
-        const float DragToSpeedMultiplier = 2.0f;
+        // Constants from grenade_base.gd for velocity-based throwing
+        const float GrenadeMass = 0.36f; // Default flashbang mass
+        const float MouseVelocityMultiplier = 1.5f; // Reduced from 3.5 for better throw control
+        const float MinSwingDistance = 180.0f;
         const float MinThrowSpeed = 100.0f;
         const float MaxThrowSpeed = 2500.0f;
-        const float GroundFriction = 150.0f;
+        const float GroundFriction = 300.0f; // Flashbang has higher friction
         const float SpawnOffset = 60.0f;
 
-        // Calculate throw speed using adjusted drag distance (same as grenade_base.gd)
-        float throwSpeed = Mathf.Clamp(
-            adjustedDragDistance * DragToSpeedMultiplier,
-            MinThrowSpeed,
-            MaxThrowSpeed
-        );
+        // Calculate velocity-based throw speed (same formula as grenade_base.gd)
+        float massRatio = GrenadeMass / 0.4f; // Reference mass
+        float adjustedMinSwing = MinSwingDistance * massRatio;
+        float transferEfficiency = Mathf.Clamp(_totalSwingDistance / adjustedMinSwing, 0.0f, 1.0f);
+        float massMultiplier = 1.0f / Mathf.Sqrt(massRatio);
+
+        // Calculate throw speed from mouse velocity
+        float throwSpeed = velocityMagnitude * MouseVelocityMultiplier * transferEfficiency * massMultiplier;
+        throwSpeed = Mathf.Clamp(throwSpeed, MinThrowSpeed, MaxThrowSpeed);
+
+        // If mouse is nearly stationary, show minimal trajectory (grenade drops at feet)
+        if (velocityMagnitude < 10.0f)
+        {
+            throwSpeed = MinThrowSpeed * 0.5f; // Very short throw
+        }
 
         // Calculate landing distance using physics: distance = v² / (2 * friction)
-        // This is the stopping distance under constant deceleration
         float landingDistance = (throwSpeed * throwSpeed) / (2.0f * GroundFriction);
 
         // Calculate spawn and landing positions
@@ -2621,7 +2918,7 @@ public partial class Player : BaseCharacter
         // Draw landing point indicator (circle with X)
         DrawLandingIndicator(localEnd, new Color(1.0f, 0.3f, 0.1f, 0.9f), 12.0f);
 
-        // Draw drag direction arrow from player
+        // Draw velocity direction arrow from player (shows current mouse velocity direction)
         Vector2 localPlayerCenter = Vector2.Zero; // Player is at origin in local coords
         Vector2 arrowEnd = localPlayerCenter + throwDirection * 40.0f;
         DrawArrow(localPlayerCenter, arrowEnd, new Color(0.2f, 1.0f, 0.2f, 0.7f), 2.0f);
