@@ -153,43 +153,17 @@ enum BehaviorMode {
 ## Scale multiplier for enemy model (1.3 matches player size).
 @export var enemy_model_scale: float = 1.3
 
-# Grenade System Configuration (Issue #363)
-# ============================================================================
-
-## Number of grenades this enemy carries. Set by DifficultyManager or per-enemy override.
-## Default 0 means no grenades unless configured by difficulty/map settings.
-@export var grenade_count: int = 0
-
-## Grenade scene to instantiate when throwing.
-@export var grenade_scene: PackedScene
-
-## Enable/disable grenade throwing behavior.
-@export var enable_grenade_throwing: bool = true
-
-## Minimum cooldown between grenade throws (prevents spam).
-@export var grenade_throw_cooldown: float = 15.0
-
-## Maximum throw distance for grenades (pixels).
-@export var grenade_max_throw_distance: float = 600.0
-
-## Minimum throw distance for grenades (pixels) - prevents point-blank throws.
-## Updated to 275.0 to account for frag grenade blast radius (225) + safety margin (50).
-## Per issue #375: Enemy should not throw grenades that would damage itself.
-@export var grenade_min_throw_distance: float = 275.0
-
-## Safety margin to add to blast radius for safe grenade throws (pixels).
-## Enemy must be at least (blast_radius + safety_margin) from target to throw safely.
-## Per issue #375: Prevents enemy from being caught in own grenade blast.
-@export var grenade_safety_margin: float = 50.0
-
-## Inaccuracy spread when throwing grenades (radians).
-@export var grenade_inaccuracy: float = 0.15
-
-## Delay before throwing grenade (seconds) - allows animation/telegraph.
-@export var grenade_throw_delay: float = 0.4
-
-## Enable grenade debug logging (separate from general debug_logging).
-@export var grenade_debug_logging: bool = false
+# Grenade System Configuration (Issue #363, #375)
+@export var grenade_count: int = 0  ## Grenades carried (0 = use DifficultyManager)
+@export var grenade_scene: PackedScene  ## Grenade scene to throw
+@export var enable_grenade_throwing: bool = true  ## Enable grenade throwing
+@export var grenade_throw_cooldown: float = 15.0  ## Cooldown between throws (sec)
+@export var grenade_max_throw_distance: float = 600.0  ## Max throw distance (px)
+@export var grenade_min_throw_distance: float = 275.0  ## Min safe distance (blast_radius:225 + margin:50, Issue #375)
+@export var grenade_safety_margin: float = 50.0  ## Safety margin added to blast radius (Issue #375)
+@export var grenade_inaccuracy: float = 0.15  ## Throw inaccuracy (radians)
+@export var grenade_throw_delay: float = 0.4  ## Delay before throw (sec)
+@export var grenade_debug_logging: bool = false  ## Grenade debug logging
 
 
 signal hit  ## Enemy hit
