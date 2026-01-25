@@ -295,13 +295,59 @@ The root cause is likely one of:
 
 ---
 
-## Next Steps
+## Implementation (Approach A)
 
-1. **Revert current changes** to restore working state
-2. **Implement Approach A** (Character-Side Push Detection)
-3. **Add kick sound** using existing AudioManager
-4. **Test in editor** before exporting
-5. **Export and test** the EXE to verify no crashes
+**Status: IMPLEMENTED** ✅
+
+The Character-Side Push Detection approach has been implemented with the following changes:
+
+### Collision Layer Configuration
+
+| Entity | `collision_layer` | `collision_mask` | Notes |
+|--------|------------------|------------------|-------|
+| Casing | 64 (layer 7) | 4 (walls) | Now on dedicated layer for items |
+| Player | 1 | 68 (4+64) | Added layer 7 to mask |
+| Enemy | 2 | 68 (4+64) | Added layer 7 to mask |
+
+### Files Modified
+
+1. **`scenes/effects/Casing.tscn`**
+   - Changed `collision_layer` from 0 to 64 (layer 7)
+
+2. **`scripts/effects/casing.gd`**
+   - Added `receive_kick(impulse: Vector2)` method to handle being kicked
+   - Added `_play_kick_sound(impulse_strength: float)` for audio feedback
+   - Re-enables physics when a landed casing is kicked
+
+3. **`scenes/characters/csharp/Player.tscn`**
+   - Changed `collision_mask` from 4 to 68 (added layer 7)
+
+4. **`scenes/characters/Player.tscn`**
+   - Changed `collision_mask` from 4 to 68 (added layer 7)
+
+5. **`scenes/objects/Enemy.tscn`**
+   - Changed `collision_mask` from 4 to 68 (added layer 7)
+
+6. **`Scripts/AbstractClasses/BaseCharacter.cs`**
+   - Added `PushCasings()` method called after `MoveAndSlide()`
+   - Uses `GetSlideCollision()` to detect casings and applies impulse
+
+7. **`scripts/objects/enemy.gd`**
+   - Added `_push_casings()` method called after `move_and_slide()`
+   - Applies push impulse to casings based on velocity
+
+### How It Works
+
+1. After `MoveAndSlide()` (C#) or `move_and_slide()` (GDScript), the character checks all slide collisions
+2. For each collision with a `RigidBody2D` that has a `receive_kick` method (i.e., a casing):
+   - Calculate push direction from collision normal
+   - Calculate push strength based on character velocity
+   - Call `receive_kick(impulse)` on the casing
+3. The casing:
+   - Re-enables physics if it had landed
+   - Applies the impulse for realistic physics
+   - Adds random spin for visual appeal
+   - Plays kick sound if impulse is above threshold
 
 ---
 
@@ -323,6 +369,9 @@ The root cause is likely one of:
 | 2026-01-25 02:12 | Fixed type checks |
 | 2026-01-25 05:25 | User: "try different approach" |
 | 2026-01-25 08:33 | User: "not fixed, revert and try different approach" |
+| 2026-01-25 08:49 | Code reverted, case study updated with alternative approaches |
+| 2026-01-25 16:55 | User: "casings don't react to player/enemies" (game now runs without crash) |
+| 2026-01-25 16:56 | Implementing Approach A (Character-Side Push Detection) |
 
 ---
 
@@ -340,4 +389,4 @@ The root cause is likely one of:
 ---
 
 *Case study last updated: 2026-01-25*
-*Status: Proposing alternative implementation approaches*
+*Status: Approach A (Character-Side Push Detection) IMPLEMENTED*
