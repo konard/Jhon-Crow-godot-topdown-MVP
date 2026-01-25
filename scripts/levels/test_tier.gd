@@ -250,6 +250,7 @@ func _add_test_enemies() -> void:
 		test_enemy.behavior_mode = test_enemy.BehaviorMode.GUARD  # Don't move or attack
 		test_enemy.disable_shooting = true  # Don't shoot
 		test_enemy.destroy_on_death = false  # Don't destroy, keep body for testing
+		test_enemy.respawn_delay = 999999.0  # Effectively disable respawn for testing
 
 		# Add to scene tree first (this triggers _ready() which creates DeathAnimation)
 		enemies_node.add_child(test_enemy)
