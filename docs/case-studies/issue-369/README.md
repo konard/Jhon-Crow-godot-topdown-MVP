@@ -999,3 +999,123 @@ _death_animation = DeathAnimationScript.new()
 5. **Multiple patterns can cause the same symptom** - systematic review of all class_name and autoload usage is needed
 
 ---
+
+## Update 4: FOV-Based Coverage Tracking Request (2026-01-25 16:42)
+
+### New User Feedback
+
+> "враги не должны ходить кругами по одной и той же зоне, при каждой итерации они должны осматривать 100% новое пространство (то есть должны двигаться, пока их поле зрения не будет заполнено на 100% зоной, не осмотренной в прошлой итерации)"
+>
+> Translation: "Enemies should not walk in circles in the same zone. Each iteration they should examine 100% new space (i.e., they should move until their field of view is 100% filled with areas not examined in the previous iteration)"
+
+### Problem Analysis
+
+#### Current Position-Based vs Required FOV-Based Tracking
+
+| Aspect | Current Implementation | Requested Behavior |
+|--------|----------------------|-------------------|
+| **What's tracked** | Visited positions (50px grid) | Visible areas in FOV |
+| **Coverage metric** | Position reached | Area seen by enemy |
+| **When to stop at waypoint** | After reaching position | When FOV is 100% new area |
+| **When to move** | After scan timer expires | Until FOV covers unvisited area |
+
+#### Log Evidence of Circular Behavior
+
+From `game_log_20260125_193914.txt`:
+```
+[19:39:27] [ENEMY] [Enemy1] SEARCHING started: center=(684.4765, 753.8722), radius=100, waypoints=5
+[19:39:27] [ENEMY] [Enemy2] SEARCHING started: center=(684.4765, 753.8722), radius=100, waypoints=5
+[19:39:34] [ENEMY] [Enemy2] SEARCHING: Stuck at waypoint 3 (no progress for 2.0s), skipping
+[19:39:34] [ENEMY] [Enemy1] SEARCHING: Stuck at waypoint 3 (no progress for 2.0s), skipping
+[19:39:54] [ENEMY] [Enemy2] SEARCHING: Expand outer ring r=175 wps=4
+```
+
+Multiple enemies converge on the same center, get stuck at waypoints, and expand slowly. The "corner check" logs show them repeatedly checking similar angles (89.4°, 0.6°) indicating circular patterns.
+
+### Root Cause Analysis
+
+1. **Position-Based vs FOV-Based Coverage**: The current system marks positions as visited when enemies reach them, not when they see them. An enemy could stand at position A, mark it visited, but the area behind them (visible from position B) might never be checked.
+
+2. **Fixed Waypoint Pattern**: The square spiral pattern generates waypoints based on distance from center, not based on maximizing new visible coverage.
+
+3. **No Coverage Validation**: Enemies stop at waypoints to scan, but there's no verification that the scanned areas were actually new/unvisited.
+
+### Proposed Solution: FOV-Based Coverage System
+
+#### Key Components
+
+1. **FOV Coverage Grid**
+   ```gdscript
+   const COVERAGE_CELL_SIZE: float = 25.0  # Smaller cells for FOV precision
+   const SEARCH_FOV_ANGLE: float = 90.0     # Enemy FOV in degrees
+   const SEARCH_FOV_RANGE: float = 200.0    # How far enemy can see
+
+   var _fov_coverage_grid: Dictionary = {}  # Global shared grid
+   ```
+
+2. **FOV Area Calculation**
+   ```gdscript
+   func _get_cells_in_fov(pos: Vector2, facing_angle: float) -> Array[String]:
+       var cells: Array[String] = []
+       var half_angle := deg_to_rad(SEARCH_FOV_ANGLE / 2.0)
+       # Calculate cone of cells visible from this position/angle
+       # Using raycast or geometric calculation
+       return cells
+   ```
+
+3. **Coverage-Based Waypoint Selection**
+   ```gdscript
+   func _find_waypoint_with_max_new_coverage() -> Vector2:
+       var best_pos := Vector2.ZERO
+       var best_coverage := 0
+
+       # Find positions with frontier cells (uncovered areas near covered ones)
+       var frontiers := _find_frontier_cells()
+
+       for frontier in frontiers:
+           var waypoint := _find_position_to_view_frontier(frontier)
+           var coverage := _estimate_new_coverage_from(waypoint)
+           if coverage > best_coverage:
+               best_coverage = coverage
+               best_pos = waypoint
+
+       return best_pos
+   ```
+
+4. **Stopping Condition**
+   ```gdscript
+   func _should_stop_at_current_position() -> bool:
+       var fov_cells := _get_cells_in_fov(global_position, rotation)
+       var new_cells := 0
+       for cell in fov_cells:
+           if not _fov_coverage_grid.has(cell):
+               new_cells += 1
+
+       var coverage_ratio := float(fov_cells.size() - new_cells) / float(fov_cells.size())
+       # Only stop if FOV is mostly already covered (need to move to new area)
+       return coverage_ratio < 0.5  # Stop if less than 50% is already covered
+   ```
+
+### External Resources
+
+#### Godot FOV Addons
+- [Field of View Asset](https://godotassetlibrary.com/asset/FcjODu/field-of-view) - View area detection with configurable FOV
+- [Vision Cone Addon](https://github.com/d-bucur/godot-vision-cone) - Vision cone for Godot 4
+- [2D Visibility Algorithm](https://github.com/fahall/godot_2d_visibility) - FOV/LOS in GDScript
+
+#### Academic References
+- [Complete Coverage Path Planning](https://github.com/rodriguesrenato/coverage-path-planning) - Combines multiple search algorithms
+- [Frontier-Based Exploration](https://pmc.ncbi.nlm.nih.gov/articles/PMC8198857/) - Multi-robot complete coverage
+- [Dynamic Guard Patrol in Stealth Games (AAAI)](https://cdn.aaai.org/ojs/7425/7425-52-10738-1-2-20200923.pdf) - VisMesh model for coverage
+
+#### Key Algorithms
+- **Frontier-Based Exploration**: Find boundaries between explored/unexplored space, move toward frontiers
+- **Complete Coverage Path Planning (CCPP)**: Ensure entire environment is covered with minimal overlap
+- **Modified A* for CPP**: Reduces revisiting by 7.01% compared to traditional methods
+
+### Log Files Added
+
+- `logs/game_log_20260125_193316.txt` - Testing session showing circular behavior
+- `logs/game_log_20260125_193914.txt` - Detailed search state logs
+
+---
