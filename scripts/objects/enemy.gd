@@ -154,15 +154,43 @@ enum BehaviorMode {
 @export var enemy_model_scale: float = 1.3
 
 # Grenade System Configuration (Issue #363)
-@export var grenade_count: int = 0  ## Grenades carried (0 = use DifficultyManager)
-@export var grenade_scene: PackedScene  ## Grenade scene to throw
-@export var enable_grenade_throwing: bool = true  ## Enable grenade throwing
-@export var grenade_throw_cooldown: float = 15.0  ## Cooldown between throws (sec)
-@export var grenade_max_throw_distance: float = 600.0  ## Max throw distance (px)
-@export var grenade_min_throw_distance: float = 150.0  ## Min throw distance (px)
-@export var grenade_inaccuracy: float = 0.15  ## Throw inaccuracy (radians)
-@export var grenade_throw_delay: float = 0.4  ## Delay before throw (sec)
-@export var grenade_debug_logging: bool = false  ## Grenade debug logging
+# ============================================================================
+
+## Number of grenades this enemy carries. Set by DifficultyManager or per-enemy override.
+## Default 0 means no grenades unless configured by difficulty/map settings.
+@export var grenade_count: int = 0
+
+## Grenade scene to instantiate when throwing.
+@export var grenade_scene: PackedScene
+
+## Enable/disable grenade throwing behavior.
+@export var enable_grenade_throwing: bool = true
+
+## Minimum cooldown between grenade throws (prevents spam).
+@export var grenade_throw_cooldown: float = 15.0
+
+## Maximum throw distance for grenades (pixels).
+@export var grenade_max_throw_distance: float = 600.0
+
+## Minimum throw distance for grenades (pixels) - prevents point-blank throws.
+## Updated to 275.0 to account for frag grenade blast radius (225) + safety margin (50).
+## Per issue #375: Enemy should not throw grenades that would damage itself.
+@export var grenade_min_throw_distance: float = 275.0
+
+## Safety margin to add to blast radius for safe grenade throws (pixels).
+## Enemy must be at least (blast_radius + safety_margin) from target to throw safely.
+## Per issue #375: Prevents enemy from being caught in own grenade blast.
+@export var grenade_safety_margin: float = 50.0
+
+## Inaccuracy spread when throwing grenades (radians).
+@export var grenade_inaccuracy: float = 0.15
+
+## Delay before throwing grenade (seconds) - allows animation/telegraph.
+@export var grenade_throw_delay: float = 0.4
+
+## Enable grenade debug logging (separate from general debug_logging).
+@export var grenade_debug_logging: bool = false
+
 
 signal hit  ## Enemy hit
 signal died  ## Enemy died
@@ -4912,7 +4940,8 @@ func _setup_grenade_component() -> void:
 	_grenade_component.enabled = enable_grenade_throwing
 	_grenade_component.throw_cooldown = grenade_throw_cooldown
 	_grenade_component.max_throw_distance = max_grenade_throw_distance
-	_grenade_component.min_throw_distance = min_grenade_throw_distance
+	_grenade_component.min_throw_distance = grenade_min_throw_distance
+	_grenade_component.safety_margin = grenade_safety_margin
 	_grenade_component.inaccuracy = grenade_inaccuracy
 	_grenade_component.throw_delay = grenade_throw_delay
 	_grenade_component.debug_logging = grenade_debug_logging
@@ -4964,6 +4993,7 @@ func _update_grenade_world_state() -> void:
 	_goap_world_state["grenades_remaining"] = g.grenades_remaining
 	_goap_world_state["ready_to_throw_grenade"] = g.is_ready(_can_see_player, _under_fire, _current_health)
 
+
 ## Attempt to throw a grenade. Returns true if throw was initiated.
 func try_throw_grenade() -> bool:
 	if _grenade_component == null:
@@ -4976,6 +5006,7 @@ func try_throw_grenade() -> bool:
 	if result:
 		grenade_thrown.emit(null, target)  # Signal with target; actual grenade emitted by component
 	return result
+
 
 ## Get the number of grenades remaining.
 func get_grenades_remaining() -> int:

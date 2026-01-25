@@ -12,7 +12,8 @@ var grenade_scene: PackedScene = null
 var enabled: bool = true
 var throw_cooldown: float = 15.0
 var max_throw_distance: float = 600.0
-var min_throw_distance: float = 150.0
+var min_throw_distance: float = 275.0  # Updated to 275.0 per Issue #375
+var safety_margin: float = 50.0  # Safety margin for blast radius (Issue #375)
 var inaccuracy: float = 0.15
 var throw_delay: float = 0.4
 var debug_logging: bool = false
@@ -235,16 +236,52 @@ func try_throw(target: Vector2, is_alive: bool, is_stunned: bool, is_blinded: bo
 		return false
 
 	var dist := _enemy.global_position.distance_to(target)
-	if dist < min_throw_distance:
+
+	# Issue #375: Check safe distance based on blast radius
+	var blast_radius := _get_blast_radius()
+	var min_safe_distance := blast_radius + safety_margin
+
+	if dist < min_safe_distance:
+		_log("Unsafe throw distance (%.0f < %.0f safe distance, blast=%.0f, margin=%.0f) - skipping throw" %
+			[dist, min_safe_distance, blast_radius, safety_margin])
 		return false
+
+	# Legacy minimum distance check (should be covered by above, but kept for compatibility)
+	if dist < min_throw_distance:
+		_log("Target too close (%.0f < %.0f) - skipping throw" % [dist, min_throw_distance])
+		return false
+
 	if dist > max_throw_distance:
 		target = _enemy.global_position + (target - _enemy.global_position).normalized() * max_throw_distance
 
 	if not _path_clear(target):
+		_log("Throw path blocked to %s" % target)
 		return false
 
 	_execute_throw(target, is_alive, is_stunned, is_blinded)
 	return true
+
+
+## Get grenade blast radius (Issue #375)
+func _get_blast_radius() -> float:
+	if grenade_scene == null:
+		return 225.0  # Default frag grenade radius
+
+	# Try to instantiate grenade temporarily to query its radius
+	var temp_grenade = grenade_scene.instantiate()
+	if temp_grenade == null:
+		return 225.0  # Fallback
+
+	var radius := 225.0  # Default
+
+	# Check if grenade has effect_radius property
+	if temp_grenade.get("effect_radius") != null:
+		radius = temp_grenade.effect_radius
+
+	# Clean up temporary instance
+	temp_grenade.queue_free()
+
+	return radius
 
 
 func _path_clear(target: Vector2) -> bool:
