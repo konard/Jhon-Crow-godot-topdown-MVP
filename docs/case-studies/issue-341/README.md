@@ -764,44 +764,51 @@ After the area detection fix, user reported that **the game would not start** - 
 **Investigation:**
 1. Reviewed casing.gd script for syntax errors
 2. Found incorrect GDScript method calls on Resource objects
+3. Further investigation revealed potential issues with `in` operator on Resources
 
-**Root Cause:** Invalid method call on Resource objects:
-
-```gdscript
-# INCORRECT - crashes at runtime
-elif caliber_data.has_method("get"):
-    caliber_name = caliber_data.get("caliber_name") if caliber_data.has("caliber_name") else ""
-```
-
-The code called `.has("caliber_name")` on a Resource object, but **Resources in GDScript don't have a `has()` method** - that's only for Dictionary objects. This caused a crash during script loading.
-
-#### Fix Applied
-
-Changed to proper GDScript syntax for checking if a property exists on an object:
+**Root Cause:** The code attempted to handle both CaliberData Resources and generic Resources with the same caliber_name checking logic. This added unnecessary complexity and potential for runtime errors:
 
 ```gdscript
-# CORRECT - proper GDScript property checking
-elif "caliber_name" in caliber_data:
+# PROBLEMATIC - complex branching for rare edge case
+if caliber_data is CaliberData:
+    caliber_name = (caliber_data as CaliberData).caliber_name
+elif "caliber_name" in caliber_data:  # May cause issues with non-CaliberData resources
     caliber_name = caliber_data.caliber_name
 ```
 
-The `"property" in object` syntax is the correct way to check if a property exists on any GDScript object, including Resources.
+#### Fix Applied (Simplified Approach)
+
+Since all casings in the game use CaliberData resources (loaded from .tres files), the code was simplified to only handle CaliberData:
+
+```gdscript
+# CORRECT - simple and robust
+if caliber_data != null and caliber_data is CaliberData:
+    var caliber: CaliberData = caliber_data as CaliberData
+    var caliber_name: String = caliber.caliber_name
+    # ... use caliber_name for color/sound selection
+```
+
+**Benefits of simplified approach:**
+- Removes all edge case handling code
+- Clear type checking with explicit cast
+- No potential for issues with `in` operator on unknown Resource types
+- Easier to understand and maintain
 
 #### Files Modified
 
 | File | Lines Changed | Description |
 |------|---------------|-------------|
-| scripts/effects/casing.gd | 4 | Fixed .has() to use `in` operator |
+| scripts/effects/casing.gd | 8 | Simplified caliber checking to only handle CaliberData |
 
 #### Key Learnings
 
-1. **GDScript Type Differences:** Dictionary and Resource have different methods:
-   - `Dictionary.has(key)` - check if key exists in dictionary
-   - `"property" in Resource` - check if property exists on object/Resource
+1. **YAGNI Principle:** Don't write code to handle edge cases that don't exist. All casings use CaliberData, so there's no need to handle other Resource types.
 
-2. **Silent Crashes:** GDScript syntax errors in `_set_casing_appearance()` and similar methods may not show visible error messages if the scene loads but crashes during `_ready()` callback.
+2. **Explicit Type Checking:** When working with Resources, explicitly check for the expected type (`caliber_data is CaliberData`) before accessing properties.
 
-3. **Code Review:** When adapting code patterns from one context (dictionaries) to another (resources), verify the method signatures are compatible.
+3. **Simple > Complex:** A simple if-statement with explicit type checking is more reliable than complex branching with operator edge cases.
+
+4. **Resource Types in GDScript:** While the `"property" in object` syntax works for objects, it's safer to use explicit type checking when you know the expected type.
 
 ---
 

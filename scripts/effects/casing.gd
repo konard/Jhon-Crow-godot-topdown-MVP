@@ -254,13 +254,10 @@ func _set_casing_appearance() -> void:
 	# Default color (rifle casing - brass)
 	var casing_color = Color(0.9, 0.8, 0.4)  # Brass color
 
-	if caliber_data != null:
+	if caliber_data != null and caliber_data is CaliberData:
 		# Check caliber name to determine color
-		var caliber_name: String = ""
-		if caliber_data is CaliberData:
-			caliber_name = (caliber_data as CaliberData).caliber_name
-		elif "caliber_name" in caliber_data:
-			caliber_name = caliber_data.caliber_name
+		var caliber: CaliberData = caliber_data as CaliberData
+		var caliber_name: String = caliber.caliber_name
 
 		if "buckshot" in caliber_name.to_lower() or "Buckshot" in caliber_name:
 			casing_color = Color(0.8, 0.2, 0.2)  # Red for shotgun
@@ -304,12 +301,9 @@ func _play_bounce_sound() -> void:
 
 	# Determine casing type from caliber for appropriate sound
 	var casing_type: String = "rifle"  # Default
-	if caliber_data != null:
-		var caliber_name: String = ""
-		if caliber_data is CaliberData:
-			caliber_name = (caliber_data as CaliberData).caliber_name
-		elif "caliber_name" in caliber_data:
-			caliber_name = caliber_data.caliber_name
+	if caliber_data != null and caliber_data is CaliberData:
+		var caliber: CaliberData = caliber_data as CaliberData
+		var caliber_name: String = caliber.caliber_name
 
 		if "buckshot" in caliber_name.to_lower() or "Buckshot" in caliber_name:
 			casing_type = "shotgun"
