@@ -2142,9 +2142,9 @@ func _get_fov_cells(pos: Vector2, facing_angle: float) -> Array[String]:
 	for dist in range(int(step), int(SEARCH_FOV_RANGE), int(step)):
 		var angles_to_check := maxi(3, int(dist / step))
 		for i in range(angles_to_check):
-			var angle_offset := lerp(-half_fov, half_fov, float(i) / float(angles_to_check - 1)) if angles_to_check > 1 else 0.0
-			var check_angle := facing_angle + angle_offset
-			var check_pos := pos + Vector2(cos(check_angle), sin(check_angle)) * dist
+			var angle_offset: float = lerp(-half_fov, half_fov, float(i) / float(angles_to_check - 1)) if angles_to_check > 1 else 0.0
+			var check_angle: float = facing_angle + angle_offset
+			var check_pos: Vector2 = pos + Vector2(cos(check_angle), sin(check_angle)) * dist
 			var key := _get_fov_cell_key(check_pos)
 			if not cells.has(key):
 				cells.append(key)

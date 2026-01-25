@@ -130,8 +130,8 @@ func _generate_coordinated_routes() -> void:
 		var enemy_pos: Vector2 = enemy.global_position
 
 		# Calculate this enemy's sector
-		var sector_start := i * sector_angle
-		var sector_end := (i + 1) * sector_angle
+		var sector_start: float = i * sector_angle
+		var sector_end: float = (i + 1) * sector_angle
 
 		# Generate waypoints in this sector
 		var waypoints: Array[Vector2] = _generate_sector_waypoints(
@@ -158,33 +158,33 @@ func _generate_sector_waypoints(
 	var waypoints: Array[Vector2] = []
 
 	# First waypoint: move toward center along sector midpoint
-	var sector_mid := (sector_start + sector_end) / 2.0
-	var to_center := (search_center - enemy_pos)
-	var to_center_dist := to_center.length()
+	var sector_mid: float = (sector_start + sector_end) / 2.0
+	var to_center: Vector2 = (search_center - enemy_pos)
+	var to_center_dist: float = to_center.length()
 
 	# If we're outside the search area, first waypoint is toward the center
 	if to_center_dist > radius * 0.5:
-		var entry_point := search_center + Vector2.from_angle(sector_mid) * radius * 0.3
+		var entry_point: Vector2 = search_center + Vector2.from_angle(sector_mid) * radius * 0.3
 		if _is_waypoint_valid(entry_point, nav_map):
 			waypoints.append(entry_point)
 
 	# Generate spiral waypoints within the sector
-	var rings := int(radius / SEARCH_WAYPOINT_SPACING) + 1
+	var rings: int = int(radius / SEARCH_WAYPOINT_SPACING) + 1
 	for ring in range(1, rings + 1):
-		var ring_radius := ring * SEARCH_WAYPOINT_SPACING
+		var ring_radius: float = ring * SEARCH_WAYPOINT_SPACING
 		if ring_radius > radius:
 			break
 
 		# Number of points in this ring for this sector
-		var arc_length := ring_radius * (sector_end - sector_start)
-		var points_in_arc := max(1, int(arc_length / SEARCH_WAYPOINT_SPACING))
+		var arc_length: float = ring_radius * (sector_end - sector_start)
+		var points_in_arc: int = maxi(1, int(arc_length / SEARCH_WAYPOINT_SPACING))
 
 		for j in range(points_in_arc):
-			var angle := sector_start + (sector_end - sector_start) * (float(j) + 0.5) / float(points_in_arc)
-			var point := search_center + Vector2.from_angle(angle) * ring_radius
+			var angle: float = sector_start + (sector_end - sector_start) * (float(j) + 0.5) / float(points_in_arc)
+			var point: Vector2 = search_center + Vector2.from_angle(angle) * ring_radius
 
 			# Check if this zone was already visited
-			var zone_key := _get_zone_key(point)
+			var zone_key: String = _get_zone_key(point)
 			if zone_key in _globally_visited_zones:
 				continue
 
