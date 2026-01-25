@@ -6,9 +6,10 @@
 
 **Description:** During FLANKING state, enemies get stuck walking in a corner behind a wall where the player is hiding. They repeatedly trigger corner checks but never make progress toward their flank target.
 
-## Log File Analyzed
+## Log Files Analyzed
 
-- `game_log_20260125_073543.txt` (75KB) - Provided by user demonstrating the problem
+- `game_log_20260125_073543.txt` (75KB) - Original log demonstrating FLANKING corner stuck
+- `game_log_20260125_080920.txt` (374KB) - Second log demonstrating PURSUING state freeze
 
 ---
 
@@ -305,9 +306,88 @@ When wall avoidance is applied continuously, agents can get "stuck" sliding alon
 
 ---
 
+---
+
+## Part 2: PURSUING State Freeze Bug
+
+### Problem Description
+
+After fixing the FLANKING corner stuck issue, a new related issue was reported: enemies sometimes freeze in the PURSUING state. The symptoms were similar - enemies would get stuck in a corner while in PURSUING state, only producing "PURSUING corner check" log messages but no state transitions.
+
+### Evidence from Log `game_log_20260125_080920.txt`
+
+**Enemy1 freezes in PURSUING state:**
+
+```
+[08:13:02] [ENEMY] [Enemy1] FLANKING wall-stuck (alignment=-0.53), pos=(603.3171, 1048.066)
+[08:13:02] [ENEMY] [Enemy1] State: FLANKING -> PURSUING
+[08:13:02] [ENEMY] [Enemy1] PURSUING corner check: angle 110.3°
+[08:13:04] [ENEMY] [Enemy1] PURSUING corner check: angle 76.4°
+[08:13:06] [ENEMY] [Enemy1] PURSUING corner check: angle 78.9°
+[08:13:08] [ENEMY] [Enemy1] PURSUING corner check: angle 109.4°
+[08:13:08] [ENEMY] [Enemy1] PURSUING corner check: angle 99.1°
+[08:13:10] [ENEMY] [Enemy1] PURSUING corner check: angle 94.5°
+[08:13:12] [ENEMY] [Enemy1] PURSUING corner check: angle 113.2°
+# No further state transitions until end of log
+```
+
+Enemy1 transitioned from FLANKING to PURSUING at 08:13:02 due to wall-stuck detection, then stayed in PURSUING with only corner check logs for 10+ seconds until the log ended.
+
+### Root Cause
+
+The FLANKING state had wall-stuck detection added to fix the original issue, but the PURSUING state lacked similar detection. When an enemy in PURSUING state hit a wall:
+
+1. The enemy would call `_find_pursuit_cover_toward_player()` which returned no valid cover
+2. The enemy would check for memory-based target via `_memory.has_target()`
+3. If memory had a target, it would call `_move_to_target_nav(target_pos, ...)` and return early
+4. The enemy would get stuck sliding along the wall (velocity perpendicular to target direction)
+5. No timeout or stuck detection would trigger - the enemy would be frozen indefinitely
+
+The key difference from FLANKING:
+- FLANKING had `_flank_wall_stuck_timer` to detect perpendicular movement
+- PURSUING had NO equivalent detection for any of its movement paths
+
+### Code Analysis
+
+The PURSUING state has four distinct movement paths:
+1. **Vulnerability sound pursuit** (lines 2066-2076)
+2. **Approach phase** (lines 2097-2117)
+3. **Pursuit cover movement** (lines 2172-2177)
+4. **Memory-based pursuit** (lines 2200-2209)
+
+None of these paths had wall-stuck detection - they only had corner checking for visual purposes.
+
+### Solution
+
+Added wall-stuck detection to the PURSUING state similar to FLANKING:
+
+1. **New variable:** `_pursuing_wall_stuck_timer: float = 0.0`
+2. **New constant:** `PURSUING_WALL_STUCK_MAX_TIME: float = 2.0` (slightly longer than FLANKING's 1.0s)
+3. **New helper function:** `_handle_pursuing_wall_stuck(delta, target_pos, context)` to reduce code duplication
+
+The helper function:
+- Checks if velocity is significant (length_squared > 1.0)
+- Calculates alignment between movement direction and target direction
+- If alignment < 0.3 (moving perpendicular/away from target), increments timer
+- After 2 seconds of wall-stuck, transitions to:
+  - FLANKING (if available)
+  - SEARCHING (if has_left_idle)
+  - COMBAT (as fallback)
+
+### Fix Applied
+
+Added wall-stuck detection to all four PURSUING movement paths:
+- `vuln_sound` context: When pursuing reload/empty click sounds
+- `approach` context: When directly approaching player
+- `cover` context: When moving toward pursuit cover
+- `memory` context: When pursuing memory-based suspected position
+
+---
+
 ## References
 
-- Game log: `docs/case-studies/issue-367/game_log_20260125_073543.txt`
+- Game log 1: `docs/case-studies/issue-367/game_log_20260125_073543.txt` (FLANKING stuck)
+- Game log 2: `docs/case-studies/issue-367/game_log_20260125_080920.txt` (PURSUING freeze)
 - Related PR: #358 (corner checking implementation)
 - Related Issue: #357 (enemies navigate corners without looking)
 - [Godot NavigationAgent2D Documentation](https://docs.godotengine.org/en/stable/classes/class_navigationagent2d.html)

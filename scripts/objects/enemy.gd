@@ -413,6 +413,9 @@ var _flank_wall_stuck_timer: float = 0.0  ## Wall-stuck timer (Issue #367)
 const FLANK_WALL_STUCK_MAX_TIME: float = 1.0  ## Max perpendicular movement time
 const FLANK_ALIGNMENT_THRESHOLD: float = 0.3  ## Min dot product for progress
 
+var _pursuing_wall_stuck_timer: float = 0.0  ## Wall-stuck timer for PURSUING state (Issue #367)
+const PURSUING_WALL_STUCK_MAX_TIME: float = 2.0  ## Max time stuck in PURSUING before transitioning
+
 ## --- Assault State (coordinated multi-enemy rush) ---
 ## Timer for assault wait period (5 seconds before rushing).
 var _assault_wait_timer: float = 0.0
@@ -2063,6 +2066,10 @@ func _process_pursuing_state(delta: float) -> void:
 		else:
 			# Keep moving toward the sound position using navigation
 			_move_to_target_nav(_last_known_player_position, combat_move_speed)
+			# Issue #367: Detect wall-stuck in vulnerability sound pursuit
+			if _handle_pursuing_wall_stuck(delta, _last_known_player_position, "vuln_sound"):
+				_pursuing_vulnerability_sound = false
+				return
 			# Log progress periodically
 			var vuln_pursuit_key := "last_vuln_pursuit_log"
 			var current_frame := Engine.get_physics_frames()
@@ -2106,6 +2113,10 @@ func _process_pursuing_state(delta: float) -> void:
 			var target_pos := _get_target_position()
 			if target_pos != global_position:
 				_move_to_target_nav(target_pos, combat_move_speed)
+				# Issue #367: Detect wall-stuck in approach phase
+				if _handle_pursuing_wall_stuck(delta, target_pos, "approach"):
+					_pursuit_approaching = false
+					return
 			else:
 				_pursuit_approaching = false
 				# Issue #330: If enemy has left IDLE, start searching instead of returning to IDLE
@@ -2168,6 +2179,10 @@ func _process_pursuing_state(delta: float) -> void:
 
 		# Use navigation-based pathfinding to move toward pursuit cover
 		_move_to_target_nav(_pursuit_next_cover, combat_move_speed)
+		# Issue #367: Detect wall-stuck in PURSUING state (moving perpendicular to target = stuck)
+		if _handle_pursuing_wall_stuck(delta, _pursuit_next_cover, "cover"):
+			_has_pursuit_cover = false
+			return
 		# Corner checking during PURSUING (Issue #332)
 		if velocity.length_squared() > 1.0:
 			_process_corner_check(delta, velocity.normalized(), "PURSUING")
@@ -2200,6 +2215,10 @@ func _process_pursuing_state(delta: float) -> void:
 
 			# Otherwise, continue moving toward suspected position
 			_move_to_target_nav(target_pos, combat_move_speed)
+			# Issue #367: Detect wall-stuck in PURSUING state (memory-based pursuit)
+			if _handle_pursuing_wall_stuck(delta, target_pos, "memory"):
+				_memory.decay(0.5)  # Reduce memory confidence since we can't reach position
+				return
 			# Corner checking during pursuit to suspected position (Issue #332)
 			if velocity.length_squared() > 1.0:
 				_process_corner_check(delta, velocity.normalized(), "PURSUING_MEMORY")
@@ -2642,6 +2661,28 @@ func _is_flank_target_reachable() -> bool:
 
 	return true
 
+## Issue #367: Handle wall-stuck recovery in PURSUING state.
+## Returns true if stuck was detected and state transitioned, false otherwise.
+func _handle_pursuing_wall_stuck(delta: float, target_pos: Vector2, context: String) -> bool:
+	if velocity.length_squared() <= 1.0:
+		return false
+	var alignment := (target_pos - global_position).normalized().dot(velocity.normalized())
+	if alignment < FLANK_ALIGNMENT_THRESHOLD:
+		_pursuing_wall_stuck_timer += delta
+		if _pursuing_wall_stuck_timer >= PURSUING_WALL_STUCK_MAX_TIME:
+			_log_to_file("PURSUING wall-stuck (%s) alignment=%.2f, pos=%s" % [context, alignment, global_position])
+			_pursuing_wall_stuck_timer = 0.0
+			if _can_attempt_flanking() and _player:
+				_transition_to_flanking()
+			elif _has_left_idle:
+				_transition_to_searching(global_position)
+			else:
+				_transition_to_combat()
+			return true
+	else:
+		_pursuing_wall_stuck_timer = 0.0
+	return false
+
 ## Transition to SUPPRESSED state.
 func _transition_to_suppressed() -> void:
 	_current_state = AIState.SUPPRESSED
@@ -2662,6 +2703,8 @@ func _transition_to_pursuing() -> void:
 	_current_cover_obstacle = null
 	# Reset state duration timer (prevents rapid state thrashing)
 	_pursuing_state_timer = 0.0
+	# Reset wall-stuck timer (Issue #367)
+	_pursuing_wall_stuck_timer = 0.0
 	# Reset detection delay for new engagement
 	_detection_timer = 0.0
 	_detection_delay_elapsed = false
@@ -4459,6 +4502,7 @@ func _reset() -> void:
 	_pursuit_approaching = false
 	_pursuit_approach_timer = 0.0
 	_pursuing_state_timer = 0.0
+	_pursuing_wall_stuck_timer = 0.0  # Issue #367
 	# Reset assault state variables
 	_assault_wait_timer = 0.0
 	_assault_ready = false
