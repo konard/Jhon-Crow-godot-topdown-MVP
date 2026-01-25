@@ -1144,24 +1144,42 @@ func _update_goap_state() -> void:
 func _update_enemy_model_rotation() -> void:
 	if not _enemy_model: return
 	var target_angle: float; var has_target := false
+	var rotation_source := ""  # Issue #373: track which code path sets rotation for debugging
 	# Active combat = face player directly. PURSUING/SEARCHING = use memory for last known position.
 	var active_combat := _current_state in [AIState.COMBAT, AIState.FLANKING, AIState.ASSAULT, AIState.RETREATING, AIState.SEEKING_COVER, AIState.IN_COVER, AIState.SUPPRESSED]
 	var tracking_mode := _current_state in [AIState.PURSUING, AIState.SEARCHING]
 	if active_combat and _player != null:  # Issue #373: face player directly in active combat
 		target_angle = (_player.global_position - global_position).normalized().angle(); has_target = true
+		rotation_source = "ACTIVE_COMBAT_PLAYER"
 	elif tracking_mode:  # PURSUING/SEARCHING: use memory/last known position
 		var target_pos := _get_target_position()
-		if target_pos != global_position: target_angle = (target_pos - global_position).normalized().angle(); has_target = true
-		elif _player != null: target_angle = (_player.global_position - global_position).normalized().angle(); has_target = true
-	elif _player != null and _can_see_player: target_angle = (_player.global_position - global_position).normalized().angle(); has_target = true
-	if not has_target and _corner_check_timer > 0: target_angle = _corner_check_angle; has_target = true  # Non-combat fallbacks
-	elif not has_target and velocity.length_squared() > 1.0: target_angle = velocity.normalized().angle(); has_target = true
-	elif not has_target and _current_state == AIState.IDLE and _idle_scan_targets.size() > 0: target_angle = _idle_scan_targets[_idle_scan_target_index]; has_target = true
+		if target_pos != global_position:
+			target_angle = (target_pos - global_position).normalized().angle(); has_target = true
+			rotation_source = "TRACKING_MEMORY"
+		elif _player != null:
+			target_angle = (_player.global_position - global_position).normalized().angle(); has_target = true
+			rotation_source = "TRACKING_PLAYER_FALLBACK"
+	elif _player != null and _can_see_player:
+		target_angle = (_player.global_position - global_position).normalized().angle(); has_target = true
+		rotation_source = "VISIBLE_PLAYER"
+	if not has_target and _corner_check_timer > 0:
+		target_angle = _corner_check_angle; has_target = true  # Non-combat fallbacks
+		rotation_source = "CORNER_CHECK"
+	elif not has_target and velocity.length_squared() > 1.0:
+		target_angle = velocity.normalized().angle(); has_target = true
+		rotation_source = "VELOCITY"
+	elif not has_target and _current_state == AIState.IDLE and _idle_scan_targets.size() > 0:
+		target_angle = _idle_scan_targets[_idle_scan_target_index]; has_target = true
+		rotation_source = "IDLE_SCAN"
 	if not has_target: return
-	# Smooth rotation for visual polish (Issue #347)
-	var delta := get_physics_process_delta_time()
+	# Issue #373: Log rotation changes for debugging turn-away behavior (only when angle changes significantly)
 	var current_rot := _enemy_model.global_rotation
 	var angle_diff := wrapf(target_angle - current_rot, -PI, PI)
+	var angle_change_degrees := rad_to_deg(abs(angle_diff))
+	if angle_change_degrees > 30.0:  # Log significant rotation changes
+		_log_to_file("ROT %s: %.1f° -> %.1f° (diff=%.1f°, src=%s, state=%s)" % [name, rad_to_deg(current_rot), rad_to_deg(target_angle), angle_change_degrees, rotation_source, AIState.keys()[_current_state]])
+	# Smooth rotation for visual polish (Issue #347)
+	var delta := get_physics_process_delta_time()
 	if abs(angle_diff) <= MODEL_ROTATION_SPEED * delta:
 		_enemy_model.global_rotation = target_angle
 	elif angle_diff > 0:
