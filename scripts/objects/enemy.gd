@@ -45,10 +45,7 @@ enum BehaviorMode {
 ## Field of view angle in degrees (cone centered on facing dir). 0 or negative = 360° vision. Default 100° per issue #66.
 @export var fov_angle: float = 100.0
 
-## Whether FOV checking is enabled for this specific enemy.
-## This is combined with the global ExperimentalSettings.fov_enabled setting.
-## Both must be true for FOV to be active.
-## Note: The global setting in ExperimentalSettings is disabled by default.
+## FOV enabled for this enemy (combined with ExperimentalSettings.fov_enabled, both must be true).
 @export var fov_enabled: bool = true
 
 ## Time between shots (0.1s = 10 rounds/sec).
@@ -181,13 +178,9 @@ const AIM_TOLERANCE_DOT: float = 0.866  ## cos(30°) - aim tolerance (issue #254
 @onready var _debug_label: Label = $DebugLabel  ## Debug state label
 @onready var _nav_agent: NavigationAgent2D = $NavigationAgent2D  ## Pathfinding
 
-## HitArea for bullet collision detection.
-## Used to disable collision when enemy dies so bullets pass through.
+## HitArea for bullet collision detection (disabled on death).
 @onready var _hit_area: Area2D = $HitArea
-
-## HitCollisionShape for physically disabling collision on death.
-## Disabling the shape is more reliable than just toggling monitorable/monitoring
-## due to Godot engine limitations (see issue #62506, #100687).
+## HitCollisionShape for disabling collision on death (more reliable than toggling monitorable).
 @onready var _hit_collision_shape: CollisionShape2D = $HitArea/HitCollisionShape
 
 var _original_hit_area_layer: int = 0  ## Original collision layer (restore on respawn)
@@ -255,20 +248,15 @@ var _threat_reaction_timer: float = 0.0
 ## Whether the threat reaction delay has elapsed (enemy can react to bullets).
 var _threat_reaction_delay_elapsed: bool = false
 
-## Memory of bullets that have passed through the threat sphere recently.
-## This allows the enemy to react even after fast-moving bullets have exited.
+## Memory timer for bullets that passed through threat sphere (allows reaction after fast bullets exit).
 var _threat_memory_timer: float = 0.0
-
-## Duration to remember that a bullet passed through the threat sphere.
-## This should be longer than the reaction delay to ensure enemies can complete
-## their reaction even after bullets have passed through quickly.
+## Duration to remember bullet passage (longer than reaction delay for complete reaction).
 const THREAT_MEMORY_DURATION: float = 0.5
 
 ## Current retreat mode determined by damage taken.
 var _retreat_mode: RetreatMode = RetreatMode.FULL_HP
 
-## Number of hits taken during the current retreat/combat encounter.
-## Resets when enemy enters IDLE state or finishes retreating.
+## Hits taken this retreat/combat encounter. Resets on IDLE or retreat completion.
 var _hits_taken_in_encounter: int = 0
 
 ## Timer for periodic turning to cover during FULL_HP retreat.
@@ -304,8 +292,7 @@ const RETREAT_BURST_ARC: float = 0.4
 ## Current angle offset within burst arc.
 var _retreat_burst_angle_offset: float = 0.0
 
-## Whether enemy is in "alarm" mode (was suppressed/retreating and hasn't calmed down).
-## This persists until the enemy reaches safety in cover or returns to idle.
+## Alarm mode: was suppressed/retreating, persists until reaching cover or IDLE.
 var _in_alarm_mode: bool = false
 
 ## Whether the enemy needs to fire a cover burst (when leaving cover while in alarm).
@@ -321,15 +308,13 @@ var _combat_shoot_duration: float = 2.5
 ## Whether the enemy is currently in the "exposed shooting" phase of combat.
 var _combat_exposed: bool = false
 
-## Whether the enemy is in the "approaching player" phase of combat.
-## In this phase, the enemy moves toward the player to get into direct contact.
+## Approaching player phase: moving toward player for direct contact.
 var _combat_approaching: bool = false
 
 ## Timer for the approach phase of combat.
 var _combat_approach_timer: float = 0.0
 
-## Timer tracking total time spent in COMBAT state this cycle.
-## Used to prevent rapid state thrashing when visibility flickers.
+## Total COMBAT time this cycle (prevents thrashing on visibility flicker).
 var _combat_state_timer: float = 0.0
 
 ## Maximum time to spend approaching player before starting to shoot (seconds).
@@ -354,34 +339,25 @@ var _pursuit_next_cover: Vector2 = Vector2.ZERO
 ## Whether the enemy has a valid pursuit cover target.
 var _has_pursuit_cover: bool = false
 
-## The obstacle (collider) of the current cover position.
-## Used to detect and penalize selecting another position on the same obstacle.
+## Current cover obstacle collider (penalizes selecting same obstacle again).
 var _current_cover_obstacle: Object = null
-
-## Whether the enemy is in approach phase (moving toward player without cover).
-## This happens when at the last cover before the player with no better cover available.
+## Approach phase: at last cover, moving toward player with no better cover.
 var _pursuit_approaching: bool = false
 
 ## Timer for approach phase during pursuit.
 var _pursuit_approach_timer: float = 0.0
 
-## Timer tracking total time spent in PURSUING state this cycle.
-## Used to prevent rapid state thrashing when visibility flickers.
+## Total PURSUING time this cycle (prevents thrashing on visibility flicker).
 var _pursuing_state_timer: float = 0.0
 
 ## Maximum time to approach during pursuit before transitioning to COMBAT (seconds).
 const PURSUIT_APPROACH_MAX_TIME: float = 3.0
 
-## Minimum time in PURSUING state before allowing transition to COMBAT.
-## This prevents rapid state thrashing when visibility flickers at edges of walls/obstacles.
+## Min PURSUING time before COMBAT (prevents thrashing at wall edges).
 const PURSUING_MIN_DURATION_BEFORE_COMBAT: float = 0.3
-
-## Minimum distance progress required for a valid pursuit cover (as fraction of current distance).
-## Covers that don't make at least this much progress toward the player are skipped.
-const PURSUIT_MIN_PROGRESS_FRACTION: float = 0.10  # Must get at least 10% closer
-
-## Penalty applied to cover positions on the same obstacle as current cover.
-## This prevents enemies from shuffling along the same wall repeatedly.
+## Min progress fraction for valid pursuit cover (must get at least 10% closer).
+const PURSUIT_MIN_PROGRESS_FRACTION: float = 0.10
+## Penalty for same-obstacle cover (prevents shuffling along same wall).
 const PURSUIT_SAME_OBSTACLE_PENALTY: float = 4.0
 
 ## --- Flanking State (cover-to-cover movement toward flank target) ---
@@ -467,19 +443,13 @@ const SEARCH_WAYPOINT_SPACING: float = 75.0  ## Spacing between waypoints
 var _search_visited_zones: Dictionary = {}  ## Tracks visited positions (key=snapped pos, val=true)
 const SEARCH_ZONE_SNAP_SIZE: float = 50.0  ## Grid size for snapping positions to zones
 
-## Stuck detection for SEARCHING state (Issue #354).
-## Timer for checking if stuck (no progress toward waypoint).
-var _search_stuck_timer: float = 0.0
-## Last position for progress tracking during search.
-var _search_last_progress_position: Vector2 = Vector2.ZERO
-## Maximum time without progress before skipping to next waypoint (seconds).
-const SEARCH_STUCK_MAX_TIME: float = 2.0
-## Minimum distance that counts as progress toward waypoint.
-const SEARCH_PROGRESS_THRESHOLD: float = 10.0
+## Issue #354: Stuck detection for SEARCHING state.
+var _search_stuck_timer: float = 0.0  ## Timer for no progress toward waypoint.
+var _search_last_progress_position: Vector2 = Vector2.ZERO  ## Last progress position.
+const SEARCH_STUCK_MAX_TIME: float = 2.0  ## Max time without progress before skip.
+const SEARCH_PROGRESS_THRESHOLD: float = 10.0  ## Min distance counting as progress.
 
-## Flag tracking if enemy has ever left IDLE state (Issue #330).
-## Once an enemy leaves IDLE (due to combat contact, sound detection, etc.),
-## it should NEVER return to IDLE - it must search infinitely until finding the player.
+## Issue #330: Once enemy leaves IDLE, never returns - searches until finding player.
 var _has_left_idle: bool = false
 
 ## Distance threshold for "close" vs "far" from player.
@@ -521,17 +491,13 @@ const CLEAR_SHOT_MAX_TIME: float = 3.0
 const CLEAR_SHOT_EXIT_DISTANCE: float = 60.0
 
 ## --- Sound-Based Detection ---
-## Last known position of a sound source (e.g., player or enemy gunshot).
-## Used when the enemy hears a sound but can't see the player, to investigate the location.
+## Last known sound source position (for investigation when player not visible).
 var _last_known_player_position: Vector2 = Vector2.ZERO
-
-## Flag indicating we heard a vulnerability sound (reload/empty click) and should pursue
-## to that position even without line of sight to the player.
+## Pursuing vulnerability sound (reload/empty click) without line of sight.
 var _pursuing_vulnerability_sound: bool = false
 
 ## --- Enemy Memory System (Issue #297) ---
-## Memory system that tracks suspected player position with confidence level.
-## Confidence ranges from 0.0 (no information) to 1.0 (direct visual contact).
+## Tracks suspected player position with confidence (0.0=none, 1.0=visual contact).
 ## The memory influences AI behavior:
 ## - High confidence (>0.8): Direct pursuit to suspected position
 ## - Medium confidence (0.5-0.8): Cautious approach with cover checks
