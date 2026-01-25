@@ -53,6 +53,18 @@ signal death_animation_completed
 ## When true, the body parts will remain as physics objects in the scene.
 @export var persist_body_after_death: bool = true
 
+## Whether ragdoll bodies react to bullets after death.
+## When true, shooting a dead body will cause it to move/twitch.
+@export var react_to_bullets: bool = true
+
+## Impulse strength multiplier for post-death bullet hits.
+## Different weapon types have different base impulses, this scales them.
+@export var bullet_reaction_impulse_scale: float = 1.0
+
+## Time to re-freeze ragdoll after bullet hit reaction (seconds).
+## Set to -1 to never re-freeze after a hit.
+@export var refreeze_delay_after_hit: float = 1.5
+
 ## Animation phase states.
 enum AnimationPhase {
 	NONE,           ## No death animation active
@@ -118,12 +130,37 @@ var _is_active: bool = false
 ## Each keyframe: { "time": 0.0-1.0, "pos": Vector2, "rot": float (degrees) }
 var _fall_animations: Array[Dictionary] = []
 
+## Timer for re-freezing ragdoll after bullet hit.
+var _refreeze_timer: float = -1.0
+
+## Whether we're waiting to re-freeze after a bullet hit.
+var _waiting_to_refreeze: bool = false
+
+## Weapon-specific impulse profiles for post-death reactions.
+## Format: { "weapon_type": { "impulse": float, "angular": float, "description": String } }
+const BULLET_IMPULSE_PROFILES := {
+	"shotgun": { "impulse": 250.0, "angular": 80.0, "description": "Strong knockback" },
+	"rifle": { "impulse": 120.0, "angular": 40.0, "description": "Medium twitching" },
+	"assault_rifle": { "impulse": 100.0, "angular": 35.0, "description": "Medium twitching" },
+	"uzi": { "impulse": 60.0, "angular": 25.0, "description": "Light rapid twitching" },
+	"smg": { "impulse": 70.0, "angular": 30.0, "description": "Light twitching" },
+	"pistol": { "impulse": 50.0, "angular": 20.0, "description": "Light push" },
+	"default": { "impulse": 80.0, "angular": 30.0, "description": "Default reaction" }
+}
+
 
 func _ready() -> void:
 	_generate_fall_animations()
 
 
 func _process(delta: float) -> void:
+	# Handle re-freeze timer for bullet reactions (runs even when not in active animation)
+	if _waiting_to_refreeze and refreeze_delay_after_hit >= 0:
+		_refreeze_timer -= delta
+		if _refreeze_timer <= 0:
+			_refreeze_ragdoll_bodies()
+			_waiting_to_refreeze = false
+
 	if not _is_active:
 		return
 
@@ -447,6 +484,24 @@ func _create_ragdoll_body(sprite: Sprite2D, mass: float, collision_radius: float
 	ragdoll_sprite.position = Vector2.ZERO
 	ragdoll_sprite.rotation = 0.0
 
+	# Add hit detection area for bullet reactions
+	if react_to_bullets:
+		var hit_area := Area2D.new()
+		hit_area.name = "BulletHitArea"
+		hit_area.collision_layer = 0  # Don't detect others
+		hit_area.collision_mask = 16  # Layer 5 = bullets (1 << 4 = 16)
+		hit_area.monitoring = true
+		hit_area.monitorable = false
+
+		var hit_shape := CollisionShape2D.new()
+		var hit_circle := CircleShape2D.new()
+		hit_circle.radius = collision_radius * 1.2  # Slightly larger for easier detection
+		hit_shape.shape = hit_circle
+		hit_area.add_child(hit_shape)
+
+		rb.add_child(hit_area)
+		hit_area.area_entered.connect(_on_ragdoll_bullet_hit.bind(rb))
+
 	return rb
 
 
@@ -634,3 +689,143 @@ func is_complete() -> bool:
 ## Get current animation phase.
 func get_phase() -> AnimationPhase:
 	return _current_phase
+
+
+## Called when a bullet hits a ragdoll body part.
+## Applies impulse based on bullet direction and weapon type.
+func _on_ragdoll_bullet_hit(bullet_area: Area2D, ragdoll_body: RigidBody2D) -> void:
+	if not is_instance_valid(ragdoll_body) or not is_instance_valid(bullet_area):
+		return
+
+	# Get bullet direction and weapon info
+	var bullet_direction := Vector2.RIGHT
+	var weapon_type := "default"
+
+	# Try to get bullet direction from velocity or direction property
+	if bullet_area.has_method("get_direction"):
+		bullet_direction = bullet_area.get_direction()
+	elif bullet_area.get("direction") != null:
+		bullet_direction = bullet_area.direction
+	elif bullet_area.get("linear_velocity") != null:
+		bullet_direction = bullet_area.linear_velocity.normalized()
+	else:
+		# Estimate from position difference
+		bullet_direction = (ragdoll_body.global_position - bullet_area.global_position).normalized()
+
+	# Try to get weapon type from caliber data
+	if bullet_area.has_method("get_caliber_data"):
+		var caliber_data = bullet_area.get_caliber_data()
+		if caliber_data and caliber_data.has("weapon_type"):
+			weapon_type = caliber_data.weapon_type
+	elif bullet_area.get("caliber_data") != null:
+		var caliber_data = bullet_area.caliber_data
+		if caliber_data and caliber_data.has("weapon_type"):
+			weapon_type = caliber_data.weapon_type
+
+	# Apply impulse to the ragdoll body
+	apply_bullet_impulse_to_body(ragdoll_body, bullet_direction, weapon_type, bullet_area.global_position)
+
+
+## Apply bullet impulse to a specific ragdoll body.
+## @param body: The RigidBody2D to apply impulse to.
+## @param bullet_direction: The direction the bullet was traveling.
+## @param weapon_type: The type of weapon that fired the bullet.
+## @param hit_position: Global position where the bullet hit.
+func apply_bullet_impulse_to_body(body: RigidBody2D, bullet_direction: Vector2, weapon_type: String, hit_position: Vector2) -> void:
+	if not is_instance_valid(body):
+		return
+
+	# Get impulse profile for weapon type
+	var profile: Dictionary = BULLET_IMPULSE_PROFILES.get(weapon_type.to_lower(), BULLET_IMPULSE_PROFILES["default"])
+
+	var base_impulse: float = profile["impulse"]
+	var angular_impulse: float = profile["angular"]
+
+	# Scale by the component's multiplier
+	base_impulse *= bullet_reaction_impulse_scale
+	angular_impulse *= bullet_reaction_impulse_scale
+
+	# Unfreeze the body if it was frozen
+	if body.freeze:
+		body.freeze = false
+
+	# Calculate impulse at hit point (offset from center creates rotation)
+	var offset := hit_position - body.global_position
+	var impulse := bullet_direction.normalized() * base_impulse
+
+	# Apply impulse at offset position
+	body.apply_impulse(impulse, offset)
+
+	# Add some angular impulse for twitching effect
+	var random_angular := randf_range(-1.0, 1.0) * angular_impulse
+	body.apply_torque_impulse(random_angular)
+
+	# Also apply smaller impulse to connected bodies for propagation
+	_propagate_impulse_to_connected_bodies(body, bullet_direction, base_impulse * 0.3)
+
+	# Start re-freeze timer
+	if refreeze_delay_after_hit >= 0:
+		_refreeze_timer = refreeze_delay_after_hit
+		_waiting_to_refreeze = true
+
+	# Log the hit
+	if is_inside_tree():
+		var file_logger: Node = get_node_or_null("/root/FileLogger")
+		if file_logger and file_logger.has_method("debug"):
+			file_logger.debug("[DeathAnim] Bullet hit ragdoll - Weapon: %s, Impulse: %.1f" % [weapon_type, base_impulse])
+
+
+## Propagate a smaller impulse to bodies connected via joints.
+func _propagate_impulse_to_connected_bodies(hit_body: RigidBody2D, direction: Vector2, impulse_strength: float) -> void:
+	for rb in _ragdoll_bodies:
+		if is_instance_valid(rb) and rb != hit_body:
+			# Unfreeze connected body
+			if rb.freeze:
+				rb.freeze = false
+			# Apply smaller impulse
+			rb.apply_central_impulse(direction * impulse_strength * randf_range(0.5, 1.0))
+
+
+## Re-freeze all ragdoll bodies after bullet reaction settles.
+func _refreeze_ragdoll_bodies() -> void:
+	for rb in _ragdoll_bodies:
+		if is_instance_valid(rb):
+			# Only freeze if velocity is low enough
+			if rb.linear_velocity.length() < 30.0 and absf(rb.angular_velocity) < 2.0:
+				rb.freeze = true
+				rb.linear_velocity = Vector2.ZERO
+				rb.angular_velocity = 0.0
+
+
+## Apply bullet impulse to all ragdoll bodies (external call).
+## Used when a bullet hits the dead enemy from outside this component.
+## @param bullet_direction: Direction the bullet was traveling.
+## @param weapon_type: Type of weapon that fired the bullet.
+## @param hit_position: Global position where the bullet hit.
+func apply_bullet_reaction(bullet_direction: Vector2, weapon_type: String, hit_position: Vector2) -> void:
+	# Find the closest ragdoll body to the hit position
+	var closest_body: RigidBody2D = null
+	var closest_dist := INF
+
+	for rb in _ragdoll_bodies:
+		if is_instance_valid(rb):
+			var dist := rb.global_position.distance_to(hit_position)
+			if dist < closest_dist:
+				closest_dist = dist
+				closest_body = rb
+
+	if closest_body:
+		apply_bullet_impulse_to_body(closest_body, bullet_direction, weapon_type, hit_position)
+
+
+## Get all ragdoll bodies (for external access).
+func get_ragdoll_bodies() -> Array[RigidBody2D]:
+	return _ragdoll_bodies
+
+
+## Check if ragdoll has any valid bodies.
+func has_ragdoll_bodies() -> bool:
+	for rb in _ragdoll_bodies:
+		if is_instance_valid(rb):
+			return true
+	return false
