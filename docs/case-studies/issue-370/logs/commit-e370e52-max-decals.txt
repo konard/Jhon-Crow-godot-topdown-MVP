@@ -1,0 +1,94 @@
+    3. Matte blood drops: Updated BloodDecal.tscn gradient for less visible borders
+       - Gradient now has longer solid region (0-75%) before soft fade
+       - Reduces visible boundaries when drops overlap
+    
+    4. Unlimited decals: Puddles should never disappear
+       - MAX_BLOOD_DECALS set to 0 (unlimited)
+       - Auto-fade disabled by default in blood_decal.gd
+       - Cleanup loops now check for limit > 0 before removing
+    
+    5. Added Round 3 feedback files to case study documentation
+    
+--
++++ b/scripts/autoload/impact_effects_manager.gd
+@@ -26,7 +26,8 @@ const MIN_EFFECT_SCALE: float = 0.3
+ const MAX_EFFECT_SCALE: float = 2.0
+ 
+ ## Maximum number of blood decals before oldest ones are removed.
+-const MAX_BLOOD_DECALS: int = 500
++## Set to 0 for unlimited decals (puddles should never disappear per issue #293).
++const MAX_BLOOD_DECALS: int = 0
+ 
+ ## Minimum distance between decals before they start merging (in pixels).
+ const DECAL_MERGE_DISTANCE: float = 12.0
+@@ -53,6 +54,13 @@ const SATELLITE_DROPS_PER_MAIN: int = 3
+ ## Distance threshold to consider a drop as "outermost" (percentile from center).
+--
+-	# Track decal for cleanup
++	# Track decal for cleanup (only if limit is enabled)
+ 	_blood_decals.append(decal)
+ 
+-	# Remove oldest decals if limit exceeded
+-	while _blood_decals.size() > MAX_BLOOD_DECALS:
+-		var oldest := _blood_decals.pop_front() as Node2D
+-		if oldest and is_instance_valid(oldest):
+-			oldest.queue_free()
++	# Remove oldest decals if limit exceeded (0 = unlimited, no cleanup)
++	if MAX_BLOOD_DECALS > 0:
++		while _blood_decals.size() > MAX_BLOOD_DECALS:
++			var oldest := _blood_decals.pop_front() as Node2D
++			if oldest and is_instance_valid(oldest):
++				oldest.queue_free()
+ 
+ 	if _debug_effects:
+--
+-	# Track decal for cleanup
++	# Track decal for cleanup (only if limit is enabled)
+ 	_blood_decals.append(decal)
+ 
+-	# Remove oldest decals if limit exceeded
+-	while _blood_decals.size() > MAX_BLOOD_DECALS:
+-		var oldest := _blood_decals.pop_front() as Node2D
+-		if oldest and is_instance_valid(oldest):
+-			oldest.queue_free()
++	# Remove oldest decals if limit exceeded (0 = unlimited, no cleanup)
++	if MAX_BLOOD_DECALS > 0:
++		while _blood_decals.size() > MAX_BLOOD_DECALS:
++			var oldest := _blood_decals.pop_front() as Node2D
++			if oldest and is_instance_valid(oldest):
++				oldest.queue_free()
+ 
+ 	if _debug_effects:
+--
+-	# Track as blood decal for cleanup
++	# Track as blood decal for cleanup (only if limit is enabled)
+ 	_blood_decals.append(splatter)
+ 
+-	# Remove oldest decals if limit exceeded
+-	while _blood_decals.size() > MAX_BLOOD_DECALS:
+-		var oldest := _blood_decals.pop_front() as Node2D
+-		if oldest and is_instance_valid(oldest):
+-			oldest.queue_free()
++	# Remove oldest decals if limit exceeded (0 = unlimited, no cleanup)
++	if MAX_BLOOD_DECALS > 0:
++		while _blood_decals.size() > MAX_BLOOD_DECALS:
++			var oldest := _blood_decals.pop_front() as Node2D
++			if oldest and is_instance_valid(oldest):
++				oldest.queue_free()
+ 
+ 	if _debug_effects:
+--
++	assert_gt(impact_manager.SATELLITE_MIN_SEPARATION, 0.0,
++		"SATELLITE_MIN_SEPARATION should be positive")
++
++
++func test_max_blood_decals_is_unlimited() -> void:
++	# MAX_BLOOD_DECALS should be 0 for unlimited decals (per issue #293 Round 3)
++	# Puddles should never disappear
++	assert_eq(impact_manager.MAX_BLOOD_DECALS, 0,
++		"MAX_BLOOD_DECALS should be 0 for unlimited decals")
++
++
++func test_spawn_satellite_drops_accepts_existing_positions() -> void:
++	# The satellite spawn method should accept existing positions to avoid overlap
++	var existing_positions: Array = [Vector2(100, 100), Vector2(200, 200)]

@@ -1,0 +1,36 @@
+commit e370e525a39f3b9ef04f5ffb68c25c32111c675e
+Author: konard <drakonard@gmail.com>
+Date:   Sat Jan 24 02:21:14 2026 +0100
+
+    Round 3 blood effect improvements: edge scaling, no overlap, matte drops, unlimited decals
+    
+    Addresses feedback from issue #293:
+    
+    1. Edge-based scaling: Drops farther from center are now smaller (EDGE_DROP_SCALE_MIN=0.4)
+       - More realistic blood spatter pattern where edge drops are naturally smaller
+    
+    2. Satellite drop overlap prevention: New drops check against existing positions
+       - Added SATELLITE_MIN_SEPARATION constant (4px minimum distance)
+       - Tries up to 5 positions before skipping to avoid overlapping existing drops
+    
+    3. Matte blood drops: Updated BloodDecal.tscn gradient for less visible borders
+       - Gradient now has longer solid region (0-75%) before soft fade
+       - Reduces visible boundaries when drops overlap
+    
+    4. Unlimited decals: Puddles should never disappear
+       - MAX_BLOOD_DECALS set to 0 (unlimited)
+       - Auto-fade disabled by default in blood_decal.gd
+       - Cleanup loops now check for limit > 0 before removing
+    
+    5. Added Round 3 feedback files to case study documentation
+    
+    Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
+ .../round3-feedback/game_log_20260124_040735.txt   | 1705 ++++++++++++++++++
+ .../round3-feedback/game_log_20260124_040931.txt   | 1865 ++++++++++++++++++++
+ .../issue-293/round3-feedback/references.txt       |   93 +
+ scenes/effects/BloodDecal.tscn                     |    6 +-
+ scripts/autoload/impact_effects_manager.gd         |  136 +-
+ scripts/effects/blood_decal.gd                     |    3 +-
+ tests/unit/test_impact_effects_manager.gd          |   64 +
+ 7 files changed, 3835 insertions(+), 37 deletions(-)

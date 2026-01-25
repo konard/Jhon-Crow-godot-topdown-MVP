@@ -1,0 +1,55 @@
+5c07788 feat: add realistic boot print textures with tread pattern (Issue #360)
+4ef056d test: add comprehensive unit tests for 11 script categories (Issue #335)
+4629977 fix: make bloody footprints visible by fixing z_index (Issue #360)
+2968515 Merge pull request #365 from konard/issue-350-97fea2bdb68c
+679c5ea fix: add blood effect spawning to C# Player (Issue #350)
+7756ca7 fix: add fallback distance-based blood detection (Issue #360)
+fa78235 test: add blood effect tests for player (Issue #350)
+42c322a feat: add weapon persistence and quick restart cleanup
+3578475 fix: resolve bloody footprints not appearing (Issue #360)
+2797dc1 feat: add bloody footprints feature (Issue #360)
+0501fe4 fix: position shader warmup particles on-screen for proper compilation (Issue #343)
+0159a2a fix: add shader warmup to prevent first-shot lag (Issue #343)
+df35f53 feat: increase blood puddle spawn count for enhanced visual feedback
+62a2a53 fix: correct blood decal z_index to 0 (was -1, below floor)
+737b107 docs: add case study for issue #339 (blood decals)
+2ace6b9 fix: improve blood rendering and player blood emission (Issue #339)
+9ef9a34 fix: improve blood decal rendering and reduce code size (Issue #339)
+67fb2fb fix: disable automatic blood decal fading (Issue #339)
+ce9362e Merge pull request #317 from konard/issue-307-a72114193e29
+5ecd3b3 fix: circular blood puddles instead of rectangular
+dce5196 Round 12: Fix rectangular blood puddles - correct fill_to parameter
+17d1a72 Round 11: Restore Round 5 complete gradient (RGB + alpha) for circular blood puddles
+fe64965 Round 10: Fix rectangular blood puddles - match Round 5 alpha progression
+578b2e0 Round 9: Fix rectangular blood puddles regression
+829a00f Round 8: Fix rectangular blood puddles with smoother gradient
+ecc2943 Round 7: Flat matte blood drops, smaller puddles, better satellite placement
+4cdd968 Round 6: Fix blood decal not visible - remove Unicode characters
+bc08bc1 Round 5: Fix rectangular blood drops - proper circular gradient
+246a198 Round 4 blood effect improvements: circular drops, smooth color transitions, blood aging
+e370e52 Round 3 blood effect improvements: edge scaling, no overlap, matte drops, unlimited decals
+b24bc78 Add case study documentation for issue #293
+44a580e Add realistic blood effects: satellite drops, complex merged puddles, crown effect
+1992b18 Improve blood effects: match particle count, merge overlapping drops, add directional deformation
+cba7339 docs: Update case study with Round 10 investigation analysis
+399c0ad Fix crash after restart and improve blood decal timing (Round 10)
+f542dcd docs: Update case study with Round 9 investigation analysis
+194f2f8 Fix: Restore GPUParticles2D for visible blood particle effects (Round 9)
+799e815 Fix blood decal size and spawn multiple small decals at particle landing positions
+7bd1919 Fix blood effect visibility: z_index and wall splatter scale
+f7d7138 Fix: Restore full ImpactEffectsManager to enable blood effects
+4caf857 Add experiment script for blood splatter logic testing
+a651daa Fix effect_cleanup.gd to extend Particles2D instead of GPUParticles2D
+48d269c Fix GPUParticles2D compatibility issue by changing to Particles2D
+1b38ffe Add always-print diagnostic logging for blood effects debugging
+217efa2 Fix wall collision layer and add diagnostic logging for blood effects
+f7e837e Add blood splatters on floor and walls when hit (issue #257)
+7ae74c3 Add comprehensive test coverage and contribution guidelines
+e4bac9d Replace hybrid blood system with fully procedural approach
+b4cc361 Fix blood effects: reduce spread, fix wall collision, add contextual patterns
+99507e0 Fix assert_le to assert_true in blood particle tests
+28cf071 Fix type inference in blood particle tests
+fe87d24 Enhance blood effects with wall collision and realistic physics
+2b287e7 Merge pull request #151 from konard/issue-149-f7edb648fa0d
+736d21c Improve visual impact effects realism and add blood decals
+ccfce81 Add visual impact hit effects (dust, blood, sparks) based on caliber

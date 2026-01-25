@@ -245,3 +245,15 @@ func test_on_tree_changed_method_exists() -> void:
 	# The scene change handler should exist for clearing stale references
 	assert_true(impact_manager.has_method("_on_tree_changed"),
 		"Manager should have _on_tree_changed method for scene change handling")
+
+
+# ============================================================================
+# Blood Decal Limit Tests (Issue #293, #370)
+# ============================================================================
+
+
+func test_max_blood_decals_is_unlimited() -> void:
+	# MAX_BLOOD_DECALS should be 0 for unlimited decals (per issue #293, #370)
+	# Puddles should never disappear - this is a critical requirement
+	assert_eq(impact_manager.MAX_BLOOD_DECALS, 0,
+		"MAX_BLOOD_DECALS should be 0 for unlimited decals (Issues #293, #370)")

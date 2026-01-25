@@ -1,0 +1,7 @@
+2797dc1 feat: add bloody footprints feature (Issue #360)
+b24bc78 Add case study documentation for issue #293
+1992b18 Improve blood effects: match particle count, merge overlapping drops, add directional deformation
+9acb5da Implement 3-step grenade throwing mechanic and add tutorial
+4fdd2f2 Fix penultimate hit effect: add contrast, 3s duration, logging
+fe87d24 Enhance blood effects with wall collision and realistic physics
+736d21c Improve visual impact effects realism and add blood decals
