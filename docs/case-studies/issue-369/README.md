@@ -772,45 +772,43 @@ And later:
 
 This is the EXACT same failure pattern we identified in Issue #363!
 
-### Root Cause Identified
+### Root Cause Identified (Corrected)
 
-**BloodyFeetComponent uses `class_name BloodyFeetComponent`** (line 7 of the original file):
+Initial hypothesis pointed to BloodyFeetComponent, but further investigation revealed the **actual** root cause in `enemy.gd` line 550:
 
 ```gdscript
-extends Node
-## Component that tracks when a character steps in blood and spawns footprints.
-##
-## Attach this component to any CharacterBody2D (Player or Enemy) to enable
-## bloody footprint tracking. The component monitors for blood puddle contact
-## and spawns footprint decals at regular intervals while moving.
-class_name BloodyFeetComponent
+var _memory: EnemyMemory = null
 ```
+
+This is a **typed variable reference** to `EnemyMemory`, which declares `class_name EnemyMemory` in `scripts/ai/enemy_memory.gd`.
 
 This is the SAME pattern that caused Issue #363:
 
 1. **Export build script loading order differs from editor**
-2. **When a script references a `class_name`, that class must be loaded first**
-3. **In export builds, the loading order can cause the class to not be found**
-4. **This causes the referencing script to FAIL TO PARSE**
+2. **When a script uses a typed reference (`var _memory: EnemyMemory`), that class must be loaded first**
+3. **In export builds, the loading order can cause `EnemyMemory` to not be found yet**
+4. **This causes `enemy.gd` to FAIL TO PARSE**
 5. **A script that fails to parse has NO SIGNALS at runtime**
 6. **`has_died_signal=false` because the enemy script is broken**
 7. **0 enemies registered, game appears to work but enemies don't function**
 
+**Why BloodyFeetComponent was NOT the cause:**
+- BloodyFeetComponent has `class_name BloodyFeetComponent`
+- BUT it is only used as a child node in scene files, not as a typed variable reference
+- Scene-based references don't require type resolution during script parsing
+- The issue only occurs with **typed variable declarations** like `var x: ClassName`
+
 ### Solution Applied
 
-**Removed `class_name BloodyFeetComponent`** from `scripts/components/bloody_feet_component.gd`:
+**Changed `enemy.gd` line 550 from typed to duck typed:**
 
 ```gdscript
-extends Node
-## Component that tracks when a character steps in blood and spawns footprints.
-##
-## Attach this component to any CharacterBody2D (Player or Enemy) to enable
-## bloody footprint tracking. The component monitors for blood puddle contact
-## and spawns footprint decals at regular intervals while moving.
-##
-## Note: class_name intentionally omitted to prevent export build script loading issues.
-## See Issue #363 root cause analysis for details on why typed component references
-## can cause scripts to fail parsing in export builds due to load order differences.
+# Before (broken in exports):
+var _memory: EnemyMemory = null
+
+# After (works in exports):
+## Note: Duck typed to avoid export build issues - see Issue #363/369.
+var _memory = null
 ```
 
 ### Cross-Reference to Issue #363 Root Cause Analysis
@@ -819,14 +817,16 @@ The complete technical analysis of this problem is documented in:
 - `docs/case-studies/issue-363/root-cause-analysis-20260125.md`
 
 Key points:
-- Using `class_name` in component scripts is risky for export builds
+- Using **typed variable references** (`var x: ClassName`) to classes with `class_name` is risky for export builds
 - GDScript class loading order is undefined in exports
 - Godot doesn't crash on script parse errors - it runs with broken scripts silently
-- The fix is to either remove `class_name` or use duck typing (`var x = null` instead of `var x: MyClass = null`)
+- The fix is to use duck typing (`var x = null` instead of `var x: MyClass = null`)
+- Having `class_name` in a component script is SAFE if it's only used in scene files as a child node
+- The problem is specifically with **typed variable declarations in .gd files**
 
 ### Files Modified
 
-- `scripts/components/bloody_feet_component.gd` - Removed `class_name` declaration
+- `scripts/objects/enemy.gd` - Changed `var _memory: EnemyMemory = null` to `var _memory = null`
 
 ### Log File Added
 
