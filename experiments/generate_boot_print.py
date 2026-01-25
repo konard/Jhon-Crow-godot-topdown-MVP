@@ -8,7 +8,7 @@ from PIL import Image, ImageDraw
 import math
 
 
-def create_boot_print(width=11, height=16, output_path="boot_print.png"):
+def create_boot_print(width=11, height=20, output_path="boot_print.png"):
     """
     Create a boot print texture with visible tread pattern.
 
@@ -16,6 +16,7 @@ def create_boot_print(width=11, height=16, output_path="boot_print.png"):
     - An elongated boot sole outline (wider toe, narrower arch, wide heel)
     - Horizontal tread lines (gaps) across the sole
     - Clear tread pattern visible at game scale
+    - Extra vertical padding to prevent cropping during rotation
     """
     # Create image with transparency
     img = Image.new('RGBA', (width, height), (0, 0, 0, 0))
@@ -27,8 +28,9 @@ def create_boot_print(width=11, height=16, output_path="boot_print.png"):
     transparent = (0, 0, 0, 0)          # Tread gaps
 
     # Boot sole parameters (scaled for smaller size)
+    # Added extra vertical margin to prevent cropping during rotation
     margin_x = 1
-    margin_y = 1
+    margin_y = 2  # Increased from 1 to 2 for top/bottom padding
 
     sole_left = margin_x
     sole_right = width - margin_x
@@ -150,7 +152,7 @@ def create_boot_print(width=11, height=16, output_path="boot_print.png"):
 
 
 def create_left_right_boot_prints():
-    """Create both left and right boot prints (1/3 size: 11x16 pixels)."""
+    """Create both left and right boot prints (11x20 pixels with padding)."""
     import os
 
     # Determine correct output path based on script location
@@ -161,10 +163,11 @@ def create_left_right_boot_prints():
     right_path = os.path.join(assets_dir, "boot_print_right.png")
     left_path = os.path.join(assets_dir, "boot_print_left.png")
 
-    # Create right boot print (the original) - 11x16 pixels (1/3 of 32x48)
+    # Create right boot print - 11x20 pixels (added 4px height for padding)
+    # This prevents cropping when footprints are rotated
     right_print = create_boot_print(
         width=11,
-        height=16,
+        height=20,
         output_path=right_path
     )
 

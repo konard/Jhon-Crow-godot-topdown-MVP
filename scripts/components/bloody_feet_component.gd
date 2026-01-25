@@ -54,6 +54,10 @@ var _file_logger: Node = null
 ## Area2D for detecting blood puddles.
 var _blood_detector: Area2D = null
 
+## Reference to the character's model node for facing direction.
+## This is PlayerModel for Player or EnemyModel for Enemy.
+var _character_model: Node2D = null
+
 
 func _ready() -> void:
 	_file_logger = get_node_or_null("/root/FileLogger")
@@ -78,8 +82,32 @@ func _ready() -> void:
 	# Create Area2D for blood puddle detection
 	_setup_blood_detector()
 
+	# Find the character's model node for facing direction
+	_find_character_model()
+
 	_initialized = true
 	_log_info("BloodyFeetComponent ready on %s" % _parent_body.name)
+
+
+## Finds the character model node (PlayerModel or EnemyModel) for facing direction.
+func _find_character_model() -> void:
+	if _parent_body == null:
+		return
+
+	# Try to find PlayerModel (for Player character)
+	_character_model = _parent_body.get_node_or_null("PlayerModel")
+	if _character_model:
+		_log_info("Found PlayerModel for facing direction")
+		return
+
+	# Try to find EnemyModel (for Enemy character)
+	_character_model = _parent_body.get_node_or_null("EnemyModel")
+	if _character_model:
+		_log_info("Found EnemyModel for facing direction")
+		return
+
+	# Fallback: no model found, will use movement direction
+	_log_info("No character model found, will use movement direction for footprint rotation")
 
 
 ## Sets up the Area2D for detecting blood puddles.
@@ -234,6 +262,26 @@ func _track_movement() -> void:
 	_last_position = current_pos
 
 
+## Gets the character's facing direction based on model rotation.
+## Falls back to movement direction if no model is found.
+func _get_facing_direction() -> Vector2:
+	if _character_model:
+		# Use the model's global rotation for facing direction
+		# The model rotates to face the aim/look direction
+		var facing_angle := _character_model.global_rotation
+
+		# Handle flipped sprites (when aiming left, scale.y is negative)
+		# In this case, the rotation was negated in the character script,
+		# so we need to negate it back to get the actual facing direction
+		if _character_model.scale.y < 0:
+			facing_angle = -facing_angle
+
+		return Vector2.from_angle(facing_angle)
+	else:
+		# Fallback to movement direction
+		return _last_move_direction
+
+
 ## Spawns a footprint at the current position.
 func _spawn_footprint() -> void:
 	if _footprint_scene == null or _blood_level <= 0:
@@ -249,9 +297,13 @@ func _spawn_footprint() -> void:
 	var alpha := initial_alpha - (steps_taken * alpha_decay_rate)
 	alpha = maxf(alpha, 0.05)  # Minimum visible alpha
 
+	# Get the facing direction (from model rotation, not movement)
+	var facing_direction := _get_facing_direction()
+
 	# Set footprint properties
 	footprint.global_position = _parent_body.global_position
-	footprint.rotation = _last_move_direction.angle()
+	# Use facing direction for rotation (the direction character is looking)
+	footprint.rotation = facing_direction.angle()
 	footprint.scale = Vector2(footprint_scale, footprint_scale)
 	# Ensure footprint renders above floor (z_index 0) but below characters
 	footprint.z_index = 1
@@ -260,8 +312,8 @@ func _spawn_footprint() -> void:
 	if footprint.has_method("set_foot"):
 		footprint.set_foot(_is_left_foot)
 
-	# Alternate left/right foot by slightly offsetting perpendicular to movement
-	var perpendicular := _last_move_direction.rotated(PI / 2.0)
+	# Alternate left/right foot by slightly offsetting perpendicular to facing direction
+	var perpendicular := facing_direction.rotated(PI / 2.0)
 	var foot_offset := 4.0 if _is_left_foot else -4.0
 	footprint.global_position += perpendicular * foot_offset
 	_is_left_foot = not _is_left_foot
@@ -283,7 +335,7 @@ func _spawn_footprint() -> void:
 	_blood_level -= 1
 
 	if debug_logging:
-		_log_info("Footprint spawned (steps remaining: %d, alpha: %.2f)" % [_blood_level, alpha])
+		_log_info("Footprint spawned (steps remaining: %d, alpha: %.2f, facing: %.2f)" % [_blood_level, alpha, facing_direction.angle()])
 
 	if _blood_level <= 0:
 		_log_info("Blood ran out - no more footprints")
