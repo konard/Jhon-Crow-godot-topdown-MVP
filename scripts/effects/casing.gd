@@ -11,6 +11,9 @@ extends RigidBody2D
 ## Caliber data for determining casing appearance.
 @export var caliber_data: Resource = null
 
+## Enable verbose debug logging for troubleshooting collision issues.
+@export var debug_logging: bool = false
+
 ## Whether the casing has landed on the ground.
 var _has_landed: bool = false
 
@@ -45,6 +48,21 @@ var _is_time_frozen: bool = false
 ## Reference to the kick detector Area2D.
 var _kick_detector: Area2D = null
 
+## Cooldown timer for manual overlap check to prevent spam.
+var _overlap_check_cooldown: float = 0.0
+
+## Cooldown duration for overlap checks (seconds).
+const OVERLAP_CHECK_COOLDOWN: float = 0.1
+
+## Track bodies we've already kicked by (to prevent repeat kicks).
+var _recently_kicked_by: Array[int] = []
+
+## Timer for clearing the recently kicked list.
+var _kick_memory_timer: float = 0.0
+
+## How long to remember a kick (seconds).
+const KICK_MEMORY_DURATION: float = 0.3
+
 
 func _ready() -> void:
 	# Connect to collision signals to detect landing
@@ -60,6 +78,22 @@ func _ready() -> void:
 	_kick_detector = get_node_or_null("KickDetector")
 	if _kick_detector:
 		_kick_detector.body_entered.connect(_on_kick_detector_body_entered)
+		if debug_logging:
+			_log_debug("KickDetector connected, monitoring=%s, mask=%d" % [_kick_detector.monitoring, _kick_detector.collision_mask])
+	else:
+		if debug_logging:
+			_log_debug("WARNING: KickDetector not found!")
+
+
+## Logs a debug message if debug_logging is enabled.
+func _log_debug(message: String) -> void:
+	if not debug_logging:
+		return
+	var game_manager = get_node_or_null("/root/GameManager")
+	if game_manager and game_manager.has_method("log_to_file"):
+		game_manager.log_to_file("[Casing] " + message)
+	else:
+		print("[Casing] " + message)
 
 
 func _physics_process(delta: float) -> void:
@@ -73,12 +107,27 @@ func _physics_process(delta: float) -> void:
 	if _bounce_sound_cooldown_timer > 0:
 		_bounce_sound_cooldown_timer -= delta
 
+	# Update kick memory timer
+	if _kick_memory_timer > 0:
+		_kick_memory_timer -= delta
+		if _kick_memory_timer <= 0:
+			_recently_kicked_by.clear()
+
+	# Update overlap check cooldown
+	if _overlap_check_cooldown > 0:
+		_overlap_check_cooldown -= delta
+
 	# Handle lifetime if set
 	if lifetime > 0:
 		_lifetime_timer += delta
 		if _lifetime_timer >= lifetime:
 			queue_free()
 			return
+
+	# Fallback: Manual overlap detection for kick (in case Area2D signals don't work)
+	# This is especially important for fast-moving characters in Godot 4
+	if _kick_detector and _overlap_check_cooldown <= 0:
+		_check_manual_overlaps()
 
 	# Auto-land after a few seconds if not kicked recently
 	if not _has_landed and linear_velocity.length() < 10.0:
@@ -97,6 +146,29 @@ func _physics_process(delta: float) -> void:
 		set_physics_process(false)
 
 
+## Manual overlap check as fallback for Area2D signal detection.
+## This helps with fast-moving characters that might be missed by the signal.
+func _check_manual_overlaps() -> void:
+	if not _kick_detector:
+		return
+
+	var overlapping_bodies: Array[Node2D] = _kick_detector.get_overlapping_bodies()
+	for body in overlapping_bodies:
+		if body is CharacterBody2D:
+			var body_id: int = body.get_instance_id()
+			# Skip if we recently kicked by this body
+			if body_id in _recently_kicked_by:
+				continue
+			# Process the kick
+			if debug_logging:
+				_log_debug("Manual overlap detected: %s" % body.name)
+			_process_kick(body)
+			# Add to recently kicked list
+			_recently_kicked_by.append(body_id)
+			_kick_memory_timer = KICK_MEMORY_DURATION
+			_overlap_check_cooldown = OVERLAP_CHECK_COOLDOWN
+
+
 ## Makes the casing "land" by stopping all movement.
 func _land() -> void:
 	_has_landed = true
@@ -108,6 +180,24 @@ func _on_kick_detector_body_entered(body: Node2D) -> void:
 	if not body is CharacterBody2D:
 		return
 
+	var body_id: int = body.get_instance_id()
+	# Skip if we recently kicked by this body
+	if body_id in _recently_kicked_by:
+		return
+
+	if debug_logging:
+		_log_debug("Signal body_entered: %s" % body.name)
+
+	_process_kick(body)
+
+	# Add to recently kicked list
+	_recently_kicked_by.append(body_id)
+	_kick_memory_timer = KICK_MEMORY_DURATION
+
+
+## Processes a kick from a character (player or enemy).
+## Called by both signal handler and manual overlap detection.
+func _process_kick(body: CharacterBody2D) -> void:
 	# Wake up the casing if it was landed
 	if _has_landed:
 		_has_landed = false
@@ -140,6 +230,9 @@ func _on_kick_detector_body_entered(body: Node2D) -> void:
 
 	# Play bounce sound if moving fast enough
 	_try_play_bounce_sound()
+
+	if debug_logging:
+		_log_debug("Kicked by %s with impulse %.1f" % [body.name, impulse.length()])
 
 
 ## Sets the visual appearance of the casing based on its caliber.
