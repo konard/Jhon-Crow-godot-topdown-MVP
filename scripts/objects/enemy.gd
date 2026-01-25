@@ -467,6 +467,16 @@ const SEARCH_WAYPOINT_SPACING: float = 75.0  ## Spacing between waypoints
 var _search_visited_zones: Dictionary = {}  ## Tracks visited positions (key=snapped pos, val=true)
 const SEARCH_ZONE_SNAP_SIZE: float = 50.0  ## Grid size for snapping positions to zones
 
+## Stuck detection for SEARCHING state (Issue #354).
+## Timer for checking if stuck (no progress toward waypoint).
+var _search_stuck_timer: float = 0.0
+## Last position for progress tracking during search.
+var _search_last_progress_position: Vector2 = Vector2.ZERO
+## Maximum time without progress before skipping to next waypoint (seconds).
+const SEARCH_STUCK_MAX_TIME: float = 2.0
+## Minimum distance that counts as progress toward waypoint.
+const SEARCH_PROGRESS_THRESHOLD: float = 10.0
+
 ## Flag tracking if enemy has ever left IDLE state (Issue #330).
 ## Once an enemy leaves IDLE (due to combat contact, sound detection, etc.),
 ## it should NEVER return to IDLE - it must search infinitely until finding the player.
@@ -2362,6 +2372,7 @@ func _process_searching_state(delta: float) -> void:
 		if dist <= SEARCH_WAYPOINT_REACHED_DISTANCE:
 			_search_moving_to_waypoint = false
 			_search_scan_timer = 0.0
+			_search_stuck_timer = 0.0  # Issue #354: Reset stuck timer on waypoint reached
 			_log_debug("SEARCHING: Reached waypoint %d, scanning..." % _search_current_waypoint_index)
 		else:
 			_nav_agent.target_position = target_waypoint
@@ -2369,11 +2380,31 @@ func _process_searching_state(delta: float) -> void:
 				_mark_zone_visited(target_waypoint)
 				_search_current_waypoint_index += 1
 				_search_moving_to_waypoint = true
+				_search_stuck_timer = 0.0  # Issue #354: Reset stuck timer
 			else:
 				var next_pos := _nav_agent.get_next_path_position()
 				var dir := (next_pos - global_position).normalized()
 				velocity = dir * move_speed * 0.7
 				move_and_slide()
+
+				# Issue #354: Stuck detection - check if making progress toward waypoint
+				var progress := global_position.distance_to(_search_last_progress_position)
+				if progress < SEARCH_PROGRESS_THRESHOLD:
+					_search_stuck_timer += delta
+					if _search_stuck_timer >= SEARCH_STUCK_MAX_TIME:
+						# Stuck for too long - skip to next waypoint
+						_log_to_file("SEARCHING: Stuck at waypoint %d (no progress for %.1fs), skipping" % [_search_current_waypoint_index, _search_stuck_timer])
+						_mark_zone_visited(target_waypoint)
+						_search_current_waypoint_index += 1
+						_search_moving_to_waypoint = true
+						_search_stuck_timer = 0.0
+						_search_last_progress_position = global_position
+						return
+				else:
+					# Making progress - reset stuck timer and update position
+					_search_stuck_timer = 0.0
+					_search_last_progress_position = global_position
+
 				if dir.length() > 0.1:
 					rotation = lerp_angle(rotation, dir.angle(), 5.0 * delta)
 					# Corner checking during SEARCHING movement (Issue #332)
@@ -2710,6 +2741,8 @@ func _transition_to_searching(center_position: Vector2) -> void:
 	_search_state_timer = 0.0; _search_scan_timer = 0.0; _search_current_waypoint_index = 0
 	_search_direction = 0; _search_leg_length = SEARCH_WAYPOINT_SPACING; _search_legs_completed = 0
 	_search_moving_to_waypoint = true; _search_visited_zones.clear()
+	# Issue #354: Initialize stuck detection
+	_search_stuck_timer = 0.0; _search_last_progress_position = global_position
 	_generate_search_waypoints()
 	var msg := "SEARCHING started: center=%s, radius=%.0f, waypoints=%d" % [_search_center, _search_radius, _search_waypoints.size()]
 	_log_debug(msg); _log_to_file(msg)
