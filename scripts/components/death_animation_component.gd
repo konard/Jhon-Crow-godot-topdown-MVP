@@ -333,52 +333,54 @@ func _activate_ragdoll() -> void:
 				ragdoll_activation_point * 100.0
 			))
 
-  # Get scale from character model for proper sizing
-  var model_scale := 1.0
-  if _character_model:
-    model_scale = _character_model.scale.x
+	# Get scale from character model for proper sizing
+	var model_scale := 1.0
+	if _character_model:
+		model_scale = _character_model.scale.x
 
-  # Hide original sprites during ragdoll phase
-  if _body_sprite:
-    _body_sprite.visible = false
-  if _head_sprite:
-    _head_sprite.visible = false
-  if _left_arm_sprite:
-    _left_arm_sprite.visible = false
-  if _right_arm_sprite:
-    _right_arm_sprite.visible = false
+	# Hide original sprites during ragdoll phase
+	if _body_sprite:
+		_body_sprite.visible = false
+	if _head_sprite:
+		_head_sprite.visible = false
+	if _left_arm_sprite:
+		_left_arm_sprite.visible = false
+	if _right_arm_sprite:
+		_right_arm_sprite.visible = false
 
-  # Create ragdoll bodies for each sprite
-  var body_rb: RigidBody2D = null
-  var head_rb: RigidBody2D = null
-  var left_arm_rb: RigidBody2D = null
-  var right_arm_rb: RigidBody2D = null
+	# Create ragdoll bodies for each sprite
+	var body_rb: RigidBody2D = null
+	var head_rb: RigidBody2D = null
+	var left_arm_rb: RigidBody2D = null
+	var right_arm_rb: RigidBody2D = null
 
-  if _body_sprite:
-    body_rb = _create_ragdoll_body(_body_sprite, 1.5, 12.0 * model_scale)  # Body is heavier and larger
+	if _body_sprite:
+		body_rb = _create_ragdoll_body(_body_sprite, 1.5, 12.0 * model_scale)  # Body is heavier and larger
 
-  if _head_sprite:
-    head_rb = _create_ragdoll_body(_head_sprite, 0.5, 8.0 * model_scale)
+	if _head_sprite:
+		head_rb = _create_ragdoll_body(_head_sprite, 0.5, 8.0 * model_scale)
 
-  if _left_arm_sprite:
-    left_arm_rb = _create_ragdoll_body(_left_arm_sprite, 0.3, 6.0 * model_scale)
+	if _left_arm_sprite:
+		left_arm_rb = _create_ragdoll_body(_left_arm_sprite, 0.3, 6.0 * model_scale)
 
-  if _right_arm_sprite:
-    right_arm_rb = _create_ragdoll_body(_right_arm_sprite, 0.3, 6.0 * model_scale)
+	if _right_arm_sprite:
+		right_arm_rb = _create_ragdoll_body(_right_arm_sprite, 0.3, 6.0 * model_scale)
 
-  # Create joints connecting body parts
-  # Head to body
-  if body_rb and head_rb:
-    var joint := _create_ragdoll_joint(body_rb, head_rb, Vector2(-6, -2) * model_scale)  # Head offset
+	# Create joints connecting body parts
+	# Head to body
+	if body_rb and head_rb:
+		var head_joint := _create_ragdoll_joint(body_rb, head_rb, Vector2(-6, -2) * model_scale)
+		_ragdoll_joints.append(head_joint)
 
-  # Left arm to body
-  if body_rb and left_arm_rb:
-    var joint := _create_ragdoll_joint(body_rb, left_arm_rb, Vector2(0, 6) * model_scale)  # Shoulder position
+	# Left arm to body
+	if body_rb and left_arm_rb:
+		var left_arm_joint := _create_ragdoll_joint(body_rb, left_arm_rb, Vector2(0, 6) * model_scale)
+		_ragdoll_joints.append(left_arm_joint)
 
-  # Right arm to body
-  if body_rb and right_arm_rb:
-    var joint := _create_ragdoll_joint(body_rb, right_arm_rb, Vector2(-8, 6) * model_scale)  # Shoulder position
-		_ragdoll_joints.append(joint)
+	# Right arm to body
+	if body_rb and right_arm_rb:
+		var right_arm_joint := _create_ragdoll_joint(body_rb, right_arm_rb, Vector2(-8, 6) * model_scale)
+		_ragdoll_joints.append(right_arm_joint)
 
 	# Apply impulse based on hit direction
 	if body_rb:

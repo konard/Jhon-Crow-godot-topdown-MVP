@@ -234,11 +234,14 @@ func _add_test_enemies() -> void:
 		push_error("Failed to load enemy scene for test enemies")
 		return
 
-	# Add two test enemies: one for real-time testing, one for slow-motion
+	# Define test positions and animation speeds
+	# Index 0: Real-time fall (animation_speed = 1.0)
+	# Index 1: Slow-motion fall (animation_speed = 0.1)
 	var test_positions = [
 		Vector2(500, 500),  # Real-time test enemy
 		Vector2(600, 500)   # Slow-motion test enemy
 	]
+	var animation_speeds = [1.0, 0.1]
 
 	for i in range(test_positions.size()):
 		var test_enemy = enemy_scene.instantiate()
@@ -248,15 +251,13 @@ func _add_test_enemies() -> void:
 		test_enemy.disable_shooting = true  # Don't shoot
 		test_enemy.destroy_on_death = false  # Don't destroy, keep body for testing
 
-		# Set different animation speeds for testing
-		if i == 0:
-			# Real-time fall
-			test_enemy.get_node("DeathAnimation").animation_speed = 1.0
-		elif i == 1:
-			# Slow-motion fall
-			test_enemy.get_node("DeathAnimation").animation_speed = 0.1
-
+		# Add to scene tree first (this triggers _ready() which creates DeathAnimation)
 		enemies_node.add_child(test_enemy)
+
+		# Now set animation speed (DeathAnimation exists after _ready())
+		var death_anim = test_enemy.get_node_or_null("DeathAnimation")
+		if death_anim:
+			death_anim.animation_speed = animation_speeds[i]
 
 		# Connect signals
 		if test_enemy.has_signal("died"):
