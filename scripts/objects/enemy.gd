@@ -174,7 +174,14 @@ enum BehaviorMode {
 @export var grenade_max_throw_distance: float = 600.0
 
 ## Minimum throw distance for grenades (pixels) - prevents point-blank throws.
-@export var grenade_min_throw_distance: float = 150.0
+## Updated to 275.0 to account for frag grenade blast radius (225) + safety margin (50).
+## Per issue #375: Enemy should not throw grenades that would damage itself.
+@export var grenade_min_throw_distance: float = 275.0
+
+## Safety margin to add to blast radius for safe grenade throws (pixels).
+## Enemy must be at least (blast_radius + safety_margin) from target to throw safely.
+## Per issue #375: Prevents enemy from being caught in own grenade blast.
+@export var grenade_safety_margin: float = 50.0
 
 ## Inaccuracy spread when throwing grenades (radians).
 @export var grenade_inaccuracy: float = 0.15
@@ -4801,6 +4808,29 @@ func _get_grenade_target_position() -> Vector2:
 	# No valid target
 	return Vector2.ZERO
 
+## Get the blast radius of the current grenade type.
+## Returns the effect radius from the grenade scene, or a default value.
+## Per issue #375: Used to calculate safe throw distance.
+func _get_grenade_blast_radius() -> float:
+	if grenade_scene == null:
+		return 225.0  # Default frag grenade radius
+
+	# Try to instantiate grenade temporarily to query its radius
+	var temp_grenade = grenade_scene.instantiate()
+	if temp_grenade == null:
+		return 225.0  # Fallback
+
+	var radius := 225.0  # Default
+
+	# Check if grenade has effect_radius property
+	if temp_grenade.get("effect_radius") != null:
+		radius = temp_grenade.effect_radius
+
+	# Clean up temporary instance
+	temp_grenade.queue_free()
+
+	return radius
+
 ## Check if the enemy can throw a grenade right now.
 func _can_throw_grenade() -> bool:
 	# Basic checks
@@ -4836,6 +4866,18 @@ func try_throw_grenade() -> bool:
 
 	# Check distance constraints
 	var distance := global_position.distance_to(target_position)
+
+	# Calculate minimum safe distance based on grenade blast radius (Issue #375)
+	var blast_radius := _get_grenade_blast_radius()
+	var min_safe_distance := blast_radius + grenade_safety_margin
+
+	# Ensure enemy won't be caught in own grenade blast
+	if distance < min_safe_distance:
+		_log_grenade("Unsafe throw distance (%.0f < %.0f safe distance, blast=%.0f, margin=%.0f) - skipping throw" %
+			[distance, min_safe_distance, blast_radius, grenade_safety_margin])
+		return false
+
+	# Legacy minimum distance check (should be covered by above, but kept for compatibility)
 	if distance < grenade_min_throw_distance:
 		_log_grenade("Target too close (%.0f < %.0f) - skipping throw" % [distance, grenade_min_throw_distance])
 		return false
