@@ -840,3 +840,162 @@ Key points:
 4. **Use duck typing** for cross-script references when possible
 
 ---
+
+## Session 5: Direct Autoload Reference Bug (2026-01-25)
+
+### User Report
+
+User Jhon-Crow reported enemies still broken:
+> "всё ещё сломаны" (Translation: "still broken")
+
+Attached log: `game_log_20260125_104959.txt`
+
+### Log Analysis
+
+The log shows the SAME failure pattern:
+```
+[10:49:59] [INFO] [BuildingLevel] Child 'Enemy1': script=true, has_died_signal=false
+[10:49:59] [INFO] [BuildingLevel] Child 'Enemy2': script=true, has_died_signal=false
+...
+[10:49:59] [INFO] [BuildingLevel] Enemy tracking complete: 0 enemies registered
+```
+
+And 2 seconds later:
+```
+[10:50:01] [INFO] [BloodyFeet:Enemy1] Overlap check: ... in_tree=false
+```
+
+### Investigation
+
+Compared the code between the last working commit (858a4174) and current HEAD:
+
+1. **Last working commit used safe autoload access:**
+   ```gdscript
+   var difficulty_manager: Node = get_node_or_null("/root/DifficultyManager")
+   if difficulty_manager and difficulty_manager.has_method("get_detection_delay"):
+       return difficulty_manager.get_detection_delay()
+   ```
+
+2. **Current code used DIRECT autoload name references:**
+   ```gdscript
+   if DifficultyManager.are_enemy_grenades_enabled(map_name):
+       _grenades_remaining = DifficultyManager.get_enemy_grenade_count(map_name)
+   var scene_path := DifficultyManager.get_enemy_grenade_scene_path(map_name)
+   ```
+
+### Root Cause: Direct Autoload Name References
+
+Direct autoload name references like `DifficultyManager.method()` work perfectly in the Godot editor but can cause script parsing failures in export builds.
+
+**Why this happens:**
+1. In the editor, Godot pre-loads all autoloads before scripts are parsed
+2. In export builds, the loading order is undefined
+3. If `enemy.gd` is parsed BEFORE `DifficultyManager` is loaded, the reference fails
+4. GDScript parser fails silently - the script appears "loaded" but has no functions/signals
+5. Result: `script=true, has_died_signal=false`
+
+**How the bug was introduced:**
+- When merging `origin/main` into the PR branch (commit 0db36fb), new code from main introduced direct `DifficultyManager.` references
+- The main branch had this bug, and it was imported into our PR
+
+### Additional Issues Found
+
+1. **Direct `AudioManager.` reference** at line 1228:
+   ```gdscript
+   AudioManager.play_reload_full(global_position)
+   ```
+
+2. **Typed `EnemyMemory` parameter** at line 3550:
+   ```gdscript
+   func receive_intel_from_ally(ally_memory: EnemyMemory) -> void:
+   ```
+
+3. **Class instantiation using `class_name`** at lines 892 and 4149:
+   ```gdscript
+   _memory = EnemyMemory.new()
+   _death_animation = DeathAnimationComponent.new()
+   ```
+
+### Solutions Applied
+
+#### 1. Fixed DifficultyManager References
+**Before:**
+```gdscript
+if DifficultyManager.are_enemy_grenades_enabled(map_name):
+    _grenades_remaining = DifficultyManager.get_enemy_grenade_count(map_name)
+var scene_path := DifficultyManager.get_enemy_grenade_scene_path(map_name)
+```
+
+**After:**
+```gdscript
+var difficulty_mgr: Node = get_node_or_null("/root/DifficultyManager")
+if difficulty_mgr and difficulty_mgr.are_enemy_grenades_enabled(map_name):
+    _grenades_remaining = difficulty_mgr.get_enemy_grenade_count(map_name)
+var scene_path := ""
+if difficulty_mgr:
+    scene_path = difficulty_mgr.get_enemy_grenade_scene_path(map_name)
+```
+
+#### 2. Fixed AudioManager Reference
+**Before:**
+```gdscript
+AudioManager.play_reload_full(global_position)
+```
+
+**After:**
+```gdscript
+var audio_mgr: Node = get_node_or_null("/root/AudioManager")
+if audio_mgr and audio_mgr.has_method("play_reload_full"):
+    audio_mgr.play_reload_full(global_position)
+```
+
+#### 3. Fixed Typed EnemyMemory Parameter
+**Before:**
+```gdscript
+func receive_intel_from_ally(ally_memory: EnemyMemory) -> void:
+```
+
+**After:**
+```gdscript
+func receive_intel_from_ally(ally_memory) -> void:
+```
+
+#### 4. Used preload() for Class Instantiation
+**Before:**
+```gdscript
+_memory = EnemyMemory.new()
+_death_animation = DeathAnimationComponent.new()
+```
+
+**After:**
+```gdscript
+const EnemyMemoryScript := preload("res://scripts/ai/enemy_memory.gd")
+_memory = EnemyMemoryScript.new()
+
+const DeathAnimationScript := preload("res://scripts/components/death_animation_component.gd")
+_death_animation = DeathAnimationScript.new()
+```
+
+### Safe Patterns for Export Builds
+
+| Pattern | Risk Level | Safe Alternative |
+|---------|------------|------------------|
+| `AutoloadName.method()` | HIGH | `get_node_or_null("/root/AutoloadName")` |
+| `var x: ClassName = null` | HIGH | `var x = null` (duck typed) |
+| `func f(p: ClassName)` | HIGH | `func f(p)` (duck typed) |
+| `ClassName.new()` | MEDIUM | `preload("path").new()` |
+| Child node with class_name | LOW | Generally safe in scene files |
+
+### Log File Added
+
+- `logs/game_log_20260125_104959.txt`
+
+### Key Takeaways
+
+1. **Never use direct autoload name references** in exported builds
+2. **Always use `get_node_or_null("/root/AutoloadName")`** for safe autoload access
+3. **Merges from main can introduce export-breaking bugs** - always verify export builds
+4. **The Godot editor hides these issues** because it pre-loads autoloads differently
+5. **Multiple patterns can cause the same symptom** - systematic review of all class_name and autoload usage is needed
+
+---

@@ -649,9 +649,8 @@ const GRENADE_DESPERATION_HEALTH_THRESHOLD: int = 1  ## HP threshold (Trigger 6)
 var _last_hit_direction: Vector2 = Vector2.RIGHT
 
 ## Death animation component reference.
-var _death_animation: Node = null
-
-## Note: DeathAnimationComponent is available via class_name declaration.
+## Note: Duck typed (no type annotation) to avoid export build script loading issues.
+var _death_animation = null
 
 func _ready() -> void:
 	# Add to enemies group for grenade targeting
@@ -888,8 +887,10 @@ func _initialize_goap_state() -> void:
 	}
 
 ## Initialize the enemy memory system (Issue #297).
+## Note: Use preload instead of class_name reference to avoid export build script loading issues.
+const EnemyMemoryScript := preload("res://scripts/ai/enemy_memory.gd")
 func _initialize_memory() -> void:
-	_memory = EnemyMemory.new()
+	_memory = EnemyMemoryScript.new()
 
 ## Connect to GameManager's debug mode signal for F7 toggle.
 func _connect_debug_mode_signal() -> void:
@@ -1224,8 +1225,10 @@ func _finish_reload() -> void:
 	_reserve_ammo -= ammo_to_load
 	_current_ammo += ammo_to_load
 
-	# Play reload complete sound
-	AudioManager.play_reload_full(global_position)
+	# Play reload complete sound (use get_node_or_null for safe autoload access)
+	var audio_mgr: Node = get_node_or_null("/root/AudioManager")
+	if audio_mgr and audio_mgr.has_method("play_reload_full"):
+		audio_mgr.play_reload_full(global_position)
 
 	reload_finished.emit()
 	ammo_changed.emit(_current_ammo, _reserve_ammo)
@@ -3545,7 +3548,8 @@ func _share_intel_with_nearby_enemies() -> void:
 			other.receive_intel_from_ally(_memory)
 
 ## Receive intelligence from an allied enemy (Issue #297).
-func receive_intel_from_ally(ally_memory: EnemyMemory) -> void:
+## Note: Duck typed parameter to avoid export build script loading issues with class_name references.
+func receive_intel_from_ally(ally_memory) -> void:
 	if _memory == null or ally_memory == null: return
 	if _memory.receive_intel(ally_memory, INTEL_SHARE_FACTOR):
 		_log_debug("Received intel from ally: pos=%s, conf=%.2f" % [_memory.suspected_position, _memory.confidence])
@@ -4139,9 +4143,11 @@ func is_alive() -> bool:
 	return _is_alive
 
 ## Initialize the death animation component.
+## Note: Use preload instead of class_name reference to avoid export build script loading issues.
+const DeathAnimationScript := preload("res://scripts/components/death_animation_component.gd")
 func _init_death_animation() -> void:
 	# Create death animation component as a child node
-	_death_animation = DeathAnimationComponent.new()
+	_death_animation = DeathAnimationScript.new()
 	_death_animation.name = "DeathAnimation"
 	add_child(_death_animation)
 
@@ -4520,29 +4526,39 @@ func _initialize_grenade_system() -> void:
 	_fire_zone_valid = false
 
 	# Determine grenade count: use export value if set, otherwise query DifficultyManager
+	# Note: Use get_node_or_null to avoid export build script loading failures.
+	# Direct autoload name references (DifficultyManager.method()) can cause parsing
+	# errors when autoload loading order is undefined in export builds.
+	var difficulty_mgr: Node = get_node_or_null("/root/DifficultyManager")
 	if grenade_count > 0:
 		# Use explicitly set grenade count from export
 		_grenades_remaining = grenade_count
 		_log_grenade("Using export grenade_count: %d" % grenade_count)
-	else:
+	elif difficulty_mgr:
 		# Query DifficultyManager for map-based grenade assignment
 		var map_name := _get_current_map_name()
-		if DifficultyManager.are_enemy_grenades_enabled(map_name):
-			_grenades_remaining = DifficultyManager.get_enemy_grenade_count(map_name)
+		if difficulty_mgr.are_enemy_grenades_enabled(map_name):
+			_grenades_remaining = difficulty_mgr.get_enemy_grenade_count(map_name)
 			if _grenades_remaining > 0:
 				_log_grenade("DifficultyManager assigned %d grenades (map: %s)" % [_grenades_remaining, map_name])
 		else:
 			_grenades_remaining = 0
+	else:
+		_grenades_remaining = 0
 
 	# Load grenade scene if needed
 	if grenade_scene == null and _grenades_remaining > 0:
 		var map_name := _get_current_map_name()
-		var scene_path := DifficultyManager.get_enemy_grenade_scene_path(map_name)
-		grenade_scene = load(scene_path)
+		var scene_path := ""
+		if difficulty_mgr:
+			scene_path = difficulty_mgr.get_enemy_grenade_scene_path(map_name)
+		if scene_path != "" and scene_path != null:
+			grenade_scene = load(scene_path)
 		if grenade_scene == null:
 			# Fallback to default frag grenade
 			grenade_scene = preload("res://scenes/projectiles/FragGrenade.tscn")
-			push_warning("[Enemy] Failed to load grenade scene: %s, using default" % scene_path)
+			if scene_path != "":
+				push_warning("[Enemy] Failed to load grenade scene: %s, using default" % scene_path)
 
 	if _grenades_remaining > 0:
 		_log_grenade("Grenade system initialized: %d grenades" % _grenades_remaining)
