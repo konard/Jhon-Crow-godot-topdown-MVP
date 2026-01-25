@@ -352,8 +352,99 @@ After implementation:
 - Issue #332: FOV visualization and corner checking
 - Issue #66: Field of view angle implementation
 
+## Follow-up: Corner Check Rotation Issue (2026-01-25)
+
+### Problem Report
+
+After the initial fix was implemented, the user reported that "enemies still turn jerkily when there's no direct contact with the player." A game log was provided: `game_log_20260125_030937.txt`.
+
+### Log Analysis
+
+Examining the log revealed patterns of sudden angle changes:
+
+```
+[03:09:52] [ENEMY] [Enemy1] PURSUING corner check: angle -129.2°
+[03:09:53] [ENEMY] [Enemy1] PURSUING corner check: angle -92.7°     # ~36° jump
+[03:09:53] [ENEMY] [Enemy1] PURSUING corner check: angle 122.7°    # ~215° INSTANT JUMP!
+[03:09:55] [ENEMY] [Enemy1] PURSUING corner check: angle -168.3°
+[03:09:55] [ENEMY] [Enemy1] PURSUING corner check: angle 11.7°     # ~180° INSTANT JUMP!
+```
+
+These large angle jumps indicated the problem was specifically with **corner checking**, not the main rotation system.
+
+### Root Cause Identified
+
+The corner checking system (Issue #332) uses `_force_model_to_face_direction()` which bypasses smooth rotation:
+
+**File:** `scripts/objects/enemy.gd`
+- `_detect_perpendicular_opening()` (line ~4098): Calls `_force_model_to_face_direction(perp_dir)` - INSTANT
+- `_process_corner_check()` (line ~4106): Calls `_force_model_to_face_direction(Vector2.from_angle(_corner_check_angle))` - INSTANT
+
+The initial fix made `_update_enemy_model_rotation()` smooth, but corner checking used a separate code path (`_force_model_to_face_direction()`) that still rotated instantly.
+
+### Timeline of Events
+
+1. **Initial Issue #347:** Enemies rotate instantly when changing direction
+2. **First Fix (0ec1f01):** Made `_update_enemy_model_rotation()` always use smooth rotation
+3. **Line Count Fix (857fd3b):** Reduced enemy.gd from 5005 to 4999 lines
+4. **User Report (2026-01-25):** Jerky rotation still observed during corner checks
+5. **Root Cause Analysis:** Corner check system bypassed smooth rotation
+6. **Second Fix:** Integrated corner check into `_update_enemy_model_rotation()` priority system
+
+### Solution Implementation
+
+**Changes to `_update_enemy_model_rotation()`:**
+- Added corner check angle as priority 2 (after player visibility, before velocity)
+- When `_corner_check_timer > 0`, uses `_corner_check_angle` as target
+
+**Changes to corner check functions:**
+- Removed `_force_model_to_face_direction()` calls
+- Corner angle is now stored and the smooth rotation system handles the interpolation
+
+**Priority Order for Rotation Targets:**
+1. Player (when visible) - highest priority
+2. Corner check angle (when actively checking) - **NEW**
+3. Movement velocity direction
+4. Idle scan targets (for IDLE state)
+
+### Code Changes Summary
+
+```diff
+ func _update_enemy_model_rotation() -> void:
+     # ... existing code ...
+     if _player != null and _can_see_player:
+         target_angle = (player_pos - global_position).normalized().angle()
+         has_target = true
++    elif _corner_check_timer > 0:
++        target_angle = _corner_check_angle
++        has_target = true
+     elif velocity.length_squared() > 1.0:
+         target_angle = velocity.normalized().angle()
+
+ func _detect_perpendicular_opening(move_dir: Vector2) -> bool:
+     # ... raycast logic ...
+     if space_state.intersect_ray(query).is_empty():
+         _corner_check_angle = perp_dir.angle()
+-        _force_model_to_face_direction(perp_dir)  # REMOVED
+         return true
+
+ func _process_corner_check(delta: float, move_dir: Vector2, state_name: String) -> void:
+     if _corner_check_timer > 0:
+         _corner_check_timer -= delta
+-        _force_model_to_face_direction(Vector2.from_angle(_corner_check_angle))  # REMOVED
+```
+
+### Lessons Learned
+
+1. **Test all rotation paths:** Multiple code paths can affect rotation; need to test all scenarios
+2. **Log analysis is valuable:** The corner check log messages helped identify the exact source
+3. **Priority-based systems:** Centralized rotation with priority ordering is cleaner than multiple force functions
+4. **Preserve `_force_model_to_face_direction()` for priority attacks:** Still needed for instant aiming before shooting
+
 ## Conclusion
 
 The issue is well-understood and has a straightforward solution. The codebase already contains the necessary smooth rotation logic in `_update_enemy_model_rotation()`, but it's currently only applied during idle scanning. By removing the conditional and applying smooth rotation in all scenarios, we can achieve the desired smooth rotation effect while maintaining game logic accuracy.
 
 The recommended approach (Solution 1/4 Hybrid) provides the best balance of visual quality, code simplicity, and gameplay responsiveness.
+
+**Update (2026-01-25):** Corner checking was identified as a secondary source of instant rotation. The fix integrates corner check rotation into the smooth rotation system by adding it as a priority target in `_update_enemy_model_rotation()`.
