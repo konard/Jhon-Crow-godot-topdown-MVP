@@ -426,7 +426,7 @@ var _in_assault: bool = false
 var _search_center: Vector2 = Vector2.ZERO  ## Center position for search pattern
 var _search_radius: float = 100.0  ## Current search radius (expands over time)
 const SEARCH_INITIAL_RADIUS: float = 100.0  ## Initial radius when search begins
-const SEARCH_RADIUS_EXPANSION: float = 75.0  ## Expand by this when all waypoints visited
+const SEARCH_RADIUS_EXPANSION: float = 100.0  ## Expand by this when all waypoints visited (Issue #369: increased from 75)
 const SEARCH_MAX_RADIUS: float = 400.0  ## Max radius before giving up
 var _search_waypoints: Array[Vector2] = []  ## Waypoints to visit during search
 var _search_current_waypoint_index: int = 0  ## Current waypoint index
@@ -451,6 +451,15 @@ const SEARCH_PROGRESS_THRESHOLD: float = 10.0  ## Min distance counting as progr
 
 ## Issue #330: Once enemy leaves IDLE, never returns - searches until finding player.
 var _has_left_idle: bool = false
+
+## Issue #369: Player position prediction for search state.
+## Each enemy makes their own prediction based on time elapsed and nearby covers.
+const PLAYER_SPEED_ESTIMATE: float = 300.0  ## Estimated player max speed (pixels/sec).
+const PREDICTION_COVER_WEIGHT: float = 0.5  ## Weight for cover positions in prediction.
+const PREDICTION_FLANK_WEIGHT: float = 0.3  ## Weight for flank positions in prediction.
+const PREDICTION_RANDOM_WEIGHT: float = 0.2  ## Weight for random offset in prediction.
+const PREDICTION_MIN_PROBABILITY: float = 0.3  ## Minimum probability to use prediction (0.0-1.0).
+const PREDICTION_CHECK_DISTANCE: float = 500.0  ## Max distance to check for covers/flanks.
 
 ## Distance threshold for "close" vs "far" from player.
 ## Used to determine if enemy can engage from current position or needs to pursue.
@@ -2699,19 +2708,152 @@ func _transition_to_assault() -> void:
 	_find_cover_closest_to_player()
 
 ## Transition to SEARCHING state - methodical search around last known player position (Issue #322).
+## Issue #369: Now uses player position prediction based on time elapsed and nearby covers.
 func _transition_to_searching(center_position: Vector2) -> void:
 	_current_state = AIState.SEARCHING
 	# Mark that enemy has left IDLE state (Issue #330)
 	_has_left_idle = true
-	_search_center = center_position; _search_radius = SEARCH_INITIAL_RADIUS
+
+	# Issue #369: Try to predict player position instead of using raw last known position
+	var predicted_center := _predict_player_position(center_position)
+	_search_center = predicted_center
+	_search_radius = SEARCH_INITIAL_RADIUS
 	_search_state_timer = 0.0; _search_scan_timer = 0.0; _search_current_waypoint_index = 0
 	_search_direction = 0; _search_leg_length = SEARCH_WAYPOINT_SPACING; _search_legs_completed = 0
 	_search_moving_to_waypoint = true; _search_visited_zones.clear()
 	# Issue #354: Initialize stuck detection
 	_search_stuck_timer = 0.0; _search_last_progress_position = global_position
 	_generate_search_waypoints()
-	var msg := "SEARCHING started: center=%s, radius=%.0f, waypoints=%d" % [_search_center, _search_radius, _search_waypoints.size()]
+	var used_prediction := predicted_center != center_position
+	var msg := "SEARCHING started: center=%s, radius=%.0f, waypoints=%d%s" % [
+		_search_center, _search_radius, _search_waypoints.size(),
+		" (predicted from %s)" % center_position if used_prediction else ""
+	]
 	_log_debug(msg); _log_to_file(msg)
+
+## Issue #369: Predict where player might have moved based on time elapsed and environment.
+## Each enemy generates their own prediction with randomness for individual behavior.
+func _predict_player_position(last_known_pos: Vector2) -> Vector2:
+	# Check if we should use prediction (based on probability threshold)
+	if randf() > PREDICTION_MIN_PROBABILITY:
+		return last_known_pos  # Skip prediction sometimes for variety
+
+	# Get time since we last saw the player
+	var time_elapsed := 0.0
+	if _memory != null:
+		time_elapsed = _memory.get_time_since_update()
+
+	# If we just saw the player, use their last known position
+	if time_elapsed < 0.5:
+		return last_known_pos
+
+	# Calculate maximum distance player could have traveled
+	var max_distance := PLAYER_SPEED_ESTIMATE * time_elapsed
+	max_distance = minf(max_distance, PREDICTION_CHECK_DISTANCE)  # Cap at check distance
+
+	# Collect prediction candidates with weights
+	var candidates: Array[Dictionary] = []
+	var total_weight := 0.0
+
+	# 1. Find nearby cover positions (player likely moved to cover)
+	var covers := _find_prediction_covers(last_known_pos, max_distance)
+	for cover_pos in covers:
+		var weight := PREDICTION_COVER_WEIGHT + randf() * 0.1  # Add slight randomness
+		candidates.append({"pos": cover_pos, "weight": weight, "type": "cover"})
+		total_weight += weight
+
+	# 2. Add flank positions relative to this enemy (player might flank)
+	var flanks := _get_prediction_flanks(last_known_pos, max_distance)
+	for flank_pos in flanks:
+		var weight := PREDICTION_FLANK_WEIGHT + randf() * 0.1
+		candidates.append({"pos": flank_pos, "weight": weight, "type": "flank"})
+		total_weight += weight
+
+	# 3. Add random offset from last known position (unpredictable movement)
+	var random_angle := randf() * TAU
+	var random_distance := randf() * max_distance * 0.5  # Up to half max distance
+	var random_pos := last_known_pos + Vector2.from_angle(random_angle) * random_distance
+	if _is_waypoint_navigable(random_pos):
+		var weight := PREDICTION_RANDOM_WEIGHT
+		candidates.append({"pos": random_pos, "weight": weight, "type": "random"})
+		total_weight += weight
+
+	# 4. Add last known position as fallback
+	candidates.append({"pos": last_known_pos, "weight": 0.1, "type": "last_known"})
+	total_weight += 0.1
+
+	# If no good candidates, use last known position
+	if candidates.is_empty():
+		return last_known_pos
+
+	# Weighted random selection - each enemy gets different result due to randf()
+	var roll := randf() * total_weight
+	var cumulative := 0.0
+	for candidate in candidates:
+		cumulative += candidate.weight
+		if roll <= cumulative:
+			_log_to_file("Prediction selected: %s at %s (time_elapsed=%.1fs, max_dist=%.0f)" % [
+				candidate.type, candidate.pos, time_elapsed, max_distance
+			])
+			return candidate.pos
+
+	# Fallback to last known
+	return last_known_pos
+
+## Issue #369: Find cover positions near a point for prediction.
+func _find_prediction_covers(center: Vector2, max_distance: float) -> Array[Vector2]:
+	var covers: Array[Vector2] = []
+	var nav_map := get_world_2d().navigation_map
+
+	# Use cover raycasts to find nearby obstacles that could provide cover
+	for i in range(COVER_CHECK_COUNT):
+		var angle := (float(i) / COVER_CHECK_COUNT) * TAU
+		var direction := Vector2.from_angle(angle)
+
+		var raycast := _cover_raycasts[i]
+		raycast.global_position = center  # Temporarily move raycast to center
+		raycast.target_position = direction * minf(max_distance, COVER_CHECK_DISTANCE)
+		raycast.force_raycast_update()
+
+		if raycast.is_colliding():
+			var collision_point := raycast.get_collision_point()
+			var collision_normal := raycast.get_collision_normal()
+			var cover_pos := collision_point + collision_normal * 35.0
+
+			# Check if cover is within reachable distance and navigable
+			if center.distance_to(cover_pos) <= max_distance:
+				var closest := NavigationServer2D.map_get_closest_point(nav_map, cover_pos)
+				if cover_pos.distance_to(closest) < 50.0:
+					covers.append(cover_pos)
+
+		# Reset raycast position
+		raycast.global_position = global_position
+
+	return covers
+
+## Issue #369: Calculate flank positions for prediction.
+func _get_prediction_flanks(center: Vector2, max_distance: float) -> Array[Vector2]:
+	var flanks: Array[Vector2] = []
+	var my_pos := global_position
+
+	# Calculate direction from enemy to center
+	var to_center := (center - my_pos).normalized()
+
+	# Left and right flank positions (perpendicular to line of sight)
+	var left_dir := to_center.rotated(-PI / 2)
+	var right_dir := to_center.rotated(PI / 2)
+
+	var flank_distance := minf(max_distance * 0.7, 200.0)  # Reasonable flank distance
+	var left_flank := center + left_dir * flank_distance
+	var right_flank := center + right_dir * flank_distance
+
+	# Check if flanks are navigable
+	if _is_waypoint_navigable(left_flank):
+		flanks.append(left_flank)
+	if _is_waypoint_navigable(right_flank):
+		flanks.append(right_flank)
+
+	return flanks
 
 ## Transition to RETREATING state with appropriate retreat mode.
 func _transition_to_retreating() -> void:

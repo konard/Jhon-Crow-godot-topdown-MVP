@@ -358,19 +358,167 @@ Based on the current codebase architecture and the specific request in Issue #36
 
 ### Relevant Constants (enemy.gd):
 ```gdscript
+# Search behavior constants
 const SEARCH_INITIAL_RADIUS: float = 100.0
-const SEARCH_RADIUS_EXPANSION: float = 75.0
+const SEARCH_RADIUS_EXPANSION: float = 100.0  # Issue #369: increased from 75.0
 const SEARCH_MAX_RADIUS: float = 400.0
 const SEARCH_SCAN_DURATION: float = 1.0
 const SEARCH_MAX_DURATION: float = 30.0
 const SEARCH_WAYPOINT_SPACING: float = 75.0
 const SEARCH_ZONE_SNAP_SIZE: float = 50.0
+
+# Issue #369: Prediction constants
+const PLAYER_SPEED_ESTIMATE: float = 300.0
+const PREDICTION_COVER_WEIGHT: float = 0.5
+const PREDICTION_FLANK_WEIGHT: float = 0.3
+const PREDICTION_RANDOM_WEIGHT: float = 0.2
+const PREDICTION_MIN_PROBABILITY: float = 0.3
+const PREDICTION_CHECK_DISTANCE: float = 500.0
 ```
 
 ### Related Signals:
 ```gdscript
 signal state_changed(new_state: AIState)
 ```
+
+## Game Log Analysis
+
+### Log File: `game_log_20260125_083304.txt`
+
+A detailed game log was captured during testing on 2026-01-25 08:33:04. The log contains ~7774 lines of enemy AI behavior data.
+
+#### Key Observations from Log Analysis:
+
+1. **Search Expansion Timing Analysis:**
+   - Search starts at radius=100, expands to 175, 250, 325, 400
+   - Original expansion increment: 75 pixels
+   - Time between expansions: approximately 7-8 seconds
+   - This was identified as too slow by the user
+
+2. **Multiple Enemies Search Same Area:**
+   ```
+   [08:33:22] Enemy1 SEARCHING started: center=(607.6915, 643.8395)
+   [08:33:22] Enemy2 SEARCHING started: center=(666.3936, 699.4895)
+   [08:33:22] Enemy3 SEARCHING started: center=(666.3936, 699.4895) <- Same as Enemy2!
+   [08:33:22] Enemy4 SEARCHING started: center=(522.1313, 723.0651)
+   ```
+   Enemy2 and Enemy3 started searching at the identical center position.
+
+3. **No Prediction Logs Found:**
+   - The log contained no prediction-related entries
+   - All search centers were based on raw last known positions
+
+4. **Timeline of Search Expansion Events:**
+   | Time | Enemy | Radius | Notes |
+   |------|-------|--------|-------|
+   | 08:33:22 | All | 100 | Initial search start |
+   | 08:33:30 | 2,3 | 175 | First expansion (~8s) |
+   | 08:33:31 | 1 | 175 | First expansion (~9s) |
+   | 08:33:32 | 4 | 175 | First expansion (~10s) |
+   | 08:33:38 | 1,2,3 | 250 | Second expansion |
+   | 08:33:45 | 4 | 250 | Second expansion |
+   | 08:33:49 | 2,3 | 325 | Third expansion |
+   | 08:33:54 | 1 | 325 | Third expansion |
+   | 08:33:59 | 4 | 325 | Third expansion |
+   | 08:34:03 | 2,3 | 400 | Max radius reached |
+
+#### Root Cause Analysis:
+
+1. **Slow Expansion Speed:** The `SEARCH_RADIUS_EXPANSION` constant was set to 75.0 pixels, causing slow area coverage.
+
+2. **No Individual Prediction:** The `_transition_to_searching()` function used the raw `center_position` parameter directly without any prediction logic.
+
+3. **Shared Search Centers:** When multiple enemies lost sight of the player at the same position, they all searched the same area.
+
+---
+
+## Implementation (PR #372)
+
+### Changes Made:
+
+#### 1. Increased Search Zone Expansion Speed
+
+**File:** `scripts/objects/enemy.gd`
+
+```gdscript
+# Before:
+const SEARCH_RADIUS_EXPANSION: float = 75.0
+
+# After:
+const SEARCH_RADIUS_EXPANSION: float = 100.0  # Issue #369: increased from 75
+```
+
+This change increases the expansion step from 75 to 100 pixels, resulting in:
+- Faster area coverage (approximately 33% faster)
+- Fewer expansion cycles needed to reach max radius
+
+#### 2. Added Player Position Prediction System
+
+**New Constants Added:**
+```gdscript
+## Issue #369: Player position prediction for search state.
+const PLAYER_SPEED_ESTIMATE: float = 300.0  ## Estimated player max speed (pixels/sec).
+const PREDICTION_COVER_WEIGHT: float = 0.5  ## Weight for cover positions in prediction.
+const PREDICTION_FLANK_WEIGHT: float = 0.3  ## Weight for flank positions in prediction.
+const PREDICTION_RANDOM_WEIGHT: float = 0.2  ## Weight for random offset in prediction.
+const PREDICTION_MIN_PROBABILITY: float = 0.3  ## Minimum probability to use prediction (0.0-1.0).
+const PREDICTION_CHECK_DISTANCE: float = 500.0  ## Max distance to check for covers/flanks.
+```
+
+**New Functions Added:**
+
+1. `_predict_player_position(last_known_pos: Vector2) -> Vector2`
+   - Calculates time elapsed since last seeing player
+   - Determines maximum distance player could have traveled
+   - Collects weighted prediction candidates (covers, flanks, random)
+   - Uses weighted random selection for individual predictions
+
+2. `_find_prediction_covers(center: Vector2, max_distance: float) -> Array[Vector2]`
+   - Uses existing cover raycast system
+   - Finds navigable cover positions within reachable distance
+
+3. `_get_prediction_flanks(center: Vector2, max_distance: float) -> Array[Vector2]`
+   - Calculates left/right flank positions relative to enemy
+   - Returns only navigable positions
+
+#### 3. Modified `_transition_to_searching()` Function
+
+The function now calls `_predict_player_position()` before setting the search center:
+
+```gdscript
+func _transition_to_searching(center_position: Vector2) -> void:
+    # Issue #369: Try to predict player position instead of using raw last known position
+    var predicted_center := _predict_player_position(center_position)
+    _search_center = predicted_center
+    # ... rest of initialization
+```
+
+### Prediction Algorithm Details:
+
+1. **30% chance to skip prediction** (`PREDICTION_MIN_PROBABILITY = 0.3`) - ensures variety
+2. **If player was seen < 0.5 seconds ago** - use last known position (still accurate)
+3. **Calculate max travel distance:** `PLAYER_SPEED_ESTIMATE * time_elapsed`
+4. **Weight candidates:**
+   - Cover positions: 50% weight (players tend to seek cover)
+   - Flank positions: 30% weight (relative to enemy, not shared)
+   - Random offset: 20% weight (unpredictable movement)
+   - Last known position: 10% weight (fallback)
+5. **Weighted random selection** - each enemy rolls differently
+
+### Expected Behavior After Changes:
+
+1. **Faster expansion:** Search radius expands 100px per cycle instead of 75px
+2. **Individual predictions:** Each enemy calculates their own predicted search center based on:
+   - Their relative position to the last known player location
+   - Nearby cover positions
+   - Random variance
+3. **Logged predictions:** New log entries show when prediction is used:
+   ```
+   Prediction selected: cover at (x, y) (time_elapsed=2.5s, max_dist=750.0)
+   SEARCHING started: center=(x, y), radius=100, waypoints=5 (predicted from (orig_x, orig_y))
+   ```
+
+---
 
 ## Conclusion
 
@@ -380,4 +528,10 @@ Issue #369 requests a significant improvement to the enemy AI search behavior. T
 2. Having each enemy make independent predictions
 3. Searching around predicted positions rather than just the last known position
 
-The recommended approach is to implement Solution 1 (Simple Position Prediction) as it balances implementation complexity with the desired behavior improvement. This can later be enhanced with the full hypothesis system (Solution 2) as described in Issue #298.
+**Implementation Status:** Solution 1 (Simple Position Prediction) has been implemented with the following key features:
+- Increased search expansion speed (75 → 100 pixels per expansion)
+- Individual prediction per enemy based on covers, flanks, and random variance
+- Logging for debugging prediction selections
+- 30% base probability to use prediction (configurable via `PREDICTION_MIN_PROBABILITY`)
+
+This can later be enhanced with the full hypothesis system (Solution 2) as described in Issue #298.
