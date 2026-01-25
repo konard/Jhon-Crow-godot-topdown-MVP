@@ -440,6 +440,77 @@ When the turn-away occurs, the logs should show exactly which code path triggere
 
 ---
 
+## Update: Sixth Fix Attempt (2026-01-25) - THE ROOT CAUSE FOUND
+
+### The Actual Root Cause
+
+After deep analysis including research on Godot forums and game dev resources, we identified the **actual root cause**: The sprite flip was happening based on **current rotation** instead of **target rotation**.
+
+#### How the Bug Manifested
+
+1. Enemy detects player, starts rotating toward them
+2. Rotation is SMOOTH (gradual, at `MODEL_ROTATION_SPEED` = 3.0 rad/s)
+3. When current rotation crosses the ±90° (PI/2) threshold...
+4. **INSTANT SPRITE FLIP** - the Y-scale changes from +1 to -1 or vice versa
+5. This instant flip during smooth rotation creates a visual "pop" or "jerk"
+6. Player perceives this as the enemy "turning away sharply"
+
+#### Why Previous Fixes Didn't Work
+
+All previous fixes addressed the **rotation target calculation**:
+- Fix 1: Skip FOV in combat (visibility)
+- Fix 2: Use `_get_target_position()` (rotation source)
+- Fix 3: Add player fallback when memory empty (rotation source)
+- Fix 4: Face player DIRECTLY in active combat (rotation source)
+
+But NONE of them addressed the **sprite flip timing**. The rotation target was correct, but the visual flip happened at the wrong moment.
+
+### The Fix
+
+Changed the sprite flip from being based on **current rotation** to **target rotation**:
+
+**Before (buggy):**
+```gdscript
+# Smooth rotation first
+_enemy_model.global_rotation = current_rot + MODEL_ROTATION_SPEED * delta
+
+# Then flip based on CURRENT rotation (after smooth interpolation)
+var aiming_left := absf(_enemy_model.global_rotation) > PI / 2
+_model_facing_left = aiming_left
+if aiming_left:
+    _enemy_model.scale = Vector2(enemy_model_scale, -enemy_model_scale)
+```
+
+**After (fixed):**
+```gdscript
+# Flip based on TARGET angle (where we're GOING, not where we ARE)
+var target_facing_left := absf(target_angle) > PI / 2
+if target_facing_left != _model_facing_left:
+    _model_facing_left = target_facing_left
+    if _model_facing_left:
+        _enemy_model.scale = Vector2(enemy_model_scale, -enemy_model_scale)
+    else:
+        _enemy_model.scale = Vector2(enemy_model_scale, enemy_model_scale)
+
+# Then smooth rotation
+_enemy_model.global_rotation = current_rot + MODEL_ROTATION_SPEED * delta
+```
+
+### Why This Works
+
+1. **Flip happens at the START**: When we decide to face the player, we immediately know which side they're on (target angle)
+2. **No mid-transition flip**: The sprite flip happens once when we start rotating, not during the smooth transition
+3. **Consistent visual**: Enemy smoothly rotates toward player without any visual "pop"
+
+### Technical Background
+
+This is a known issue in 2D game development with smooth rotation + sprite flip:
+- [Godot Issue #25759](https://github.com/godotengine/godot/issues/25759): Random flipping when rotated
+- [Godot Issue #12335](https://github.com/godotengine/godot/issues/12335): Flipping 2D characters with non-uniform scaling
+- Best practice: Flip based on **intent** (target), not **current state**
+
+---
+
 ## References
 
 - Issue #347: Smooth rotation for visual polish
@@ -447,4 +518,6 @@ When the turn-away occurs, the logs should show exactly which code path triggere
 - Issue #367: FLANKING/PURSUING wall-stuck detection
 - Related concepts: [Game AI awareness systems](https://www.gamedeveloper.com/design/the-ai-of-halo-2)
 - Common Godot issue: [180/-180 degree wrap-around in FOV calculations](https://godotforums.org/d/18193-enemy-not-rotating-properly-towards-the-player)
+- Sprite flip best practices: Flip based on target direction, not current rotation
+- [Godot GitHub Issues](https://github.com/godotengine/godot/issues) on scale/rotation interactions
 
