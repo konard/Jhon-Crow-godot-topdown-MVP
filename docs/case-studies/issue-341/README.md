@@ -1,4 +1,4 @@
-# Case Study: Issue #341 - Interactive Shell Casings with EXE Crash Investigation
+# Case Study: Issue #341 - Interactive Shell Casings
 
 ## Issue Summary
 
@@ -16,333 +16,328 @@
 
 ## Executive Summary
 
-This case study documents the development of an interactive shell casing feature and the critical investigation into why the exported EXE crashes immediately after the Godot splash screen. The investigation revealed **multiple potential root causes** related to both GDScript type checking patterns and C#/.NET export requirements.
+This case study documents the investigation into implementing interactive shell casings that can be kicked by players and enemies. **The previous implementation attempts using Area2D signals have failed**, and this document presents **alternative approaches** based on thorough research.
 
-### Key Findings
+### Problem Summary
 
-1. **GDScript Pattern Issues (Fixed):**
-   - `.has()` method called on Resource objects (crashes silently in exports)
-   - `is ClassName` type checks can cause parse errors in exported builds
-   - **Solution:** Use property-based checks (`"property" in object`)
+The previous implementation attempted to use:
+1. An Area2D "KickDetector" child node on casings to detect characters entering
+2. `body_entered` signal to trigger kick physics
+3. Direct impulse application from within the casing script
 
-2. **C#/.NET Export Requirements (Potential Cause):**
-   - Project uses hybrid C#/GDScript architecture
-   - Main scene uses C# Player (`res://scenes/characters/csharp/Player.tscn`)
-   - C# exports require .NET export templates, not standard GDScript templates
-   - Assembly name mismatch can cause immediate crash after splash screen
-
----
-
-## Detailed Timeline of Events
-
-### Phase 1: Feature Implementation (PR #342)
-
-| Date/Time (UTC) | Event | Details |
-|-----------------|-------|---------|
-| 2026-01-24 23:32 | PR #342 Created | Initial implementation of interactive casings |
-| 2026-01-25 00:06 | User Report #1 | "ни враги ни игрок не влияют на гильзы" (casings not reacting) |
-| 2026-01-25 00:18 | Fix Applied | Improved kick detection with larger Area2D and signal + manual fallback |
-| 2026-01-25 00:28 | Enhancement | Added dual detection (signal-based + `get_overlapping_bodies()` fallback) |
-
-### Phase 2: Crash Reports Begin
-
-| Date/Time (UTC) | Event | Details |
-|-----------------|-------|---------|
-| **2026-01-25 00:37** | **CRASH REPORTED** | "игра не запускается - появляется заставка godot и сразу исчезает" (splash screen then crashes) |
-| 2026-01-25 00:42 | Fix Attempt #1 | Changed `caliber_data.has("key")` to `"key" in caliber_data` |
-| 2026-01-25 00:47 | User Report #2 | "не исправлено" (not fixed) |
-| 2026-01-25 00:57 | Fix Attempt #2 | Simplified to only use `CaliberData` type check |
-| 2026-01-25 01:09 | User Report #3 | "всё ещё не запускается" (still not starting) |
-| 2026-01-25 01:10 | PR #342 Closed | Decision to create fresh PR |
-
-### Phase 3: New PR and Continued Investigation (PR #359)
-
-| Date/Time (UTC) | Event | Details |
-|-----------------|-------|---------|
-| 2026-01-25 01:10 | PR #359 Created | Fresh implementation with lessons learned |
-| 2026-01-25 01:27 | User Report #4 | "опять вылетает так же" (crashes the same way again) |
-| 2026-01-25 01:55 | User Report #5 | "сразу вылетает. дальше заставки godot не включается" (crashes immediately after splash) |
-| 2026-01-25 02:12 | Fix Attempt #3 | Removed `is CaliberData` type checks, replaced with property-based checks |
-| 2026-01-25 02:40 | Discovery | Project uses C# Player scene which may require .NET export templates |
-| 2026-01-25 04:14 | Investigation | Deep dive into C# export requirements |
-| 2026-01-25 05:25 | User Request | Request for comprehensive case study analysis |
+**Issues encountered:**
+- Exported builds crash immediately after splash screen
+- Characters may not interact with casings in all cases
+- Potential `class_name` resolution issues in exported builds
 
 ---
 
-## Root Cause Analysis
+## Alternative Implementation Approaches
 
-### Issue #1: `.has()` Method on Resource Objects (Fixed in PR #359)
+### Approach A: Character-Side Push Detection (RECOMMENDED)
 
-**Problem Code:**
+**Concept:** Instead of the casing detecting characters, the **character detects collisions with casings** after `move_and_slide()` and applies impulses.
+
+**Why this is better:**
+1. **More reliable collision detection** - Uses built-in collision system via `get_slide_collision()`
+2. **No signal connection issues** - No signals that might fail in exported builds
+3. **Single point of control** - Logic lives in character scripts, easier to debug
+4. **Proven pattern** - This is the officially recommended approach from [Godot 4 Recipes](https://kidscancode.org/godot_recipes/4.x/physics/character_vs_rigid/)
+
+**Implementation:**
+
+In `scripts/characters/player.gd`:
 ```gdscript
-# CRASHES in exported builds - .has() is Dictionary-only!
-if caliber_data.has("caliber_name"):
-    caliber_name = caliber_data.get("caliber_name")
+const CASING_PUSH_FORCE = 50.0
+
+func _physics_process(delta: float) -> void:
+    # ... existing movement code ...
+    move_and_slide()
+
+    # Push casings after movement
+    _push_casings()
+
+func _push_casings() -> void:
+    for i in get_slide_collision_count():
+        var collision = get_slide_collision(i)
+        var collider = collision.get_collider()
+        if collider is RigidBody2D and collider.has_method("receive_kick"):
+            var push_dir = -collision.get_normal()
+            collider.receive_kick(push_dir * velocity.length() * CASING_PUSH_FORCE / 100.0)
 ```
 
-**Why It Crashes:**
-1. The `.has()` method is **only available on Dictionary objects** in GDScript
-2. `caliber_data` is typed as `Resource`, not `Dictionary`
-3. GDScript silently crashes in exported builds when calling undefined methods
-4. No error shown - game just closes after splash screen
-
-**Solution Applied:**
+In `scripts/effects/casing.gd`:
 ```gdscript
-# SAFE - "in" operator works on any Object
-if "caliber_name" in caliber_data:
-    caliber_name = caliber_data.caliber_name
+func receive_kick(impulse: Vector2) -> void:
+    if _is_time_frozen:
+        return
+    if _has_landed:
+        _has_landed = false
+        _auto_land_timer = 0.0
+    apply_central_impulse(impulse)
+    angular_velocity = randf_range(-10.0, 10.0)
+    _play_kick_sound_if_loud_enough(impulse.length())
 ```
 
-### Issue #2: `is ClassName` Type Checks (Fixed in PR #359)
+**Collision layer setup:**
+- Casing `collision_layer`: Layer for items (e.g., layer 3)
+- Casing `collision_mask`: Static bodies (walls, obstacles)
+- Player/Enemy `collision_mask`: Must include the items layer
 
-**Problem Code:**
-```gdscript
-# Can cause parse errors in exported builds!
-if caliber_data is CaliberData:
-    var caliber: CaliberData = caliber_data as CaliberData
-```
+**Pros:**
+- Uses Godot's built-in collision detection
+- No Area2D nodes or signals needed
+- Works reliably in exported builds
+- Follows the same pattern used for pushing boxes and other physics objects
 
-**Why It Crashes:**
-1. GDScript `class_name` references may not resolve correctly in exported builds
-2. Known Godot issue [#41215](https://github.com/godotengine/godot/issues/41215): "References to class not resolved when exported"
-3. Error: `Parse Error: The identifier 'CaliberData' isn't declared in the current scope`
-4. Crash occurs at script load time - before game logic runs
-
-**Relevant Godot Issues:**
-- [#41215](https://github.com/godotengine/godot/issues/41215) - References to class not resolved when exported
-- [#76380](https://github.com/godotengine/godot/issues/76380) - Class names stop working after a while
-- [Godot Forum](https://forum.godotengine.org/t/4-3-stable-exported-build-crashes-immediately-upon-starting-up-game-everything-fails-to-load/101339) - Similar crash symptoms
-
-**Solution Applied:**
-```gdscript
-# SAFE - property check instead of type check
-if not ("caliber_name" in caliber_data):
-    return "rifle"
-var caliber_name: String = caliber_data.caliber_name
-```
-
-### Issue #3: C#/.NET Export Requirements (Potential Unresolved Cause)
-
-**Project Configuration Analysis:**
-
-| Component | Value |
-|-----------|-------|
-| `project.godot` features | `PackedStringArray("4.3", "C#")` |
-| Assembly name setting | `project/assembly_name="GodotTopDownTemplate"` |
-| Solution file | `GodotTopDownTemplate.sln` |
-| Project file | `GodotTopDownTemplate.csproj` |
-| Namespace | `GodotTopDownTemplate` |
-| Main scene | `res://scenes/levels/BuildingLevel.tscn` |
-| Player scene | `res://scenes/characters/csharp/Player.tscn` (C# script) |
-
-**Why C# Could Cause Crash:**
-
-1. **Wrong Export Templates**: If user exports with standard GDScript templates instead of .NET templates, C# scripts cannot load
-2. **Assembly Not Built**: Godot may skip C# build during export if it can't find the project
-3. **Silent Failure**: Per [#91998](https://github.com/godotengine/godot/issues/91998): "Godot is not building your C# project because it can't find it, so it assumes it's a GDScript-only project. The crash happens because the game tries to load a `.cs` Resource but .NET is not initialized."
-
-**Assembly Name Verification (All Match):**
-- `GodotTopDownTemplate.sln`: Contains "GodotTopDownTemplate" project
-- `GodotTopDownTemplate.csproj`: `<RootNamespace>GodotTopDownTemplate</RootNamespace>`
-- `project.godot`: `project/assembly_name="GodotTopDownTemplate"`
-
-**Alternative GDScript Player Available:**
-- **C# version** (currently used): `res://scenes/characters/csharp/Player.tscn`
-- **GDScript version**: `res://scenes/characters/Player.tscn`
+**Cons:**
+- Requires modifying both player and enemy scripts
+- Characters must be set to collide with casings (may affect game feel)
 
 ---
 
-## GDScript Type System Reference
+### Approach B: Collision Layer One-Way Detection
 
-### Safe vs Unsafe Patterns
+**Concept:** Configure collision layers so that **casings detect characters, but characters don't detect casings**. The RigidBody2D naturally gets pushed by the physics engine.
 
-| Pattern | Dictionary | Resource | Works in Export? |
-|---------|------------|----------|------------------|
-| `obj.has("key")` | Yes | CRASHES | No |
-| `obj.has_method("name")` | No | Yes | Yes |
-| `"key" in obj` | Yes | Yes | Yes |
-| `obj is ClassName` | N/A | May Crash | Risky |
-| `obj.get("key")` | Yes | Yes | Yes |
+**Why this might work:**
+1. **Pure physics solution** - No code changes to casing detection
+2. **Automatic pushing** - Physics engine handles the interaction
+3. **Simpler implementation** - Just collision layer configuration
 
-### Recommended Property Access Patterns
+**Implementation:**
 
-```gdscript
-# SAFE: Property existence check
-if "property_name" in some_resource:
-    var value = some_resource.property_name
-
-# SAFE: Method existence check
-if some_object.has_method("method_name"):
-    some_object.method_name()
-
-# AVOID: Type checks with custom class_name
-# if obj is MyCustomClass:  # May fail in exports
-
-# SAFE: Script comparison alternative
-if obj.get_script() == preload("res://path/to/script.gd"):
-    # Type-safe code here
+In `scenes/effects/Casing.tscn`:
+```
+[node name="Casing" type="RigidBody2D"]
+collision_layer = 8    # Layer 4 (items)
+collision_mask = 7     # Layers 1-3 (player, enemies, walls)
 ```
 
----
+In player/enemy scenes, ensure the `collision_mask` does **NOT** include layer 4, but the casing's `collision_mask` **DOES** include player and enemy layers.
 
-## Online Research Summary
+**Note:** This approach relies on the physics engine's handling of asymmetric collisions. The RigidBody2D will be pushed when it collides with the CharacterBody2D, even if the CharacterBody2D doesn't "see" it.
 
-### Godot Forum References
+**Pros:**
+- No script changes needed (just scene configuration)
+- Natural physics interactions
 
-1. **[Godot 4.4.1 C# Export Issue](https://forum.godotengine.org/t/godot-4-4-1-c-export-issue/119567)**
-   - Android apps crash after splash with C# scripts
-   - Works with GDScript, crashes with C#
-
-2. **[4.3 Stable Exported Build Crashes Immediately](https://forum.godotengine.org/t/4-3-stable-exported-build-crashes-immediately-upon-starting-up-game-everything-fails-to-load/101339)**
-   - Symptoms: splash screen then immediate crash
-   - Root cause: inverted export resource filter
-   - Solution: correct export settings + reimport resources
-
-3. **[Release Export Crashes at Start](https://forum.godotengine.org/t/release-export-of-the-game-crashes-at-start/120339)**
-   - Debug export works, release crashes
-   - Related to script loading order
-
-### GitHub Issues
-
-1. **[#91998 - C# exports crash if assembly names don't match](https://github.com/godotengine/godot/issues/91998)**
-   - Editor runs fine, export segfaults
-   - Solution: ensure .sln, .csproj, and project setting all match
-
-2. **[#41215 - References to class not resolved when exported](https://github.com/godotengine/godot/issues/41215)**
-   - `is ClassName` causes parse errors
-   - Workaround: use file paths instead of class names
-
-3. **[#76380 - Class names stop working](https://github.com/godotengine/godot/issues/76380)**
-   - Class name resolution becomes unreliable
-   - Affects type checking in GDScript
+**Cons:**
+- Less control over push force and direction
+- May result in unpredictable behavior (casings clipping through walls)
+- The mass of casings won't matter - they'll all be pushed the same
 
 ---
 
-## Proposed Solutions
+### Approach C: Proximity-Based Push (No Collision Required)
 
-### Solution A: Verify C# Export Configuration (Recommended First Step)
+**Concept:** In `_physics_process`, check distance to nearby characters and apply forces based on proximity, without requiring actual collisions.
 
-**Questions for User:**
-1. Which Godot Editor version? (Standard or **.NET** version)
-2. Are .NET export templates installed?
-3. Does the game work when running from editor?
-4. Did exported builds work BEFORE this PR?
+**Why this might work:**
+1. **No collision detection issues** - Uses pure distance calculations
+2. **Works regardless of collision layers** - Characters don't need to collide with casings
+3. **Smooth, natural-looking kicks** - Force can be proportional to character speed
 
-**Verification Steps:**
-1. Open Godot Editor -> Editor -> Manage Export Templates
-2. Confirm ".NET" templates are installed (not standard GDScript-only)
-3. Rebuild C# project before export: `dotnet build`
-4. Export with "Export Debug" first to see any error messages
+**Implementation:**
 
-### Solution B: Switch to GDScript Player (Diagnostic Test)
+In `scripts/effects/casing.gd`:
+```gdscript
+const KICK_DISTANCE = 20.0  # Pixels
+const KICK_FORCE = 30.0
 
-To determine if crash is C#-related:
+func _physics_process(delta: float) -> void:
+    if _is_time_frozen or not _has_landed:
+        return
 
-1. Edit `scenes/levels/BuildingLevel.tscn`
-2. Change line 4:
-   ```diff
-   - [ext_resource type="PackedScene" uid="uid://dv8nq2vj5r7p2" path="res://scenes/characters/csharp/Player.tscn" id="2_player"]
-   + [ext_resource type="PackedScene" uid="uid://..." path="res://scenes/characters/Player.tscn" id="2_player"]
-   ```
-3. Export and test
-4. If game runs -> crash was C#-related
+    # Find nearby characters
+    var characters = get_tree().get_nodes_in_group("kickable_sources")
+    for character in characters:
+        if character is CharacterBody2D:
+            var distance = global_position.distance_to(character.global_position)
+            if distance < KICK_DISTANCE and character.velocity.length() > 10.0:
+                _apply_proximity_kick(character)
 
-### Solution C: Add FileLogger Diagnostics (Already Implemented)
+func _apply_proximity_kick(character: CharacterBody2D) -> void:
+    var direction = (global_position - character.global_position).normalized()
+    var force = direction * character.velocity.length() * KICK_FORCE / 100.0
+    _has_landed = false
+    _auto_land_timer = 0.0
+    apply_central_impulse(force)
+    angular_velocity = randf_range(-10.0, 10.0)
+    _play_kick_sound_if_loud_enough(force.length())
+```
 
-The FileLogger autoload has been added to capture startup sequence:
-- Creates `game_log_*.txt` next to executable
-- Logs initialization steps
-- Helps identify exactly where crash occurs
+Player and enemies need to be added to the "kickable_sources" group.
+
+**Pros:**
+- No dependency on collision system
+- Works regardless of how collisions are configured
+- Easy to tune the kick distance and force
+
+**Cons:**
+- Less performant (checking distances every frame for every casing)
+- May kick casings that are behind walls
+- Requires characters to be in a specific group
 
 ---
 
-## Files Collected for This Case Study
+### Approach D: AnimatableBody2D Instead of RigidBody2D
 
-### Logs Directory (`docs/case-studies/issue-341/logs/`)
-- `solution-draft-log-1.txt` - First AI work session (8412 lines)
-- `solution-draft-log-2.txt` - Second AI work session (4574 lines)
-- `solution-draft-log-3.txt` - Third AI work session (6546 lines)
-- `solution-draft-log-4.txt` - Fourth AI work session (6589 lines)
+**Concept:** Use `AnimatableBody2D` which is designed for objects that move based on code, not physics. Characters can push them directly via `move_and_slide()`.
 
-### PR/Issue Documentation
+**Why this might work:**
+1. **Designed for this use case** - AnimatableBody2D is meant for movable platforms and objects
+2. **No physics complexity** - Movement is purely code-driven
+3. **Simpler mental model** - No mass, gravity, or impulses to worry about
+
+**Implementation:**
+
+Change Casing from RigidBody2D to AnimatableBody2D and implement push handling in `_physics_process()`.
+
+**Cons:**
+- Loss of realistic physics behavior (bounce, friction, angular momentum)
+- Casings won't tumble realistically
+- More code needed for realistic movement simulation
+
+---
+
+## Comparison Matrix
+
+| Approach | Reliability | Performance | Physics Realism | Code Complexity | Export Safety |
+|----------|------------|-------------|-----------------|-----------------|---------------|
+| A: Character-Side Push | HIGH | HIGH | MEDIUM | MEDIUM | HIGH |
+| B: Collision Layer Trick | MEDIUM | HIGH | LOW | LOW | HIGH |
+| C: Proximity-Based | HIGH | LOW | LOW | MEDIUM | HIGH |
+| D: AnimatableBody2D | HIGH | HIGH | LOW | HIGH | HIGH |
+
+---
+
+## Recommendation
+
+**Approach A (Character-Side Push Detection)** is recommended because:
+
+1. It uses the proven `get_slide_collision()` pattern that is well-documented and tested
+2. It keeps the casing script simple (no Area2D, no signals)
+3. It's the official recommendation from Godot documentation and tutorials
+4. It gives precise control over push force based on character velocity
+5. It avoids the potential signal/Area2D issues that caused problems in exported builds
+
+---
+
+## Previous Implementation Analysis
+
+### What Was Tried (PR #359)
+
+1. **Area2D KickDetector approach:**
+   - Added Area2D child node to detect characters entering
+   - Connected `body_entered` signal to apply kick impulse
+   - Changed collision layers to enable interaction
+
+2. **Crash fixes:**
+   - Replaced `.has()` calls on Resource with `"key" in object`
+   - Replaced `is CaliberData` type checks with property-based checks
+
+### Why It Failed
+
+The root cause is likely one of:
+
+1. **Signal issues in exported builds** - Godot 4.4 dev builds have known issues where signals don't work in exported builds ([GitHub #100097](https://github.com/godotengine/godot/issues/100097))
+
+2. **Area2D one-frame delay** - Area2D `body_entered` signal fires one physics tick late ([GitHub #86199](https://github.com/godotengine/godot/issues/86199)), which may cause missed detections
+
+3. **Class name resolution** - Using `class_name` references in scripts can cause parse errors in exported builds ([GitHub #41215](https://github.com/godotengine/godot/issues/41215))
+
+4. **C#/.NET export configuration** - The project uses hybrid C#/GDScript and may require .NET export templates
+
+---
+
+## Online Research Sources
+
+### Official Documentation
+- [Using CharacterBody2D](https://docs.godotengine.org/en/stable/tutorials/physics/using_character_body_2d.html) - Official Godot documentation
+- [Physics Introduction](https://docs.godotengine.org/en/stable/tutorials/physics/physics_introduction.html)
+
+### Tutorials
+- [Character to Rigid Body Interaction](https://kidscancode.org/godot_recipes/4.x/physics/character_vs_rigid/) - KidsCanCode Godot 4 Recipes
+- [Movable Objects in Top-Down 2D](https://catlikecoding.com/godot/true-top-down-2d/3-movable-objects/) - Catlike Coding
+
+### Godot Forum Discussions
+- [How to push a RigidBody2D with a CharacterBody2D](https://forum.godotengine.org/t/how-to-push-a-rigidbody2d-with-a-characterbody2d/2681)
+- [CharacterBody2d & RigidBody2D Interaction](https://forum.godotengine.org/t/characterbody2d-rigidbody2d-interaction/72851)
+- [Area2D body_entered signal not working](https://forum.godotengine.org/t/area2d-body-entered-signal-not-working-at-all/83466)
+
+### Known Godot Issues
+- [#100097 - Signals don't work in exported builds (4.4-dev6)](https://github.com/godotengine/godot/issues/100097)
+- [#86199 - Area2D body_entered signal fires late](https://github.com/godotengine/godot/issues/86199)
+- [#41215 - Class references not resolved when exported](https://github.com/godotengine/godot/issues/41215)
+- [#91998 - C# exports crash if assembly names don't match](https://github.com/godotengine/godot/issues/91998)
+
+---
+
+## Existing Libraries and Components
+
+### Relevant Godot Addons
+
+1. **[Godot 4 2D Destructible Objects](https://github.com/VSeryi/Godot-4-2D-Destructible-Objects)**
+   - Script that divides sprites into blocks and makes them explode
+   - Configurable collision layers and debris behavior
+   - May provide useful patterns for debris interaction
+
+2. **[Godot Destruction Physics](https://godotforums.org/d/30024-godot-destruction-physics)**
+   - Destruction physics for Godot 4.0
+   - Includes debris handling
+
+### Example Projects
+
+1. **[character_vs_rigid](https://github.com/godotrecipes/character_vs_rigid)**
+   - Example code from KidsCanCode tutorial
+   - Demonstrates the recommended impulse-based pushing pattern
+
+---
+
+## Next Steps
+
+1. **Revert current changes** to restore working state
+2. **Implement Approach A** (Character-Side Push Detection)
+3. **Add kick sound** using existing AudioManager
+4. **Test in editor** before exporting
+5. **Export and test** the EXE to verify no crashes
+
+---
+
+## Timeline of Previous Attempts
+
+### PR #342 (Closed)
+| Date (UTC) | Event |
+|------------|-------|
+| 2026-01-24 23:32 | PR created with Area2D approach |
+| 2026-01-25 00:06 | User: "casings not reacting" |
+| 2026-01-25 00:37 | User: "game crashes after splash" |
+| 2026-01-25 01:10 | PR closed |
+
+### PR #359 (Current)
+| Date (UTC) | Event |
+|------------|-------|
+| 2026-01-25 01:10 | PR created with fixes |
+| 2026-01-25 01:27 | User: "crashes same way" |
+| 2026-01-25 02:12 | Fixed type checks |
+| 2026-01-25 05:25 | User: "try different approach" |
+| 2026-01-25 08:33 | User: "not fixed, revert and try different approach" |
+
+---
+
+## Files in This Case Study
+
+- `README.md` - This document
 - `issue-341-details.txt` - Original issue description
 - `issue-341-comments.txt` - Issue comments
 - `pr-342-details.txt` - First PR details
-- `pr-342-comments.txt` - First PR comments (contains crash reports)
+- `pr-342-comments.txt` - First PR comments
 - `pr-359-details.txt` - Current PR details
 - `pr-359-comments.txt` - Current PR comments
-
----
-
-## Implementation Status
-
-### Completed
-
-| Item | Status |
-|------|--------|
-| Add collision layer 7 "interactive_items" | Done |
-| Add PhysicsMaterial2D to Casing scene | Done |
-| Add Area2D "KickDetector" child | Done |
-| Update collision layer/mask for casings | Done |
-| Implement kick detection in casing.gd | Done |
-| Implement kick physics with impulse | Done |
-| Implement kick sound with threshold/cooldown | Done |
-| Add caliber-based sound selection | Done |
-| Fix: Remove `.has()` calls on Resource | Done |
-| Fix: Remove `is CaliberData` type checks | Done |
-| Add FileLogger for debugging exports | Done |
-
-### Pending (Manual Testing Required)
-
-| Item | Status |
-|------|--------|
-| Verify exported EXE runs without crashing | Awaiting user test |
-| Walk player through casings | Pending |
-| Walk enemies through casings | Pending |
-| Verify sounds play at appropriate velocity | Pending |
-| Verify bullet-time freezes casings correctly | Pending |
-
----
-
-## Lessons Learned
-
-1. **GDScript Dictionary methods on Resources cause silent crashes** in exported builds
-2. **`is ClassName` type checks can fail** in exports due to class_name resolution issues
-3. **C#/GDScript hybrid projects require careful export configuration** - must use .NET templates
-4. **The Godot Editor doesn't catch all export-breaking errors** during development
-5. **Property-based checks (`"property" in object`)** are the safest pattern for Resource access
-6. **Always follow existing codebase patterns** - `bullet.gd` was already using safe patterns
-7. **Add startup logging** to help diagnose silent crashes in exported builds
-
----
-
-## References
-
-### Project Links
-- **Issue**: https://github.com/Jhon-Crow/godot-topdown-MVP/issues/341
-- **PR #342** (closed): https://github.com/Jhon-Crow/godot-topdown-MVP/pull/342
-- **PR #359** (current): https://github.com/Jhon-Crow/godot-topdown-MVP/pull/359
-
-### Godot Documentation
-- [GDScript Exported Properties](https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/gdscript_exports.html)
-- [Physics Introduction](https://docs.godotengine.org/en/stable/tutorials/physics/physics_introduction.html)
-- [Area2D Tutorial](https://docs.godotengine.org/en/stable/tutorials/physics/using_area_2d.html)
-
-### External Tutorials
-- [KidsCanCode - Character to Rigid Body Interaction](https://kidscancode.org/godot_recipes/4.x/physics/character_vs_rigid/index.html)
-- [Catlike Coding - Movable Objects in Top-Down 2D](https://catlikecoding.com/godot/true-top-down-2d/3-movable-objects/)
-
-### Godot Issues (Crash-Related)
-- [#91998 - C# exports crash if assembly names don't match](https://github.com/godotengine/godot/issues/91998)
-- [#41215 - References to class not resolved when exported](https://github.com/godotengine/godot/issues/41215)
-- [#76380 - Class names stop working](https://github.com/godotengine/godot/issues/76380)
-
-### Godot Forum Discussions
-- [4.3 Stable Exported Build Crashes](https://forum.godotengine.org/t/4-3-stable-exported-build-crashes-immediately-upon-starting-up-game-everything-fails-to-load/101339)
-- [C# Export Issue](https://forum.godotengine.org/t/godot-4-4-1-c-export-issue/119567)
-- [Release Export Crashes](https://forum.godotengine.org/t/release-export-of-the-game-crashes-at-start/120339)
+- `logs/` - AI work session logs
 
 ---
 
 *Case study last updated: 2026-01-25*
-*Investigation status: Awaiting user feedback on C# export configuration*
+*Status: Proposing alternative implementation approaches*

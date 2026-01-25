@@ -3,10 +3,7 @@ extends RigidBody2D
 ##
 ## Casings are spawned when weapons fire, ejected in the opposite direction
 ## of the shot with some randomness. They fall to the ground and remain there
-## as persistent environmental detail.
-##
-## Casings are now interactive - they can be kicked by players and enemies
-## walking through them, with realistic physics and sound effects.
+## permanently as persistent environmental detail.
 
 ## Lifetime in seconds before auto-destruction (0 = infinite).
 @export var lifetime: float = 0.0
@@ -33,35 +30,10 @@ var _frozen_angular_velocity: float = 0.0
 ## Whether the casing is currently frozen in time.
 var _is_time_frozen: bool = false
 
-## Kick force multiplier when characters walk through.
-const KICK_FORCE_MULTIPLIER: float = 0.5
-
-## Minimum velocity to play kick sound (pixels per second).
-const KICK_SOUND_VELOCITY_THRESHOLD: float = 75.0
-
-## Cooldown between kick sounds (seconds).
-const KICK_SOUND_COOLDOWN: float = 0.1
-
-## Timer tracking cooldown between kick sounds.
-var _kick_sound_timer: float = 0.0
-
-## Cached caliber type for sound selection.
-var _cached_caliber_type: String = "rifle"
-
 
 func _ready() -> void:
-	# Log casing initialization for debugging crash issues
-	var logger = get_node_or_null("/root/FileLogger")
-	if logger:
-		logger.log_debug("Casing: _ready() starting")
-
 	# Connect to collision signals to detect landing
 	body_entered.connect(_on_body_entered)
-
-	# Connect KickDetector Area2D signals
-	var kick_detector = get_node_or_null("KickDetector")
-	if kick_detector:
-		kick_detector.body_entered.connect(_on_kick_detector_body_entered)
 
 	# Set initial rotation to random for variety
 	rotation = randf_range(0, 2 * PI)
@@ -69,18 +41,8 @@ func _ready() -> void:
 	# Set casing appearance based on caliber
 	_set_casing_appearance()
 
-	# Cache the caliber type for sound selection
-	_cached_caliber_type = _determine_caliber_type()
-
-	if logger:
-		logger.log_debug("Casing: _ready() completed, caliber_type=%s" % _cached_caliber_type)
-
 
 func _physics_process(delta: float) -> void:
-	# Update kick sound cooldown timer
-	if _kick_sound_timer > 0:
-		_kick_sound_timer -= delta
-
 	# If time is frozen, maintain frozen state (velocity should stay at zero)
 	if _is_time_frozen:
 		linear_velocity = Vector2.ZERO
@@ -104,7 +66,8 @@ func _physics_process(delta: float) -> void:
 	if _has_landed:
 		linear_velocity = Vector2.ZERO
 		angular_velocity = 0.0
-		# Note: We no longer disable physics processing to allow re-kicking
+		# Disable physics processing to save performance
+		set_physics_process(false)
 
 
 ## Makes the casing "land" by stopping all movement.
@@ -112,112 +75,17 @@ func _land() -> void:
 	_has_landed = true
 
 
-## Called when a character enters the KickDetector area.
-func _on_kick_detector_body_entered(body: Node2D) -> void:
-	# Only respond to CharacterBody2D (players and enemies)
-	if body is CharacterBody2D:
-		_apply_kick(body)
-
-
-## Applies kick physics when a character walks through the casing.
-func _apply_kick(character: CharacterBody2D) -> void:
-	# Don't kick if time is frozen
-	if _is_time_frozen:
-		return
-
-	# Get character velocity
-	var character_velocity: Vector2 = character.velocity
-
-	# Only kick if character is actually moving
-	if character_velocity.length_squared() < 100.0:  # ~10 px/s minimum
-		return
-
-	# Re-enable movement if landed
-	if _has_landed:
-		_has_landed = false
-		_auto_land_timer = 0.0
-
-	# Calculate kick direction (away from character)
-	var kick_direction = (global_position - character.global_position).normalized()
-
-	# Calculate kick force based on character speed
-	var kick_speed = character_velocity.length() * KICK_FORCE_MULTIPLIER
-
-	# Add some randomness to the kick direction (±0.3 radians = ~17 degrees)
-	kick_direction = kick_direction.rotated(randf_range(-0.3, 0.3))
-
-	# Create the kick force vector
-	var kick_force = kick_direction * kick_speed
-
-	# Add random angular velocity for realistic tumbling
-	angular_velocity = randf_range(-10.0, 10.0)
-
-	# Apply the impulse to the casing
-	apply_central_impulse(kick_force)
-
-	# Play kick sound if above velocity threshold and not in cooldown
-	var resulting_velocity = linear_velocity.length()
-	if resulting_velocity > KICK_SOUND_VELOCITY_THRESHOLD and _kick_sound_timer <= 0:
-		_play_kick_sound()
-		_kick_sound_timer = KICK_SOUND_COOLDOWN
-
-
-## Plays the appropriate kick sound based on caliber type.
-func _play_kick_sound() -> void:
-	# Check if AudioManager is available
-	var audio_manager = get_node_or_null("/root/AudioManager")
-	if audio_manager == null:
-		return
-
-	# Play sound based on caliber type
-	match _cached_caliber_type:
-		"pistol":
-			audio_manager.play_shell_pistol(global_position)
-		"shotgun":
-			audio_manager.play_shell_shotgun(global_position)
-		_:  # Default to rifle
-			audio_manager.play_shell_rifle(global_position)
-
-
-## Determines the caliber type from caliber_data for sound selection.
-## Uses property-based checks instead of 'is' type checks to avoid
-## exported build crashes when class_name resolution fails.
-func _determine_caliber_type() -> String:
-	if caliber_data == null:
-		return "rifle"
-
-	# Use property-based check instead of "is CaliberData" to avoid
-	# parse errors in exported builds where class_name may not resolve.
-	# The "in" operator safely checks if a property exists on the Resource.
-	if not ("caliber_name" in caliber_data):
-		return "rifle"
-
-	var caliber_name: String = caliber_data.caliber_name
-
-	# Determine type from name
-	var name_lower = caliber_name.to_lower()
-	if "buckshot" in name_lower or "shotgun" in name_lower:
-		return "shotgun"
-	elif "9x19" in name_lower or "9mm" in name_lower or "pistol" in name_lower:
-		return "pistol"
-	else:
-		return "rifle"
-
-
 ## Sets the visual appearance of the casing based on its caliber.
-## Uses property-based checks instead of 'is' type checks to avoid
-## exported build crashes when class_name resolution fails.
 func _set_casing_appearance() -> void:
 	var sprite = $Sprite2D
 	if sprite == null:
 		return
 
-	# Try to get the casing sprite from caliber data using property check
-	# instead of "is CaliberData" to avoid exported build parse errors.
-	if caliber_data != null and "casing_sprite" in caliber_data:
-		var casing_sprite = caliber_data.casing_sprite
-		if casing_sprite != null:
-			sprite.texture = casing_sprite
+	# Try to get the casing sprite from caliber data
+	if caliber_data != null and caliber_data is CaliberData:
+		var caliber: CaliberData = caliber_data as CaliberData
+		if caliber.casing_sprite != null:
+			sprite.texture = caliber.casing_sprite
 			# Reset modulate to show actual sprite colors
 			sprite.modulate = Color.WHITE
 			return
@@ -226,9 +94,13 @@ func _set_casing_appearance() -> void:
 	# Default color (rifle casing - brass)
 	var casing_color = Color(0.9, 0.8, 0.4)  # Brass color
 
-	# Use property-based check for caliber_name to determine color
-	if caliber_data != null and "caliber_name" in caliber_data:
-		var caliber_name: String = caliber_data.caliber_name
+	if caliber_data != null:
+		# Check caliber name to determine color
+		var caliber_name: String = ""
+		if caliber_data is CaliberData:
+			caliber_name = (caliber_data as CaliberData).caliber_name
+		elif caliber_data.has_method("get"):
+			caliber_name = caliber_data.get("caliber_name") if caliber_data.has("caliber_name") else ""
 
 		if "buckshot" in caliber_name.to_lower() or "Buckshot" in caliber_name:
 			casing_color = Color(0.8, 0.2, 0.2)  # Red for shotgun
