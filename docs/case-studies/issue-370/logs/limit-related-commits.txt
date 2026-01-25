@@ -1,0 +1,5 @@
+df35f53 feat: increase blood puddle spawn count for enhanced visual feedback
+e370e52 Round 3 blood effect improvements: edge scaling, no overlap, matte drops, unlimited decals
+1992b18 Improve blood effects: match particle count, merge overlapping drops, add directional deformation
+cba7339 docs: Update case study with Round 10 investigation analysis
+7ae74c3 Add comprehensive test coverage and contribution guidelines
