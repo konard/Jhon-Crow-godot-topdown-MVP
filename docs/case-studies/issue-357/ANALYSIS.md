@@ -331,3 +331,76 @@ Based on the analysis, **Solution 4 (Hybrid Approach)** is recommended because:
 **Action Required:**
 1. Implement target-aware corner checking - when in tactical states (PURSUING, FLANKING, SEARCHING), look toward the suspected player position instead of perpendicular to movement
 2. Increase corner check duration from 0.3s to 1.0s per user feedback
+
+---
+
+### 2026-01-25: Second Feedback from PR #358
+
+**User comment (translated from Russian):**
+> "Enemy quickly turns away when player enters their field of view.
+> Return corner check to 0.3s, but the enemy should check all corners with line of fire (center of FOV) as soon as there's an opportunity (can turn and corner becomes visible)."
+
+**New log file added:** `game_log_20260125_050557.txt`
+
+**Analysis of issue:**
+The user identified TWO separate problems:
+
+1. **Enemy turns away too quickly after seeing player:**
+   - When player enters enemy FOV, enemy looks at player (correct)
+   - When player exits FOV, enemy immediately turns toward movement direction (bug)
+   - Expected: Enemy should continue looking toward where player was for a moment
+
+2. **Corner check duration too long at 1.0s:**
+   - User prefers quick 0.3s glances at corners
+   - But wants MORE corners to be checked, not longer checks
+
+**Root Cause:**
+In `_update_enemy_model_rotation()`:
+- Priority 1: Player visible → look at player
+- Priority 2: Corner check timer active → look at corner
+- Priority 3: Moving → look in movement direction
+
+When player exits FOV, if corner check timer has already expired, enemy immediately goes to Priority 3 (movement direction), causing the "turn away" behavior.
+
+**Fix Implementation:**
+
+1. **Reverted CORNER_CHECK_DURATION to 0.3s** (per user request)
+
+2. **Added "hold aim" on visibility loss:**
+   In `_check_player_visibility()`, when enemy loses sight in tactical states (COMBAT, PURSUING, FLANKING, SEARCHING):
+   - Set `_corner_check_angle` toward player's last position
+   - Set `_corner_check_timer = CORNER_CHECK_DURATION`
+   - This keeps enemy looking toward the threat for 0.3s after losing sight
+
+3. **Enhanced tactical corner scanning:**
+   In `_detect_tactical_opening()`:
+   - Now scans multiple angles, not just perpendicular
+   - Priority order:
+     1. Direction to suspected target (if differs from movement/facing)
+     2. Flanking angles (45° offset from target)
+     3. Perpendicular angles (standard corner check)
+   - Only triggers for angles the enemy isn't already facing
+
+**Code Changes:**
+
+```gdscript
+# In _check_player_visibility() - hold aim when losing sight
+if was_visible and _player and _current_state in [AIState.COMBAT, AIState.PURSUING, AIState.FLANKING, AIState.SEARCHING]:
+    var dir_to_player := (_player.global_position - global_position).normalized()
+    _corner_check_angle = dir_to_player.angle()
+    _corner_check_timer = CORNER_CHECK_DURATION
+    _log_to_file("Lost sight in %s: holding aim toward (%.1f°)" % [AIState.keys()[_current_state], rad_to_deg(_corner_check_angle)])
+
+# In _detect_tactical_opening() - scan multiple angles with priorities
+# 1. Check target direction first (priority)
+# 2. Check flanking angles (45° offset each side)
+# 3. Fall back to perpendicular check
+```
+
+**Expected Behavior After Fix:**
+1. Enemy sees player → looks at player
+2. Player exits FOV → enemy holds aim toward player for 0.3s
+3. During movement, enemy proactively scans toward suspected target and flanking angles
+4. Quick 0.3s glances at each corner/angle
+
+---

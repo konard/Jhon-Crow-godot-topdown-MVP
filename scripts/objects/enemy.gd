@@ -3700,21 +3700,17 @@ func _check_player_visibility() -> void:
 			_can_see_player = true
 			# Continue checking to calculate visibility ratio
 
-	# Calculate visibility ratio based on how many points are visible
 	if _can_see_player:
 		_player_visibility_ratio = float(visible_count) / float(check_points.size())
 		_continuous_visibility_timer += get_physics_process_delta_time()
 	else:
-		# Lost line of sight - reset the timer and visibility ratio
 		_continuous_visibility_timer = 0.0
 		_player_visibility_ratio = 0.0
-		# Issue #357: When losing sight in tactical states, keep looking toward the threat
-		# This prevents the enemy from immediately turning away when player exits FOV
+		# Issue #357: Hold aim toward threat when losing sight in tactical states
 		if was_visible and _player and _current_state in [AIState.COMBAT, AIState.PURSUING, AIState.FLANKING, AIState.SEARCHING]:
-			var dir_to_player := (_player.global_position - global_position).normalized()
-			_corner_check_angle = dir_to_player.angle()
+			_corner_check_angle = (_player.global_position - global_position).normalized().angle()
 			_corner_check_timer = CORNER_CHECK_DURATION
-			_log_to_file("Lost sight in %s: holding aim toward (%.1f°)" % [AIState.keys()[_current_state], rad_to_deg(_corner_check_angle)])
+			_log_to_file("Lost sight in %s: holding aim (%.1f°)" % [AIState.keys()[_current_state], rad_to_deg(_corner_check_angle)])
 
 ## Update enemy memory: visual detection, decay, and periodic intel sharing (Issue #297).
 func _update_memory(delta: float) -> void:
@@ -4108,46 +4104,20 @@ func _detect_perpendicular_opening(move_dir: Vector2) -> bool:
 			return true
 	return false
 
-## Issue #357: Detect tactical opening toward suspected target position (for clearing corners).
-## Enhanced to scan all visible corners, prioritizing the suspected target direction.
+## Issue #357: Detect tactical opening toward target, then fall back to perpendicular.
 func _detect_tactical_opening(move_dir: Vector2, target_pos: Vector2) -> bool:
-	var space_state := get_world_2d().direct_space_state
 	var dir_to_target := (target_pos - global_position).normalized()
-	var facing_angle := _enemy_model.global_rotation if _enemy_model else rotation
-
-	# Issue #357: Scan for openings in multiple directions, prioritizing:
-	# 1. Direction to suspected target (if not blocked and differs from movement)
-	# 2. Angles near the target direction (flanking angles)
-	# 3. Perpendicular angles (standard corner check)
-
-	# Check target direction first (priority)
-	var angle_to_target := dir_to_target.angle()
-	var angle_diff_from_move := absf(wrapf(angle_to_target - move_dir.angle(), -PI, PI))
-	var angle_diff_from_facing := absf(wrapf(angle_to_target - facing_angle, -PI, PI))
-
-	# Only check target direction if it differs from movement and isn't already where we're facing
-	if angle_diff_from_move > CORNER_CHECK_TACTICAL_ANGLE_THRESHOLD and angle_diff_from_facing > deg_to_rad(15.0):
-		var query := PhysicsRayQueryParameters2D.create(global_position, global_position + dir_to_target * CORNER_CHECK_DISTANCE)
-		query.collision_mask = 0b100
-		query.exclude = [self]
-		if space_state.intersect_ray(query).is_empty():
-			_corner_check_angle = angle_to_target
+	var facing := _enemy_model.global_rotation if _enemy_model else rotation
+	var target_ang := dir_to_target.angle()
+	var diff_move := absf(wrapf(target_ang - move_dir.angle(), -PI, PI))
+	var diff_facing := absf(wrapf(target_ang - facing, -PI, PI))
+	if diff_move > CORNER_CHECK_TACTICAL_ANGLE_THRESHOLD and diff_facing > deg_to_rad(15.0):
+		var q := PhysicsRayQueryParameters2D.create(global_position, global_position + dir_to_target * CORNER_CHECK_DISTANCE)
+		q.collision_mask = 0b100
+		q.exclude = [self]
+		if get_world_2d().direct_space_state.intersect_ray(q).is_empty():
+			_corner_check_angle = target_ang
 			return true
-
-	# Check angles near the target direction (45° offset each side) - flanking positions
-	for offset in [PI / 4, -PI / 4]:  # 45° left and right of target
-		var check_angle := angle_to_target + offset
-		var check_dir := Vector2.from_angle(check_angle)
-		var angle_diff_check := absf(wrapf(check_angle - facing_angle, -PI, PI))
-		if angle_diff_check > deg_to_rad(15.0):  # Only check if not already facing that way
-			var query := PhysicsRayQueryParameters2D.create(global_position, global_position + check_dir * CORNER_CHECK_DISTANCE)
-			query.collision_mask = 0b100
-			query.exclude = [self]
-			if space_state.intersect_ray(query).is_empty():
-				_corner_check_angle = check_angle
-				return true
-
-	# Fall back to perpendicular check
 	return _detect_perpendicular_opening(move_dir)
 
 ## Handle corner checking during movement (#332, #347, #357: tactical states look toward target).
