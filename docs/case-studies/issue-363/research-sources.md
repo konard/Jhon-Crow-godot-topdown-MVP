@@ -223,3 +223,43 @@ This document catalogs all external sources and references used for the case stu
 3. No cooldown between grenade throws
 4. Ignoring line-of-sight for throwing
 5. Not considering friendly fire
+
+---
+
+## Online Research Session (2026-01-25)
+
+### Key F.E.A.R. AI Findings
+
+#### The Illusion of Coordination
+According to the GDC presentation and technical analysis:
+> "None of the enemy AI in F.E.A.R. know that each other exists and cooperative behaviors are simply two AI characters being given goals that line up nicely to create what look like coordinated behaviors when executed."
+
+This is relevant for our grenade implementation - enemies don't need to explicitly coordinate grenade throws. Each enemy evaluates their own trigger conditions and throws independently, but this creates emergent tactical behavior.
+
+#### Emergent Flanking as Side Effect
+> "Imagine a situation where the player has invalidated one of the A.I.'s cover positions, and a squad behavior orders the A.I. to move to the valid cover position. If there is some obstacle in the level, like a solid wall, the A.I. may take a back route and resurface on the player's side. It appears that the A.I. is flanking, but in fact this is just a side effect of moving to the only available valid cover."
+
+Our grenade throwing can follow a similar pattern - the grenade throw appears coordinated with flanking, but is actually just each AI following simple rules.
+
+#### Real-Time Response Architecture
+> "Because of this, the AI is constantly changing its plan based upon what the player is doing—if the player throws a grenade, the NPCs will flee; if the player is being very aggressive, they'll be defensive; if the player is hiding, they'll be offensive and try to flush him out."
+
+This aligns perfectly with Issue #363's trigger conditions - the grenade throws are reactive to player behavior (hiding, suppressing, etc.).
+
+### GOAP Grenade Action Design Principles
+
+1. **Throw Action**: "Why shoot if you can blow them up with a grenade" - Grenades are a high-priority action when conditions are met
+2. **PreConditions**: "Not all actions are possible all the time - for example, agents can't open a door which is already open. To handle these conditions, PreConditions are evaluated before simulating the action."
+3. **Dynamic Costs**: GOAP actions have varying costs based on world state, allowing grenades to become more attractive when trigger conditions are met
+
+### F.E.A.R. Legacy Impact
+> "F.E.A.R.'s use of Goal Oriented Action Planning is still held to this day as some of the most exciting and fun enemy opponents in modern video games. GOAP has continued to have a lasting impact within the video games industry, with games like Condemned Criminal Origins, S.T.A.L.K.E.R.: Shadow of Chernobyl, Just Cause 2, Deus Ex Human Revolution, the 2013 reboot of Tomb Raider, and Monolith's Middle-Earth: Shadow of Mordor and Shadow of War adopting the methodology."
+
+### Sources from Web Research
+- [Building the AI of F.E.A.R. with Goal Oriented Action Planning](https://www.gamedeveloper.com/design/building-the-ai-of-f-e-a-r-with-goal-oriented-action-planning)
+- [Paper Insight: The A.I. of F.E.A.R. (Nordeus Engineering)](https://engineering.nordeus.com/https-www-youtube-com-watch-v-d8nrhltca9y/)
+- [Implementing GOAP For AI Agents (2025)](https://wpbox.dev/2025/05/02/implementing-goap-for-ai-agents/)
+- [GOAP and Utility AI in Grab n' Throw (2024)](https://goldensyrupgames.com/blog/2024-05-04-grab-n-throw-utility-goap-ai/)
+- [Game AI Planning: GOAP, Utility, and Behavior Trees](https://tonogameconsultants.com/game-ai-planning/)
+- [GDC Vault - Three States and a Plan: The AI of F.E.A.R.](https://gdcvault.com/play/1013282/Three-States-and-a-Plan)
+- [GDC Vault - Goal-Oriented Action Planning: Ten Years Old and No Fear!](https://gdcvault.com/play/1022020/Goal-Oriented-Action-Planning-Ten)
