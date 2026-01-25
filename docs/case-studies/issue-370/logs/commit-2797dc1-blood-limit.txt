@@ -1,0 +1,17 @@
+
+## Maximum number of blood decals before oldest ones are removed.
+const MAX_BLOOD_DECALS: int = 100
+
+## Maximum distance to check for walls for blood splatters (in pixels).
+--
+
+	# Remove oldest decals if limit exceeded
+	while _blood_decals.size() > MAX_BLOOD_DECALS:
+		var oldest := _blood_decals.pop_front() as Node2D
+		if oldest and is_instance_valid(oldest):
+--
+
+	# Remove oldest decals if limit exceeded
+	while _blood_decals.size() > MAX_BLOOD_DECALS:
+		var oldest := _blood_decals.pop_front() as Node2D
+		if oldest and is_instance_valid(oldest):

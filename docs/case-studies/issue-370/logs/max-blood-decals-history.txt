@@ -1,0 +1,10 @@
+2797dc1	refs/remotes/origin/issue-360-6b008a412327 feat: add bloody footprints feature (Issue #360)
+829a00f	refs/remotes/origin/issue-293-f11cb23cf435 Round 8: Fix rectangular blood puddles with smoother gradient
+246a198	refs/remotes/origin/issue-293-f11cb23cf435 Round 4 blood effect improvements: circular drops, smooth color transitions, blood aging
+e370e52	refs/remotes/origin/issue-293-f11cb23cf435 Round 3 blood effect improvements: edge scaling, no overlap, matte drops, unlimited decals
+b24bc78	refs/remotes/origin/issue-293-f11cb23cf435 Add case study documentation for issue #293
+1992b18	refs/remotes/origin/issue-293-f11cb23cf435 Improve blood effects: match particle count, merge overlapping drops, add directional deformation
+f7e837e	refs/remotes/origin/issue-257-300a49175154 Add blood splatters on floor and walls when hit (issue #257)
+9acb5da	refs/remotes/origin/issue-177-6550221fdac5 Implement 3-step grenade throwing mechanic and add tutorial
+4fdd2f2	refs/remotes/origin/issue-165-c89a59839c96 Fix penultimate hit effect: add contrast, 3s duration, logging
+736d21c	refs/remotes/origin/issue-149-f7edb648fa0d Improve visual impact effects realism and add blood decals

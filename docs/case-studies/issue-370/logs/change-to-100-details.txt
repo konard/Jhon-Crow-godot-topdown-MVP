@@ -1,0 +1,100 @@
+commit 2797dc141ff29041b1bb38d721c222cd2f8a65ec
+Author: konard <drakonard@gmail.com>
+Date:   Sun Jan 25 02:35:20 2026 +0100
+
+    feat: add bloody footprints feature (Issue #360)
+    
+    When player or enemy steps in a blood puddle, they leave bloody
+    boot footprints behind them. Footprints become more transparent
+    with each step until they disappear after a configurable number
+    of steps.
+    
+    Key changes:
+    - Add BloodyFeetComponent that tracks blood contact and spawns footprints
+    - Add BloodFootprint scene and script for individual footprint decals
+    - Update BloodDecal to add Area2D for puddle detection (group: blood_puddle)
+    - Add component to Player.tscn and Enemy.tscn
+    - Add case study documentation in docs/case-studies/issue-360/
+    - Add unit tests for BloodyFeetComponent
+    
+    Features:
+    - Footprints do NOT fade over time (per requirements)
+    - Footprints have no maximum limit (per requirements)
+    - Alpha decreases step-by-step (configurable decay rate)
+    - Alternates left/right foot placement
+    - Footprints rotate to match movement direction
+    
+    Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>
+
+diff --git a/docs/case-studies/issue-360/README.md b/docs/case-studies/issue-360/README.md
+new file mode 100644
+index 0000000..86eddac
+--- /dev/null
++++ b/docs/case-studies/issue-360/README.md
+@@ -0,0 +1,274 @@
++# Case Study: Issue #360 - Add Bloody Footprints
++
++## Issue Summary
++
++**Issue URL:** https://github.com/Jhon-Crow/godot-topdown-MVP/issues/360
++
++**Problem Description (Russian):**
++> если враг или игрок вступает в лужу крови за ними должны появляться кровавые следы ботинок, которые будут всё прозрачнее с каждым шагом, пока не исчезнут.
++> они не должно исчезать со временим, их максимально количество не ограничено.
++
++**English Translation:**
++> If an enemy or player steps into a blood puddle, bloody boot footprints should appear behind them, which will become more transparent with each step until they disappear.
++> They should NOT disappear over time, their maximum number is NOT limited.
++
++## Requirements Analysis
++
++### Core Requirements
++
++1. **Blood Puddle Detection**: Detect when player or enemy steps into a blood puddle
++2. **Footprint Spawning**: Spawn footprint decals behind the character while they have "bloody feet"
++3. **Fading Transparency**: Each consecutive footprint should be more transparent than the previous
++4. **Persistence**: Footprints do NOT fade over time - they persist indefinitely
++5. **Unlimited Count**: No maximum limit on footprints (performance considerations still apply)
++6. **Both Characters**: Feature applies to both player and enemies
++
++### Key Behaviors
++
++- Footprints appear **after** stepping into blood (tracking blood outward)
++- Transparency decreases step-by-step (e.g., 100% → 80% → 60% → 40% → 20% → 0%)
++- The number of "bloody steps" before footprints stop is configurable
++- Footprints should rotate to match character's movement direction
++
++## Technical Research
++
++### Existing Codebase Analysis
++
++#### Blood System Components
++
++1. **BloodDecal.tscn** (`scenes/effects/BloodDecal.tscn`)
++   - Sprite2D-based blood stain effect
++   - Uses GradientTexture2D (32x32 radial gradient)
++   - Has optional auto_fade functionality (disabled by default)
++   - Script: `scripts/effects/blood_decal.gd`
++
++2. **BloodEffect.tscn** (`scenes/effects/BloodEffect.tscn`)
++   - GPUParticles2D blood spray effect
++   - Spawns BloodDecal instances at particle landing positions
++   - Uses `effect_cleanup.gd` script
++
++3. **ImpactEffectsManager** (`scripts/autoload/impact_effects_manager.gd`)
++   - Autoload singleton managing all impact effects
++   - Spawns blood decals via `spawn_blood_effect()`
++   - Has `MAX_BLOOD_DECALS: int = 100` limit (but footprints should be unlimited per requirements)
++   - Already handles blood puddle spawning at hit locations
++
++#### Character Movement Systems
++
++1. **Player** (`scripts/characters/player.gd`)
++   - CharacterBody2D-based movement
++   - Uses `_physics_process()` for movement via `move_and_slide()`
++   - Has velocity tracking for movement direction
++   - Walking animation system exists (`_update_walk_animation()`)
++
++2. **Enemy** (`scripts/objects/enemy.gd`)
++   - CharacterBody2D-based movement with AI states
++   - Uses NavigationAgent2D for pathfinding

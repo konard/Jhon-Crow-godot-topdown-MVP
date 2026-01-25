@@ -26,7 +26,9 @@ const MIN_EFFECT_SCALE: float = 0.3
 const MAX_EFFECT_SCALE: float = 2.0
 
 ## Maximum number of blood decals before oldest ones are removed.
-const MAX_BLOOD_DECALS: int = 100
+## Set to 0 for unlimited decals (puddles should never disappear per issue #293, #370).
+## CRITICAL: Must remain 0 - do not change without explicit user approval.
+const MAX_BLOOD_DECALS: int = 0
 
 ## Maximum distance to check for walls for blood splatters (in pixels).
 const WALL_SPLATTER_CHECK_DISTANCE: float = 100.0
@@ -459,11 +461,12 @@ func _schedule_delayed_decal(origin: Vector2, landing_pos: Vector2, decal_rotati
 	# Track decal for cleanup
 	_blood_decals.append(decal)
 
-	# Remove oldest decals if limit exceeded
-	while _blood_decals.size() > MAX_BLOOD_DECALS:
-		var oldest := _blood_decals.pop_front() as Node2D
-		if oldest and is_instance_valid(oldest):
-			oldest.queue_free()
+	# Remove oldest decals if limit exceeded (0 = unlimited, no cleanup)
+	if MAX_BLOOD_DECALS > 0:
+		while _blood_decals.size() > MAX_BLOOD_DECALS:
+			var oldest := _blood_decals.pop_front() as Node2D
+			if oldest and is_instance_valid(oldest):
+				oldest.queue_free()
 
 	if _debug_effects:
 		print("[ImpactEffectsManager] Delayed blood decal spawned at ", landing_pos)
@@ -556,11 +559,12 @@ func _spawn_wall_blood_splatter(hit_position: Vector2, hit_direction: Vector2, i
 	# Track as blood decal for cleanup
 	_blood_decals.append(splatter)
 
-	# Remove oldest decals if limit exceeded
-	while _blood_decals.size() > MAX_BLOOD_DECALS:
-		var oldest := _blood_decals.pop_front() as Node2D
-		if oldest and is_instance_valid(oldest):
-			oldest.queue_free()
+	# Remove oldest decals if limit exceeded (0 = unlimited, no cleanup)
+	if MAX_BLOOD_DECALS > 0:
+		while _blood_decals.size() > MAX_BLOOD_DECALS:
+			var oldest := _blood_decals.pop_front() as Node2D
+			if oldest and is_instance_valid(oldest):
+				oldest.queue_free()
 
 	if _debug_effects:
 		print("[ImpactEffectsManager] Wall blood splatter spawned at ", wall_hit_pos)
