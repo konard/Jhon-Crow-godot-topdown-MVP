@@ -11,10 +11,17 @@ extends GutTest
 
 
 class MockEnemy:
-	extends Node2D
+	## Mock enemy class that mimics Node2D properties for testing.
+	## Note: Inner classes cannot extend engine types (Node2D) in GDScript,
+	## so we use RefCounted and manually define needed properties.
+	extends RefCounted
 
 	# Enum matching the real enemy
 	enum BehaviorMode { PATROL, GUARD }
+
+	# Simulated Node2D properties
+	var global_position: Vector2 = Vector2.ZERO
+	var velocity: Vector2 = Vector2.ZERO
 
 	# Properties used by states
 	var behavior_mode: int = BehaviorMode.PATROL
@@ -27,7 +34,6 @@ class MockEnemy:
 	var _patrol_wait_timer: float = 0.0
 	var patrol_wait_time: float = 2.0
 	var move_speed: float = 100.0
-	var velocity: Vector2 = Vector2.ZERO
 
 	# Method call tracking
 	var reset_alarm_mode_called: int = 0
@@ -55,11 +61,9 @@ var enemy: MockEnemy
 
 func before_each() -> void:
 	enemy = MockEnemy.new()
-	add_child(enemy)
 
 
 func after_each() -> void:
-	enemy.queue_free()
 	enemy = null
 
 

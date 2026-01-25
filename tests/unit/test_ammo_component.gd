@@ -443,12 +443,12 @@ func test_update_reload_gradual_progress() -> void:
 	assert_true(ammo.is_reloading(),
 		"Should still be reloading after 2 seconds")
 
-	# Continue for 1 more second
-	for i in range(60):
+	# Continue for 1.1 more seconds to account for floating-point precision
+	for i in range(66):
 		ammo.update_reload(1.0 / 60.0)
 
 	assert_false(ammo.is_reloading(),
-		"Should finish reloading after 3 seconds")
+		"Should finish reloading after 3+ seconds")
 
 
 # ============================================================================

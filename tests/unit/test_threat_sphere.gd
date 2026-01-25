@@ -17,8 +17,8 @@ class MockThreatSphere:
 	## Tolerance angle (in degrees) for trajectory checking.
 	var trajectory_tolerance_degrees: float = 15.0
 
-	## Reference to the parent player node.
-	var _player: Node2D = null
+	## Reference to the parent player.
+	var _player: RefCounted = null
 
 	## Enable debug logging.
 	var _debug: bool = false
@@ -26,24 +26,25 @@ class MockThreatSphere:
 	## Signal tracking
 	var threat_detected_emitted: Array = []
 
-	func _init(player_ref: Node2D) -> void:
+	func _init(player_ref: RefCounted) -> void:
 		_player = player_ref
 
 	## Emit threat detected (simulates signal)
-	func _emit_threat(bullet: Area2D) -> void:
+	func _emit_threat(bullet: RefCounted) -> void:
 		threat_detected_emitted.append(bullet)
 
-	## Checks if the area is a bullet.
-	func _is_bullet(area: Area2D) -> bool:
+	## Checks if the object is a bullet.
+	func _is_bullet(area: RefCounted) -> bool:
 		if area == null:
 			return false
-		# Check by node name
-		if "Bullet" in area.name or "bullet" in area.name:
-			return true
+		# Check by name property
+		if "name" in area:
+			if "Bullet" in area.name or "bullet" in area.name:
+				return true
 		return false
 
 	## Checks if the bullet was fired by the player.
-	func _is_player_bullet(area: Area2D) -> bool:
+	func _is_player_bullet(area: RefCounted) -> bool:
 		if _player == null:
 			return false
 
@@ -51,13 +52,13 @@ class MockThreatSphere:
 		if "shooter_id" in area:
 			var shooter_id: int = area.shooter_id
 			if shooter_id != -1:
-				var shooter: Object = instance_from_id(shooter_id)
-				if shooter == _player:
+				# Compare with player's mock instance ID
+				if shooter_id == _player.get_instance_id():
 					return true
 		return false
 
 	## Checks if the bullet is heading toward the player (on a collision course).
-	func _is_bullet_heading_toward_player(area: Area2D) -> bool:
+	func _is_bullet_heading_toward_player(area: RefCounted) -> bool:
 		if _player == null:
 			return false
 
@@ -70,7 +71,7 @@ class MockThreatSphere:
 			bullet_direction = area.direction
 
 		# Fallback: try to infer direction from rotation
-		if bullet_direction == Vector2.ZERO:
+		if bullet_direction == Vector2.ZERO and "rotation" in area:
 			bullet_direction = Vector2.RIGHT.rotated(area.rotation)
 
 		if bullet_direction == Vector2.ZERO:
@@ -90,7 +91,7 @@ class MockThreatSphere:
 		return angle_to_player_deg <= trajectory_tolerance_degrees
 
 	## Main processing logic for area entering.
-	func process_area_entered(area: Area2D) -> void:
+	func process_area_entered(area: RefCounted) -> void:
 		if _player == null:
 			return
 
@@ -107,18 +108,29 @@ class MockThreatSphere:
 
 
 class MockPlayer:
-	extends Node2D
+	## Mock player class that mimics Node2D for testing.
+	## Note: Inner classes cannot extend engine types in GDScript.
+	extends RefCounted
 
-	var player_id: int = 0
+	var global_position: Vector2 = Vector2.ZERO
+	var _instance_id: int = 0
 
 	func _init() -> void:
-		player_id = get_instance_id()
+		# Use a random ID to simulate instance_id
+		_instance_id = randi()
+
+	func get_instance_id() -> int:
+		return _instance_id
 
 
 class MockBullet:
-	extends Area2D
+	## Mock bullet class that mimics Area2D for testing.
+	extends RefCounted
 
+	var name: String = "Bullet"
+	var global_position: Vector2 = Vector2.ZERO
 	var direction: Vector2 = Vector2.RIGHT
+	var rotation: float = 0.0
 	var shooter_id: int = -1
 
 
@@ -130,19 +142,17 @@ var bullet: MockBullet
 func before_each() -> void:
 	player = MockPlayer.new()
 	player.global_position = Vector2(100, 100)
-	add_child(player)
 
 	threat_sphere = MockThreatSphere.new(player)
 
 	bullet = MockBullet.new()
 	bullet.name = "Bullet"
-	add_child(bullet)
 
 
 func after_each() -> void:
-	player.queue_free()
-	bullet.queue_free()
 	threat_sphere = null
+	player = null
+	bullet = null
 
 
 # ============================================================================
@@ -226,14 +236,11 @@ func test_is_player_bullet_false_no_shooter() -> void:
 
 
 func test_is_player_bullet_false_enemy_shooter() -> void:
-	var enemy := Node2D.new()
-	add_child(enemy)
-	bullet.shooter_id = enemy.get_instance_id()
+	# Use a different ID than the player's
+	bullet.shooter_id = player.get_instance_id() + 1000
 
 	assert_false(threat_sphere._is_player_bullet(bullet),
 		"Should not detect enemy bullet as player's")
-
-	enemy.queue_free()
 
 
 func test_is_player_bullet_with_null_player() -> void:
@@ -430,7 +437,6 @@ func test_multiple_bullets() -> void:
 	bullet2.name = "Bullet2"
 	bullet2.global_position = Vector2(0, 50)
 	bullet2.direction = Vector2(1, 0.5).normalized()  # Heading toward player
-	add_child(bullet2)
 
 	bullet.global_position = Vector2(0, 100)
 	bullet.direction = Vector2.RIGHT
@@ -440,8 +446,6 @@ func test_multiple_bullets() -> void:
 
 	assert_eq(threat_sphere.threat_detected_emitted.size(), 2,
 		"Should detect multiple threats")
-
-	bullet2.queue_free()
 
 
 func test_bullet_from_various_angles() -> void:
