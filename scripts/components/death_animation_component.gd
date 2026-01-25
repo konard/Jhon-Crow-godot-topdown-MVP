@@ -136,6 +136,9 @@ var _refreeze_timer: float = -1.0
 ## Whether we're waiting to re-freeze after a bullet hit.
 var _waiting_to_refreeze: bool = false
 
+## Whether this ragdoll has been registered with RagdollManager for persistence.
+var _registered_with_manager: bool = false
+
 ## Weapon-specific impulse profiles for post-death reactions.
 ## Format: { "weapon_type": { "impulse": float, "angular": float, "description": String } }
 const BULLET_IMPULSE_PROFILES := {
@@ -232,6 +235,8 @@ func reset(force_cleanup: bool = true) -> void:
 	_current_phase = AnimationPhase.NONE
 	_animation_timer = 0.0
 	_ragdoll_activated = false
+	# Reset registration flag - new death animation can register new bodies
+	_registered_with_manager = false
 
 	# Clean up ragdoll bodies and joints (force cleanup on reset for respawn)
 	_cleanup_ragdoll(force_cleanup)
@@ -558,6 +563,10 @@ func _update_ragdoll_phase(delta: float) -> void:
 				rb.linear_velocity = Vector2.ZERO
 				rb.angular_velocity = 0.0
 
+		# Register with RagdollManager for persistence across scene reloads
+		if persist_body_after_death:
+			_register_with_ragdoll_manager()
+
 		death_animation_completed.emit()
 
 
@@ -829,3 +838,47 @@ func has_ragdoll_bodies() -> bool:
 		if is_instance_valid(rb):
 			return true
 	return false
+
+
+## Register ragdoll bodies with RagdollManager for persistence across scene reloads.
+## This moves the bodies from the current scene to the autoload container.
+func _register_with_ragdoll_manager() -> void:
+	if _registered_with_manager:
+		return  # Already registered
+
+	var ragdoll_manager: Node = get_node_or_null("/root/RagdollManager")
+	if ragdoll_manager == null:
+		# RagdollManager not available, bodies will not persist
+		if is_inside_tree():
+			var file_logger: Node = get_node_or_null("/root/FileLogger")
+			if file_logger and file_logger.has_method("warn"):
+				file_logger.warn("[DeathAnim] RagdollManager not found - bodies will not persist across scene reload")
+		return
+
+	# Filter valid bodies and joints
+	var valid_bodies: Array[RigidBody2D] = []
+	for rb in _ragdoll_bodies:
+		if is_instance_valid(rb):
+			valid_bodies.append(rb)
+
+	var valid_joints: Array[PinJoint2D] = []
+	for joint in _ragdoll_joints:
+		if is_instance_valid(joint):
+			valid_joints.append(joint)
+
+	if valid_bodies.is_empty():
+		return
+
+	# Register with manager (this will reparent bodies to the persistent container)
+	if ragdoll_manager.has_method("register_ragdoll_group"):
+		var group_index: int = ragdoll_manager.register_ragdoll_group(valid_bodies, valid_joints)
+		if group_index >= 0:
+			_registered_with_manager = true
+			# Clear local references since manager now owns them
+			_ragdoll_bodies.clear()
+			_ragdoll_joints.clear()
+
+			if is_inside_tree():
+				var file_logger: Node = get_node_or_null("/root/FileLogger")
+				if file_logger and file_logger.has_method("info"):
+					file_logger.info("[DeathAnim] Ragdoll registered with RagdollManager (group #%d) - will persist across scene reload" % group_index)

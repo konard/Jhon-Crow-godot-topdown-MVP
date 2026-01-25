@@ -210,3 +210,111 @@ Already implemented in current PR:
 3. Test enemies work as expected (1.0 and 0.1 speed)
 4. No performance degradation with many dead bodies
 5. All CI checks pass
+
+---
+
+## Update: January 25, 2026 - Root Cause Discovery
+
+### User Feedback
+
+After initial implementation, user reported:
+> "тела всё ещё исчезают, не вижу изменений" (bodies still disappear, I don't see changes)
+
+**User provided log file**: `logs/game_log_20260125_043039.txt`
+
+### Deep Log Analysis
+
+Analyzed the game log and found the critical pattern:
+
+```
+[04:30:47] [ENEMY] [Enemy3] Enemy died (ricochet: false, penetration: false)
+[04:30:47] [INFO] [DeathAnim] Started - Angle: 0.0 deg, Index: 12
+[04:30:48] [ENEMY] [Enemy3] Ragdoll activated
+[04:30:48] [INFO] [DeathAnim] Ragdoll activated at 60% fall progress
+
+-- 1 SECOND LATER --
+
+[04:30:48] [INFO] [Player.Grenade] Normal level - starting with 1 grenade
+[04:30:48] [INFO] [ScoreManager] Level started with 10 enemies
+[04:30:48] [ENEMY] [Enemy1] Death animation component initialized
+[04:30:48] [ENEMY] [Enemy2] Death animation component initialized
+... (all enemies re-initialized)
+```
+
+**Key Observation**: "Level started with 10 enemies" appears multiple times in quick succession, indicating **level restarts**.
+
+### TRUE Root Cause
+
+The issue was **NOT** with `respawn_delay` (individual enemy respawn), but with **SCENE RELOAD**:
+
+1. **Level Architecture**:
+   - `building_level.gd` line 510-516: When player dies, calls `GameManager.on_player_death()`
+   - `game_manager.gd` line 124-128: `on_player_death()` calls `restart_scene()`
+   - `game_manager.gd` line 131-134: `restart_scene()` calls `get_tree().reload_current_scene()`
+
+2. **Impact of Scene Reload**:
+   - `reload_current_scene()` **destroys the entire scene tree**
+   - All nodes, including ragdoll bodies, are freed
+   - Scene is recreated fresh with all enemies alive
+   - **Even with `persist_body_after_death = true`, bodies are destroyed on scene reload**
+
+3. **Why Previous Fix Didn't Work**:
+   - Previous fix set `respawn_delay = 999999` only for TestTier level
+   - User was playing on BuildingLevel (main game level)
+   - Even if respawn was disabled, player death restarts the entire level
+   - **Scene reload = all physics bodies (including ragdoll) destroyed**
+
+### Solution: RagdollManager Autoload
+
+**Solution**: Create an autoload (`RagdollManager`) that persists across scene changes.
+
+**How it works**:
+1. When ragdoll animation completes, bodies are reparented to `RagdollManager`
+2. `RagdollManager` is an autoload (under `/root/`), which persists across scene changes
+3. When level restarts, `RagdollManager` keeps the ragdoll bodies alive
+4. Bodies continue to exist in the new scene instance
+
+**Files Added/Modified**:
+1. **NEW** `scripts/autoload/ragdoll_manager.gd` - Manages persistent ragdoll bodies
+2. **MODIFIED** `project.godot` - Added RagdollManager autoload
+3. **MODIFIED** `scripts/components/death_animation_component.gd`:
+   - Added `_register_with_ragdoll_manager()` function
+   - Bodies are registered when ragdoll reaches AT_REST state
+   - Bodies are reparented to RagdollManager container
+
+### Technical Details
+
+**RagdollManager Features**:
+- `max_persistent_bodies` - Limit to prevent memory leaks (default: 50)
+- `persist_bodies` - Toggle persistence on/off
+- Automatic cleanup of oldest bodies when limit exceeded
+- Automatic cleanup of invalid references after scene change
+- Logging for debugging
+
+**Integration with DeathAnimationComponent**:
+```gdscript
+# When ragdoll reaches AT_REST state:
+if persist_body_after_death:
+    _register_with_ragdoll_manager()
+
+# This reparents bodies from current_scene to RagdollManager container
+```
+
+### Sequence of Events (Fixed)
+
+1. Enemy dies → Death animation starts
+2. Ragdoll created (RigidBody2D nodes)
+3. Ragdoll settles → AT_REST state
+4. `_register_with_ragdoll_manager()` called
+5. Bodies reparented to `/root/RagdollManager/PersistentRagdolls`
+6. **Player dies → Level restarts**
+7. Current scene destroyed, but RagdollManager persists
+8. New scene loads, ragdoll bodies still visible
+9. Bodies persist indefinitely (until max_persistent_bodies exceeded)
+
+### Lessons Learned
+
+1. **Scene reload vs node lifecycle**: Godot's scene reload destroys ALL nodes in the scene tree. Only autoloads survive.
+2. **Testing environment matters**: TestTier had different setup than BuildingLevel - always test on actual user environment.
+3. **Log analysis is crucial**: The "Level started with 10 enemies" pattern revealed the true cause.
+4. **Reparenting for persistence**: To persist objects across scene changes, reparent them to autoloads.
