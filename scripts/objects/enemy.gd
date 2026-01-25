@@ -434,6 +434,14 @@ var _is_stunned: bool = false
 ## Last hit direction (used for death animation).
 var _last_hit_direction: Vector2 = Vector2.RIGHT
 
+## --- Hit Reaction System (Issue #390) ---
+## When hit, enemy briefly faces attacker before resuming normal rotation priority.
+## This prevents enemies from turning away while being shot at.
+var _hit_reaction_timer: float = 0.0
+var _hit_reaction_direction: Vector2 = Vector2.ZERO
+## Duration to face attacker after being hit (seconds). Gives player visual feedback.
+const HIT_REACTION_DURATION: float = 0.8
+
 ## Death animation component reference.
 var _death_animation: Node = null
 
@@ -880,6 +888,7 @@ func _physics_process(delta: float) -> void:
 	_update_goap_state()
 	_update_suppression(delta)
 	_update_grenade_triggers(delta)
+	_update_hit_reaction(delta)
 
 	# Update enemy model rotation BEFORE processing AI state (which may shoot).
 	# This ensures the weapon is correctly positioned when bullets are created.
@@ -928,14 +937,20 @@ func _update_goap_state() -> void:
 		_goap_world_state["confidence_medium"] = _memory.is_medium_confidence()
 		_goap_world_state["confidence_low"] = _memory.is_low_confidence()
 
-## Updates model rotation smoothly (#347). Priority: player > flank target > corner check > velocity > idle scan.
+## Updates model rotation smoothly (#347). Priority: hit reaction > player > flank target > corner check > velocity > idle scan.
 ## Issue #386: FLANKING state now prioritizes facing the player over corner checks.
+## Issue #390: Hit reaction takes highest priority - enemy faces attacker after being hit.
 func _update_enemy_model_rotation() -> void:
 	if not _enemy_model:
 		return
 	var target_angle: float
 	var has_target := false
-	if _player != null and _can_see_player:
+	# Issue #390: HIGHEST PRIORITY - Hit reaction: face attacker for a duration after being hit.
+	# This prevents enemies from turning away while being shot at (e.g., during retreat).
+	if _hit_reaction_timer > 0 and _hit_reaction_direction.length_squared() > 0.01:
+		target_angle = _hit_reaction_direction.angle()
+		has_target = true
+	elif _player != null and _can_see_player:
 		target_angle = (_player.global_position - global_position).normalized().angle()
 		has_target = true
 	# Issue #386: During FLANKING, face the player (even if not visible) instead of corner check.
@@ -1086,6 +1101,16 @@ func _update_suppression(delta: float) -> void:
 		if _threat_reaction_delay_elapsed:
 			_under_fire = true
 			_suppression_timer = 0.0
+
+## Update hit reaction timer (Issue #390).
+## Decrements the timer that keeps enemy facing attacker after being hit.
+func _update_hit_reaction(delta: float) -> void:
+	if _hit_reaction_timer > 0:
+		_hit_reaction_timer -= delta
+		if _hit_reaction_timer <= 0:
+			_hit_reaction_timer = 0.0
+			_hit_reaction_direction = Vector2.ZERO
+			_log_debug("Hit reaction ended, resuming normal rotation")
 
 ## Update reload state.
 func _update_reload(delta: float) -> void:
@@ -4094,10 +4119,14 @@ func on_hit_with_bullet_info(hit_direction: Vector2, caliber_data: Resource, has
 
 	# Turn toward attacker: the attacker is in the opposite direction of the bullet travel
 	# This makes the enemy face where the shot came from
+	# Issue #390: Set hit reaction timer to maintain facing direction for a duration.
+	# This prevents the enemy from immediately turning away (e.g., during retreat).
 	var attacker_direction := -hit_direction.normalized()
 	if attacker_direction.length_squared() > 0.01:
+		_hit_reaction_direction = attacker_direction
+		_hit_reaction_timer = HIT_REACTION_DURATION
 		_force_model_to_face_direction(attacker_direction)
-		_log_debug("Hit reaction: turning toward attacker (direction: %s)" % attacker_direction)
+		_log_debug("Hit reaction: turning toward attacker for %.1fs (direction: %s)" % [HIT_REACTION_DURATION, attacker_direction])
 
 	# Track hits for retreat behavior
 	_hits_taken_in_encounter += 1
@@ -4345,6 +4374,9 @@ func _reset() -> void:
 	_threat_reaction_delay_elapsed = false
 	_threat_memory_timer = 0.0
 	_bullets_in_threat_sphere.clear()
+	# Reset hit reaction state (Issue #390)
+	_hit_reaction_timer = 0.0
+	_hit_reaction_direction = Vector2.ZERO
 	# Reset retreat state variables
 	_hits_taken_in_encounter = 0
 	_retreat_mode = RetreatMode.FULL_HP
