@@ -30,6 +30,9 @@
 | 2026-01-25 | 01:09 | User reports: "всё ещё не запускается" (still not starting) | PR #342 comment |
 | 2026-01-25 | 01:10 | PR #342 closed, new PR #359 created with fresh approach | [PR #359](https://github.com/Jhon-Crow/godot-topdown-MVP/pull/359) |
 | 2026-01-25 | 01:27 | User reports crash persists in PR #359 | PR #359 comment |
+| 2026-01-25 | 01:55 | User reports: "сразу вылетает. дальше заставки godot не включается" (crashes immediately) | PR #359 comment |
+| 2026-01-25 | 02:12 | Third fix attempt: replace `is CaliberData` with property-based checks | PR #359 |
+| 2026-01-25 | 02:40 | Investigation: discovered project uses C# Player scene which may require .NET export | PR #359 comment |
 
 ### Root Cause Analysis
 
@@ -148,6 +151,70 @@ var caliber_name: String = caliber_data.caliber_name
 | `"property" in obj` | ✅ Works | ✅ Works | **Recommended** |
 | `obj.get("property")` | ✅ Works | ✅ Works | OK but less readable |
 | Direct access `obj.property` | ✅ Works | ✅ Works | Only if property guaranteed |
+
+---
+
+## Potential Issue 3: C# / .NET Export Requirements
+
+### Discovery
+
+During investigation of persisting crashes, it was discovered that the project uses **both C# and GDScript**:
+
+**Project configuration (`project.godot`):**
+```ini
+config/features=PackedStringArray("4.3", "C#")
+[dotnet]
+project/assembly_name="GodotTopDownTemplate"
+```
+
+**Main scene uses C# Player:**
+```
+# BuildingLevel.tscn
+[ext_resource type="PackedScene" path="res://scenes/characters/csharp/Player.tscn" id="2_player"]
+```
+
+The C# Player references a C# script:
+```
+# scenes/characters/csharp/Player.tscn
+[ext_resource type="Script" path="res://Scripts/Characters/Player.cs" id="1_player"]
+```
+
+### Why This Could Cause Crashes
+
+1. **Export Templates**: C# projects require .NET export templates, not the standard GDScript-only templates
+2. **Immediate Crash**: If .NET runtime is not properly bundled, the game crashes immediately after splash screen
+3. **Silent Failure**: No error message is displayed - the game simply closes
+
+### Alternative GDScript Player Exists
+
+A GDScript version of the Player scene exists:
+- **C# version** (currently used): `res://scenes/characters/csharp/Player.tscn`
+- **GDScript version**: `res://scenes/characters/Player.tscn`
+
+### Potential Fix
+
+If the crash is C#-related, the BuildingLevel.tscn could be modified to use the GDScript Player instead:
+
+```
+# Change from:
+[ext_resource type="PackedScene" uid="uid://dv8nq2vj5r7p2" path="res://scenes/characters/csharp/Player.tscn" id="2_player"]
+
+# Change to:
+[ext_resource type="PackedScene" uid="uid://bk8nq2vj5r7p1" path="res://scenes/characters/Player.tscn" id="2_player"]
+```
+
+### Related Issues
+
+- [Godot Issue #73329](https://github.com/godotengine/godot/issues/73329) - Exporting custom Resource is always null
+- [Godot Issue #77886](https://github.com/godotengine/godot/issues/77886) - Godot 4 exports unable to load custom resources
+- [Godot Forum](https://forum.godotengine.org/t/4-3-stable-exported-build-crashes-immediately-upon-starting-up-game-everything-fails-to-load/101339) - Exported build crashes immediately
+
+### Awaiting User Feedback
+
+Questions asked in PR comment:
+1. Did the game work in exported form BEFORE this PR?
+2. What export type is being used (Release/Debug)?
+3. Is there a log file `game_log_*.txt` next to the .exe?
 
 ---
 
