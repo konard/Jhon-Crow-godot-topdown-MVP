@@ -60,6 +60,10 @@ var _file_logger: Node = null
 ## Track the last known scene to detect scene changes.
 var _last_scene: Node = null
 
+## Whether the shader warmup has been completed.
+## Warmup pre-compiles GPU shaders to prevent first-shot lag (Issue #343).
+var _warmup_completed: bool = false
+
 
 func _ready() -> void:
 	# CRITICAL: First line diagnostic - if this doesn't appear, script failed to load
@@ -79,6 +83,10 @@ func _ready() -> void:
 	_last_scene = get_tree().current_scene
 
 	_log_info("ImpactEffectsManager ready - FULL VERSION with blood effects enabled")
+
+	# Perform shader warmup to prevent first-shot lag (Issue #343)
+	# This pre-compiles GPU shaders for particle effects during loading
+	_warmup_particle_shaders()
 
 
 ## Logs to FileLogger and always prints to console for diagnostics.
@@ -709,3 +717,83 @@ func _on_tree_changed() -> void:
 		_bullet_holes.clear()
 		_penetration_holes.clear()
 		_last_scene = current_scene
+
+
+## Performs warmup to pre-compile all particle effect shaders.
+## This prevents the noticeable freeze on first shot when hitting enemies (Issue #343).
+##
+## The freeze occurs because GPUParticles2D shaders are compiled just-in-time by the GPU
+## driver the first time they're used. By instantiating each effect type off-screen during
+## loading, we force the GPU to compile all shaders before gameplay begins.
+##
+## References:
+## - https://github.com/godotengine/godot/issues/34627
+## - https://github.com/godotengine/godot/issues/87891
+## - https://forum.godotengine.org/t/particles-huge-lag-spike-on-first-instance/45839
+func _warmup_particle_shaders() -> void:
+	if _warmup_completed:
+		return
+
+	_log_info("Starting particle shader warmup (Issue #343 fix)...")
+	var start_time := Time.get_ticks_msec()
+
+	# Off-screen position where warmup effects won't be visible
+	var warmup_pos := Vector2(-10000, -10000)
+
+	# Track how many effects we warmed up
+	var warmed_up_count := 0
+
+	# Warmup each effect type by instantiating, emitting once, then cleaning up
+	var effects_to_warmup: Array[PackedScene] = [
+		_dust_effect_scene,
+		_blood_effect_scene,
+		_sparks_effect_scene
+	]
+
+	var effect_names: Array[String] = ["DustEffect", "BloodEffect", "SparksEffect"]
+
+	for i in range(effects_to_warmup.size()):
+		var scene := effects_to_warmup[i]
+		var effect_name := effect_names[i]
+
+		if scene == null:
+			if _debug_effects:
+				print("[ImpactEffectsManager] Warmup: %s scene is null, skipping" % effect_name)
+			continue
+
+		var effect: GPUParticles2D = scene.instantiate() as GPUParticles2D
+		if effect == null:
+			if _debug_effects:
+				print("[ImpactEffectsManager] Warmup: Failed to instantiate %s" % effect_name)
+			continue
+
+		# Position off-screen so it's not visible during warmup
+		effect.global_position = warmup_pos
+
+		# Add to our node (autoload) so it's in the tree
+		add_child(effect)
+
+		# Start emitting to trigger shader compilation
+		effect.emitting = true
+
+		if _debug_effects:
+			print("[ImpactEffectsManager] Warmup: %s emitting at %s" % [effect_name, warmup_pos])
+
+		warmed_up_count += 1
+
+		# Store reference for cleanup after frame
+		# We use call_deferred to ensure at least one frame is processed
+		effect.set_meta("warmup_effect", true)
+
+	# Wait one frame to ensure GPU processes the particles and compiles shaders
+	if warmed_up_count > 0:
+		await get_tree().process_frame
+
+		# Clean up all warmup effects
+		for child in get_children():
+			if child.has_meta("warmup_effect"):
+				child.queue_free()
+
+	var elapsed := Time.get_ticks_msec() - start_time
+	_warmup_completed = true
+	_log_info("Particle shader warmup complete: %d effects warmed up in %d ms" % [warmed_up_count, elapsed])
